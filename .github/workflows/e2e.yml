@@ -23,7 +23,12 @@ jobs:
         with:
           node-version: 20
           cache: yarn
-          cache-dependency-path: renderer/yarn.lock
+          cache-dependency-path: |
+            yarn.lock
+            renderer/yarn.lock
+
+      - name: Install root dependencies
+        run: yarn install --frozen-lockfile
 
       - name: Install renderer dependencies
         working-directory: renderer
