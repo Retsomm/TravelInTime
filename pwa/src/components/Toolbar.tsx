@@ -76,9 +76,9 @@ const Toolbar = ({
   activePanel,
 }: Props) => {
   return (
-    <div className="drag-region flex items-center gap-2 pl-20 pr-4 py-2 border-b border-stone-200 dark:border-stone-700 bg-white dark:bg-gray-800">
+    <div className="flex items-center gap-2 px-4 py-2 border-b border-stone-200 dark:border-stone-700 bg-white dark:bg-gray-800">
       <button
-        className="no-drag p-2 rounded hover:bg-stone-100 dark:hover:bg-stone-700 transition text-stone-600 dark:text-stone-300 shrink-0"
+        className="p-2 rounded hover:bg-stone-100 dark:hover:bg-stone-700 transition text-stone-600 dark:text-stone-300 shrink-0"
         onClick={onBack}
         aria-label="返回書庫"
         title="返回書庫"
@@ -95,7 +95,7 @@ const Toolbar = ({
       </div>
 
       <button
-        className={`no-drag p-2 rounded transition text-stone-500 dark:text-stone-400 ${
+        className={`p-2 rounded transition text-stone-500 dark:text-stone-400 ${
           activePanel === 'settings'
             ? 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400'
             : 'hover:bg-stone-100 dark:hover:bg-stone-700'
@@ -107,7 +107,7 @@ const Toolbar = ({
         <IconSettings />
       </button>
       <button
-        className={`no-drag p-2 rounded transition text-stone-500 dark:text-stone-400 ${
+        className={`p-2 rounded transition text-stone-500 dark:text-stone-400 ${
           activePanel === 'chapters'
             ? 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400'
             : 'hover:bg-stone-100 dark:hover:bg-stone-700'
@@ -119,7 +119,7 @@ const Toolbar = ({
         <IconChapters />
       </button>
       <button
-        className={`no-drag p-2 rounded transition text-stone-500 dark:text-stone-400 ${
+        className={`p-2 rounded transition text-stone-500 dark:text-stone-400 ${
           activePanel === 'notes'
             ? 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400'
             : 'hover:bg-stone-100 dark:hover:bg-stone-700'
@@ -131,7 +131,7 @@ const Toolbar = ({
         <IconNotes />
       </button>
       <button
-        className="no-drag p-2 rounded hover:bg-stone-100 dark:hover:bg-stone-700 transition text-stone-500 dark:text-stone-400"
+        className="p-2 rounded hover:bg-stone-100 dark:hover:bg-stone-700 transition text-stone-500 dark:text-stone-400"
         onClick={onToggleDark}
         aria-label={darkMode ? '切換淺色模式' : '切換深色模式'}
       >
