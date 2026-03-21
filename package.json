@@ -1,6 +1,6 @@
 {
   "name": "travel-in-time",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Travel in Time — 沉靜式閱讀器",
   "main": "dist/electron/main.js",
   "scripts": {
@@ -16,6 +16,9 @@
   "build": {
     "appId": "com.travelintime.app",
     "icon": "electron/assets/logo.png",
+    "directories": {
+      "output": "release"
+    },
     "files": [
       "dist/electron/**/*",
       "renderer/dist/**/*",
