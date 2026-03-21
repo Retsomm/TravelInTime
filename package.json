@@ -1,0 +1,27 @@
+{
+  "name": "travel-in-time",
+  "version": "1.0.0",
+  "description": "Travel in Time — 沉靜式閱讀器",
+  "main": "dist/electron/main.js",
+  "scripts": {
+    "predev": "[ -f server/.env ] || cp server/.env.example server/.env",
+    "dev": "yarn build:electron && concurrently -k -n \"renderer,server,electron\" -c \"blue,green,yellow\" \"yarn dev:renderer\" \"yarn dev:server\" \"wait-on http://localhost:5173 tcp:localhost:3001 && yarn dev:electron\"",
+    "dev:renderer": "cd renderer && yarn dev",
+    "dev:server": "cd server && yarn dev",
+    "dev:electron": "cross-env NODE_ENV=development electron .",
+    "build": "yarn build:renderer && yarn build:server && yarn build:electron",
+    "build:renderer": "cd renderer && yarn build",
+    "build:server": "cd server && yarn build",
+    "build:electron": "tsc -p tsconfig.json",
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "concurrently": "^8.2.2",
+    "cross-env": "^10.1.0",
+    "electron": "^28.1.3",
+    "electron-builder": "^24.9.1",
+    "typescript": "^5.3.3",
+    "wait-on": "^7.2.0"
+  }
+}

@@ -1,0 +1,46 @@
+name: E2E Cross-Platform Tests
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  e2e:
+    name: E2E on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: yarn
+          cache-dependency-path: renderer/yarn.lock
+
+      - name: Install renderer dependencies
+        working-directory: renderer
+        run: yarn install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        working-directory: renderer
+        run: yarn playwright install --with-deps chromium
+
+      - name: Run E2E tests
+        working-directory: renderer
+        run: yarn test:e2e
+
+      - name: Upload test report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report-${{ matrix.os }}
+          path: renderer/playwright-report/
+          retention-days: 14
