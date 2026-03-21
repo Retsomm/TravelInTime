@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, globalShortcut } from 'electron'
 import * as path from 'path'
 import { autoUpdater } from 'electron-updater'
 
@@ -49,11 +49,15 @@ const createWindow = () => {
     if (!isDev) setupAutoUpdater(win)
   })
 
+  globalShortcut.register('CommandOrControl+Alt+I', () => {
+    win.webContents.toggleDevTools()
+  })
+
   if (isDev) {
     win.loadURL('http://localhost:5173')
     win.webContents.openDevTools()
   } else {
-    win.loadFile(path.join(__dirname, '../renderer/dist/index.html'))
+    win.loadFile(path.join(__dirname, '../../renderer/dist/index.html'))
   }
 }
 
