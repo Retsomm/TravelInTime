@@ -1,9 +1,32 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 import * as path from 'path'
+import { autoUpdater } from 'electron-updater'
 
 const isDev = process.env.NODE_ENV === 'development'
 
 const iconPath = path.join(app.getAppPath(), 'electron/assets/logo.png')
+
+const setupAutoUpdater = (win: BrowserWindow) => {
+  autoUpdater.autoDownload = true
+  autoUpdater.autoInstallOnAppQuit = true
+
+  autoUpdater.on('update-available', () => {
+    win.webContents.send('update-status', 'downloading')
+  })
+
+  autoUpdater.on('update-downloaded', () => {
+    dialog.showMessageBox(win, {
+      type: 'info',
+      title: '有新版本可用',
+      message: '新版本已下載完成，重新啟動後將自動安裝。',
+      buttons: ['立即重啟', '稍後'],
+    }).then(({ response }) => {
+      if (response === 0) autoUpdater.quitAndInstall()
+    })
+  })
+
+  autoUpdater.checkForUpdatesAndNotify()
+}
 
 const createWindow = () => {
   const win = new BrowserWindow({
@@ -21,7 +44,10 @@ const createWindow = () => {
     },
   })
 
-  win.once('ready-to-show', () => win.show())
+  win.once('ready-to-show', () => {
+    win.show()
+    if (!isDev) setupAutoUpdater(win)
+  })
 
   if (isDev) {
     win.loadURL('http://localhost:5173')
@@ -30,6 +56,8 @@ const createWindow = () => {
     win.loadFile(path.join(__dirname, '../renderer/dist/index.html'))
   }
 }
+
+ipcMain.handle('get-app-version', () => app.getVersion())
 
 app.whenReady().then(() => {
   if (process.platform === 'darwin') {
