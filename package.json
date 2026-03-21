@@ -12,6 +12,21 @@
     "build:electron": "tsc -p tsconfig.json",
     "start": "electron ."
   },
+  "build": {
+    "appId": "com.travelintime.app",
+    "icon": "electron/assets/logo.png",
+    "mac": {
+      "icon": "electron/assets/logo.png",
+      "target": "dmg"
+    },
+    "win": {
+      "icon": "electron/assets/logo.png",
+      "target": "nsis"
+    },
+    "linux": {
+      "icon": "electron/assets/logo.png"
+    }
+  },
   "devDependencies": {
     "@types/node": "^20.11.0",
     "concurrently": "^8.2.2",

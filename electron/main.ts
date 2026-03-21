@@ -3,6 +3,8 @@ import * as path from 'path'
 
 const isDev = process.env.NODE_ENV === 'development'
 
+const iconPath = path.join(app.getAppPath(), 'electron/assets/logo.png')
+
 const createWindow = () => {
   const win = new BrowserWindow({
     width: 1280,
@@ -10,6 +12,7 @@ const createWindow = () => {
     minWidth: 800,
     minHeight: 600,
     titleBarStyle: 'hiddenInset',
+    icon: iconPath,
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -29,6 +32,9 @@ const createWindow = () => {
 }
 
 app.whenReady().then(() => {
+  if (process.platform === 'darwin') {
+    app.dock.setIcon(iconPath)
+  }
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

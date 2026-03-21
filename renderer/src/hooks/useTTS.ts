@@ -1,9 +1,9 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 
-const ALLOWED = /Meijia|Tingting/i
+const ALLOWED = /Meijia|Tingting|美佳|婷婷/i
 
 const pickBest = (voices: SpeechSynthesisVoice[]) =>
-  voices.find((v) => /Meijia/i.test(v.name)) ?? voices[0] ?? null
+  voices.find((v) => /Meijia|美佳/i.test(v.name)) ?? voices[0] ?? null
 
 const useTTS = () => {
   const [playing, setPlaying] = useState(false)
@@ -33,10 +33,12 @@ const useTTS = () => {
       const all = window.speechSynthesis.getVoices()
       if (all.length === 0) return
       const filtered = all.filter((v) => /^zh/i.test(v.lang) && ALLOWED.test(v.name))
-      // 若系統沒有 Meijia/Tingting，fallback 到所有中文語音
-      const list = filtered.length > 0 ? filtered : all.filter((v) => /^zh/i.test(v.lang))
-      setVoices(list)
-      setSelectedVoice((prev) => prev ?? pickBest(list))
+      // 各取最後一個 Tingting/婷婷 與 Meijia/美佳（避免顯示多個變體）
+      const lastTingting = [...filtered].reverse().find((v) => /Tingting|婷婷/i.test(v.name))
+      const lastMeijia = [...filtered].reverse().find((v) => /Meijia|美佳/i.test(v.name))
+      const list = [lastTingting, lastMeijia].filter(Boolean) as SpeechSynthesisVoice[]
+      setVoices(list.length > 0 ? list : all.filter((v) => /^zh/i.test(v.lang)))
+      setSelectedVoice((prev) => prev ?? pickBest(list.length > 0 ? list : all.filter((v) => /^zh/i.test(v.lang))))
     }
 
     load()
