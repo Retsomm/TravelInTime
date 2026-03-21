@@ -9,10 +9,10 @@ const useTTS = () => {
   const [playing, setPlaying] = useState(false)
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([])
   const [selectedVoice, setSelectedVoice] = useState<SpeechSynthesisVoice | null>(null)
-  const [rate, setRate] = useState(0.85)
+  const [rate, setRate] = useState(1.0)
 
   // 穩定 refs，供 callback 內存取最新值
-  const rateRef = useRef(0.85)
+  const rateRef = useRef(1.0)
   const selectedVoiceRef = useRef<SpeechSynthesisVoice | null>(null)
   const playingRef = useRef(false)
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null)
