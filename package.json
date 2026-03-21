@@ -16,6 +16,11 @@
   "build": {
     "appId": "com.travelintime.app",
     "icon": "electron/assets/logo.png",
+    "files": [
+      "dist/electron/**/*",
+      "renderer/dist/**/*",
+      "electron/assets/**/*"
+    ],
     "publish": {
       "provider": "github",
       "releaseType": "release"
