@@ -120,11 +120,6 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
   const letterSpacingRef = useRef(letterSpacing)
   const { addAnnotation, updateColor, removeAnnotation, clearAll: clearAnnotations, loadForBook } = useAnnotationStore()
   const { playing, speak, stop, voices, selectedVoice, setSelectedVoice, rate, setRate } = useTTS()
-  const ttsAutoPlayRef = useRef(false)
-  const atEndRef = useRef(false)
-  const speakCurrentPageRef = useRef<() => void>(() => {})
-  // 記錄尚未被 relocated 消耗的視覺同步換頁次數（計數器），避免多頁跳躍時誤觸 TTS 重啟
-  const ttsSyncPendingRef = useRef(0)
   // 睡眠計時器
   const [sleepMinutes, setSleepMinutes] = useState(0)
   const [sleepRemaining, setSleepRemaining] = useState<number | null>(null)
@@ -136,8 +131,6 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
 
   // 同步 darkModeRef
   useEffect(() => { darkModeRef.current = darkMode }, [darkMode])
-  // 同步 atEndRef
-  useEffect(() => { atEndRef.current = atEnd }, [atEnd])
 
   // 外層 document 鍵盤左右鍵翻頁（焦點在 iframe 外時）
   useEffect(() => {
@@ -347,17 +340,6 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
           setAtStart(l?.atStart ?? false)
           setAtEnd(l?.atEnd ?? false)
 
-          // 判斷本次 relocated 是「視覺同步換頁」還是「章節結束換頁」
-          if (ttsSyncPendingRef.current > 0) {
-            ttsSyncPendingRef.current--
-            // 視覺同步換頁：TTS 仍在播放，不重啟
-          } else if (ttsAutoPlayRef.current) {
-            // 章節結束換頁：載入新章節後重新開始朗讀
-            setTimeout(() => {
-              if (ttsAutoPlayRef.current) speakCurrentPageRef.current()
-            }, 500)
-          }
-
           // 章節剩餘頁（左側小字）
           const d = l?.start?.displayed as { page: number; total: number } | undefined
           if (d) setChapterRemaining(d.total - d.page)
@@ -465,8 +447,6 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
       setChapterRemaining(null)
       setAtStart(false)
       setAtEnd(false)
-      ttsAutoPlayRef.current = false
-      ttsSyncPendingRef.current = 0
       stop()
       unsubAnnotations() // 先 unsub，再 clearAll，避免儲存空陣列覆蓋 localStorage
       clearAnnotations()
@@ -541,16 +521,12 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
 
   const prevPage = () => {
     if (!ready) return
-    ttsAutoPlayRef.current = false
-    ttsSyncPendingRef.current = 0
     stop(); setPopup(null)
     renditionRef.current?.prev()
   }
 
   const nextPage = () => {
     if (!ready) return
-    ttsAutoPlayRef.current = false
-    ttsSyncPendingRef.current = 0
     stop(); setPopup(null)
     renditionRef.current?.next()
   }
@@ -674,11 +650,10 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
   const speakCurrentPage = useCallback(() => {
     if (!viewerRef.current) return
     const iframe = viewerRef.current.querySelector('iframe')
-    if (!iframe?.contentDocument?.body) { ttsAutoPlayRef.current = false; return }
+    if (!iframe?.contentDocument?.body) return
 
-    // 讀取整個章節文字，朗讀過程中書頁跟隨語音推進，不會有換頁中斷
     const fullText = iframe.contentDocument.body.innerText?.trim() ?? ''
-    if (!fullText) { ttsAutoPlayRef.current = false; return }
+    if (!fullText) return
 
     // 從 epub.js 取得當前頁資訊
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -722,35 +697,10 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
     } catch { /* 保持 startOffset = 0 */ }
 
     const textToRead = fullText.slice(startOffset)
-    if (!textToRead.trim()) { ttsAutoPlayRef.current = false; return }
+    if (!textToRead.trim()) return
 
-    const charsPerPage = fullText.length / totalPages
-    let pagesAdvanced = currentPageIdx
-
-    speak(
-      textToRead,
-      () => {
-        // 章節朗讀結束，前往下一章節
-        if (!ttsAutoPlayRef.current) return
-        if (atEndRef.current) { ttsAutoPlayRef.current = false; return }
-        renditionRef.current?.next()
-        // relocated 將觸發下一章節的朗讀（ttsSyncingPageRef = false）
-      },
-      (charIdxInSpoken) => {
-        // onBoundary：根據朗讀進度同步視覺換頁
-        if (!renditionRef.current) return
-        const absolutePos = startOffset + charIdxInSpoken
-        const targetPage = Math.floor(absolutePos / charsPerPage)
-        // 用 while 迴圈追趕：onBoundary 可能一次跳多頁，每缺一頁就呼叫一次 next()
-        while (targetPage > pagesAdvanced && pagesAdvanced < totalPages - 1) {
-          pagesAdvanced++
-          ttsSyncPendingRef.current++ // 計數器遞增，讓 relocated 知道這是同步換頁
-          renditionRef.current.next()
-        }
-      },
-    )
+    speak(textToRead)
   }, [speak])
-  speakCurrentPageRef.current = speakCurrentPage
 
   const clearSleepTimer = useCallback(() => {
     if (sleepIntervalRef.current !== null) {
@@ -777,8 +727,6 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
           sleepIntervalRef.current = null
         }
         setSleepRemaining(null)
-        ttsAutoPlayRef.current = false
-        ttsSyncPendingRef.current = 0
         stop()
       }
     }, 1000)
@@ -794,14 +742,11 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
   }, [playing, startSleepTimer, clearSleepTimer])
 
   const handleTTSPlay = () => {
-    ttsAutoPlayRef.current = true
     speakCurrentPage()
     if (sleepMinutesRef.current > 0) startSleepTimer(sleepMinutesRef.current)
   }
 
   const handleTTSStop = () => {
-    ttsAutoPlayRef.current = false
-    ttsSyncPendingRef.current = 0
     stop()
     clearSleepTimer()
   }

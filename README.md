@@ -1,7 +1,7 @@
 # Travel in Time — 沉靜式電子書閱讀器
 
-一款以 Electron + React 打造的跨平台桌面 EPUB 閱讀器，專注於沉靜、專注的閱讀體驗。
-支援語音朗讀、畫線註記、繁簡轉換，所有資料完全儲存於本機，無需帳號或網路連線。
+一款以 Electron + React 打造的跨平台桌面 EPUB 閱讀器，同時提供 PWA 網頁版，可直接在瀏覽器使用並安裝至桌面。
+專注於沉靜、專注的閱讀體驗，支援語音朗讀、畫線註記、繁簡轉換，所有資料完全儲存於本機，無需帳號或網路連線。
 
 ---
 
@@ -19,7 +19,31 @@
 
 ---
 
+## 版本
+
+### 桌面版（Electron）
+
+前往 [Releases](../../releases) 頁面下載對應平台的安裝檔：
+
+| 平台 | 格式 |
+|------|------|
+| macOS | `.dmg` |
+| Windows | `.exe`（NSIS 安裝精靈） |
+| Linux | `.AppImage` |
+
+### 網頁版（PWA）
+
+直接在瀏覽器開啟，支援安裝至桌面或主畫面，可離線使用。
+
+- 原始碼位於 `pwa/` 資料夾
+- 部署至 Vercel 後即可透過網址存取
+- 所有資料同樣儲存在本機瀏覽器（IndexedDB / LocalStorage）
+
+---
+
 ## 技術棧
+
+### 桌面版（Electron）
 
 | 層級 | 技術 |
 |------|------|
@@ -33,9 +57,24 @@
 | 打包發布 | electron-builder + GitHub Actions |
 | 測試 | Playwright (E2E) |
 
+### 網頁版（PWA）
+
+| 層級 | 技術 |
+|------|------|
+| 前端 | React 18 + TypeScript + Vite |
+| 樣式 | Tailwind CSS |
+| PWA | vite-plugin-pwa + Workbox |
+| EPUB 解析 | epub.js |
+| 狀態管理 | Zustand |
+| 中文轉換 | opencc-js |
+| 語音朗讀 | Web Speech API |
+| 部署 | Vercel |
+
 ---
 
 ## 開發環境啟動
+
+### 桌面版
 
 ```bash
 # 安裝依賴
@@ -46,7 +85,19 @@ cd renderer && yarn install && cd ..
 yarn dev
 ```
 
-## 打包應用
+### 網頁版（PWA）
+
+```bash
+cd pwa
+yarn install
+yarn dev   # 開發伺服器 http://localhost:5174
+```
+
+---
+
+## 打包 / 部署
+
+### 桌面版
 
 ```bash
 # 建置
@@ -56,17 +107,20 @@ yarn build
 yarn electron-builder
 ```
 
----
+### 網頁版（PWA）部署至 Vercel
 
-## 下載安裝
+```bash
+cd pwa && yarn build  # 輸出至 pwa/dist/
+```
 
-前往 [Releases](../../releases) 頁面下載對應平台的安裝檔：
+Vercel 專案設定：
 
-| 平台 | 格式 |
-|------|------|
-| macOS | `.dmg` |
-| Windows | `.exe`（NSIS 安裝精靈） |
-| Linux | `.AppImage` |
+| 設定項目 | 值 |
+|---------|-----|
+| Root Directory | `pwa` |
+| Framework Preset | Vite |
+| Build Command | `yarn build` |
+| Output Directory | `dist` |
 
 ---
 
@@ -77,11 +131,15 @@ TravelInTime/
 ├── electron/           # Electron 主程序
 │   ├── main.ts         # 視窗管理、自動更新
 │   └── preload.ts      # IPC 安全橋接
-├── renderer/           # React 前端應用
+├── renderer/           # 桌面版 React 前端
 │   └── src/
 │       ├── components/ # UI 元件（Reader、Library、Toolbar 等）
 │       ├── hooks/      # 自訂 Hook（useTTS、useLibrary）
 │       └── store/      # Zustand 狀態（閱讀設定、註記）
+├── pwa/                # 網頁版（PWA）
+│   ├── public/         # 靜態資源（icons）
+│   ├── vite.config.ts  # PWA plugin 設定
+│   └── src/            # 與桌面版共用相同元件架構
 ├── .github/workflows/  # CI/CD（自動測試 + 發布）
 └── package.json
 ```
