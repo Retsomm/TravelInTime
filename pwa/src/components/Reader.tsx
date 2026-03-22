@@ -406,8 +406,10 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
           doc.addEventListener('mousedown', () => { setPopup(null); setEditPopup(null) })
           doc.addEventListener('touchstart', () => { setPopup(null); setEditPopup(null) }, { passive: true })
 
+          // hooks.content 的 callback 收到的第一個參數即為 Contents 物件本身
+          // （epub.js 的 afterDisplayed 路徑呼叫 hooks.content.trigger(view.contents, this)）
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const viewContents = (view as any).contents
+          const viewContents = view as any
           // 手機觸控選取：iOS 長按選文字觸發 touchcancel（非 touchend），
           // 所以改用 selectionchange 偵測選取完成。
           // 300ms debounce 等使用者停止調整選取把手後再觸發。
