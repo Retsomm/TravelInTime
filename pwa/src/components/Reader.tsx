@@ -297,6 +297,15 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     resetScript()
     scriptRef.current = 'tc'
 
+    // iOS 上 iframe 內選取文字，selectionchange 事件發生在外層 document 而非 iframe document
+    // epub.js 的監聽器掛在 iframe document，需要 forward 讓 epub.js 能收到事件
+    const forwardSelectionChange = () => {
+      const iframe = viewerRef.current?.querySelector('iframe')
+      const iframeDoc = iframe?.contentDocument
+      if (iframeDoc) iframeDoc.dispatchEvent(new Event('selectionchange'))
+    }
+    document.addEventListener('selectionchange', forwardSelectionChange)
+
     // 設定 annotation 自動儲存（先 unsub 再 clearAll，避免 clear 覆蓋 localStorage）
     const unsubAnnotations = useAnnotationStore.subscribe((state) => {
       saveAnnotationsForBook(bookId, state.annotations)
@@ -388,8 +397,10 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
               }
             }
           })
-          // mousedown 關閉現有 popup
+          // mousedown / touchstart 關閉現有 popup
           doc.addEventListener('mousedown', () => { setPopup(null); setEditPopup(null) })
+          doc.addEventListener('touchstart', () => { setPopup(null); setEditPopup(null) }, { passive: true })
+
 
           // iframe 內的鍵盤左右鍵翻頁（epub 內容取得焦點時，鍵盤事件不冒泡到外層）
           doc.addEventListener('keydown', (e: KeyboardEvent) => {
@@ -532,6 +543,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
 
     return () => {
       destroyed = true
+      document.removeEventListener('selectionchange', forwardSelectionChange)
       document.getElementById('tit-epub-layout-fix')?.remove()
       setReady(false)
       setPopup(null)
