@@ -328,6 +328,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
           height: container.clientHeight,
           spread: 'none',
           flow: 'paginated',
+          allowScriptedContent: true, // 允許 iframe sandbox 加入 allow-scripts，讓 selectionchange 在 iOS 正常觸發
         })
         renditionRef.current = rendition
 
