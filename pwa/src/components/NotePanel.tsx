@@ -16,6 +16,7 @@ interface Props {
   onRemoveAnnotation: (id: string) => void
   darkMode: boolean
   bookTitle: string
+  embedded?: boolean
 }
 
 const formatDate = (ts: number) =>
@@ -65,7 +66,7 @@ const exportAnnotations = (selected: Annotation[], bookTitle: string) => {
   URL.revokeObjectURL(url)
 }
 
-const NotePanel = ({ onNavigate, onChangeColor, onRemoveAnnotation, bookTitle }: Props) => {
+const NotePanel = ({ onNavigate, onChangeColor, onRemoveAnnotation, bookTitle, embedded }: Props) => {
   const { annotations } = useAnnotationStore()
   const [pickerOpenId, setPickerOpenId] = useState<string | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -74,7 +75,6 @@ const NotePanel = ({ onNavigate, onChangeColor, onRemoveAnnotation, bookTitle }:
   const allSelected = annotations.length > 0 && selectedIds.size === annotations.length
   const someSelected = selectedIds.size > 0 && !allSelected
 
-  // 更新全選 checkbox 的 indeterminate 狀態
   if (selectAllRef.current) {
     selectAllRef.current.indeterminate = someSelected
   }
@@ -96,6 +96,101 @@ const NotePanel = ({ onNavigate, onChangeColor, onRemoveAnnotation, bookTitle }:
     if (selected.length === 0) return
     exportAnnotations(selected, bookTitle)
   }
+
+  const content = (
+    <div className="flex-1 overflow-y-auto">
+      {annotations.length === 0 ? (
+        <p className="text-sm text-stone-400 dark:text-stone-500 p-4">
+          選取文字後點擊顏色即可新增註記。
+        </p>
+      ) : (
+        <ul className="divide-y divide-stone-100 dark:divide-stone-700">
+          {annotations.map((a) => (
+            <li key={a.id} className="group">
+              <div
+                className="flex items-start gap-2 px-4 pt-3 pb-1 cursor-pointer hover:bg-stone-50 dark:hover:bg-gray-700/50 transition"
+                onClick={() => {
+                  setPickerOpenId(null)
+                  onNavigate(a.cfi)
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedIds.has(a.id)}
+                  onChange={() => toggleSelect(a.id)}
+                  onClick={(e) => e.stopPropagation()}
+                  className="mt-1 shrink-0 accent-indigo-500 cursor-pointer"
+                />
+                <button
+                  className="mt-1 shrink-0 w-3.5 h-3.5 rounded-full border border-black/10 hover:scale-125 transition-transform"
+                  style={{ backgroundColor: a.color }}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setPickerOpenId(pickerOpenId === a.id ? null : a.id)
+                  }}
+                  aria-label="更換顏色"
+                  title="點擊更換顏色"
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-stone-700 dark:text-stone-200 leading-relaxed break-words line-clamp-3">
+                    {a.text}
+                  </p>
+                  {a.chapter ? (
+                    <p className="text-xs text-stone-400 dark:text-stone-500 mt-0.5 truncate">
+                      {a.chapter}
+                    </p>
+                  ) : null}
+                </div>
+                <button
+                  className="shrink-0 opacity-0 group-hover:opacity-100 transition text-stone-300 hover:text-red-400 dark:text-stone-600 dark:hover:text-red-400 text-xs ml-1 mt-0.5"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onRemoveAnnotation(a.id)
+                    setSelectedIds((prev) => {
+                      const next = new Set(prev)
+                      next.delete(a.id)
+                      return next
+                    })
+                    if (pickerOpenId === a.id) setPickerOpenId(null)
+                  }}
+                  aria-label="刪除此註記"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {pickerOpenId === a.id && (
+                <div className="flex gap-1.5 px-4 pb-2" onClick={(e) => e.stopPropagation()}>
+                  {COLORS.map((c) => (
+                    <button
+                      key={c.label}
+                      className="w-6 h-6 rounded-full border-2 hover:scale-110 transition-transform"
+                      style={{
+                        backgroundColor: c.value,
+                        borderColor: a.color === c.value ? '#6366f1' : 'transparent',
+                      }}
+                      onClick={() => {
+                        onChangeColor(a.id, c.value)
+                        setPickerOpenId(null)
+                      }}
+                      aria-label={`${c.label}色`}
+                      title={c.label}
+                    />
+                  ))}
+                </div>
+              )}
+
+              <p className="px-4 pb-2 text-xs text-stone-300 dark:text-stone-600">
+                {formatDate(a.createdAt)}
+              </p>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+
+  if (embedded) return content
 
   return (
     <div className="w-80 border-l border-stone-200 dark:border-stone-700 bg-white dark:bg-gray-800 flex flex-col overflow-hidden">
@@ -132,103 +227,7 @@ const NotePanel = ({ onNavigate, onChangeColor, onRemoveAnnotation, bookTitle }:
           )}
         </div>
       </div>
-
-      <div className="flex-1 overflow-y-auto">
-        {annotations.length === 0 ? (
-          <p className="text-sm text-stone-400 dark:text-stone-500 p-4">
-            選取文字後點擊顏色即可新增註記。
-          </p>
-        ) : (
-          <ul className="divide-y divide-stone-100 dark:divide-stone-700">
-            {annotations.map((a) => (
-              <li key={a.id} className="group">
-                <div
-                  className="flex items-start gap-2 px-4 pt-3 pb-1 cursor-pointer hover:bg-stone-50 dark:hover:bg-gray-700/50 transition"
-                  onClick={() => {
-                    setPickerOpenId(null)
-                    onNavigate(a.cfi)
-                  }}
-                >
-                  {/* 勾選框 */}
-                  <input
-                    type="checkbox"
-                    checked={selectedIds.has(a.id)}
-                    onChange={() => toggleSelect(a.id)}
-                    onClick={(e) => e.stopPropagation()}
-                    className="mt-1 shrink-0 accent-indigo-500 cursor-pointer"
-                  />
-
-                  {/* 顏色點 */}
-                  <button
-                    className="mt-1 shrink-0 w-3.5 h-3.5 rounded-full border border-black/10 hover:scale-125 transition-transform"
-                    style={{ backgroundColor: a.color }}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setPickerOpenId(pickerOpenId === a.id ? null : a.id)
-                    }}
-                    aria-label="更換顏色"
-                    title="點擊更換顏色"
-                  />
-
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-stone-700 dark:text-stone-200 leading-relaxed break-words line-clamp-3">
-                      {a.text}
-                    </p>
-                    {a.chapter ? (
-                      <p className="text-xs text-stone-400 dark:text-stone-500 mt-0.5 truncate">
-                        {a.chapter}
-                      </p>
-                    ) : null}
-                  </div>
-
-                  <button
-                    className="shrink-0 opacity-0 group-hover:opacity-100 transition text-stone-300 hover:text-red-400 dark:text-stone-600 dark:hover:text-red-400 text-xs ml-1 mt-0.5"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      onRemoveAnnotation(a.id)
-                      setSelectedIds((prev) => {
-                        const next = new Set(prev)
-                        next.delete(a.id)
-                        return next
-                      })
-                      if (pickerOpenId === a.id) setPickerOpenId(null)
-                    }}
-                    aria-label="刪除此註記"
-                  >
-                    ✕
-                  </button>
-                </div>
-
-                {/* 換色面板 */}
-                {pickerOpenId === a.id && (
-                  <div className="flex gap-1.5 px-4 pb-2" onClick={(e) => e.stopPropagation()}>
-                    {COLORS.map((c) => (
-                      <button
-                        key={c.label}
-                        className="w-6 h-6 rounded-full border-2 hover:scale-110 transition-transform"
-                        style={{
-                          backgroundColor: c.value,
-                          borderColor: a.color === c.value ? '#6366f1' : 'transparent',
-                        }}
-                        onClick={() => {
-                          onChangeColor(a.id, c.value)
-                          setPickerOpenId(null)
-                        }}
-                        aria-label={`${c.label}色`}
-                        title={c.label}
-                      />
-                    ))}
-                  </div>
-                )}
-
-                <p className="px-4 pb-2 text-xs text-stone-300 dark:text-stone-600">
-                  {formatDate(a.createdAt)}
-                </p>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+      {content}
     </div>
   )
 }

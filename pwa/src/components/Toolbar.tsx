@@ -52,7 +52,23 @@ const IconBack = () => (
   </svg>
 )
 
-export type ActivePanel = 'notes' | 'chapters' | 'settings' | null
+const IconBook = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+    <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+  </svg>
+)
+
+const IconPanels = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="3" width="18" height="18" rx="2" />
+    <line x1="15" y1="3" x2="15" y2="21" />
+    <line x1="3" y1="9" x2="15" y2="9" />
+    <line x1="3" y1="15" x2="15" y2="15" />
+  </svg>
+)
+
+export type ActivePanel = 'notes' | 'chapters' | 'settings' | 'bookinfo' | 'mobilepanel' | null
 
 interface Props {
   onBack: () => void
@@ -62,6 +78,8 @@ interface Props {
   onToggleNotes: () => void
   onToggleChapters: () => void
   onToggleSettings: () => void
+  onToggleBookInfo: () => void
+  onToggleMobilePanel: () => void
   activePanel: ActivePanel
 }
 
@@ -73,6 +91,8 @@ const Toolbar = ({
   onToggleNotes,
   onToggleChapters,
   onToggleSettings,
+  onToggleBookInfo,
+  onToggleMobilePanel,
   activePanel,
 }: Props) => {
   return (
@@ -94,6 +114,33 @@ const Toolbar = ({
         )}
       </div>
 
+      {/* 手機：合併面板按鈕（md 以上隱藏） */}
+      <button
+        className={`md:hidden p-2 rounded transition text-stone-500 dark:text-stone-400 ${
+          activePanel === 'mobilepanel'
+            ? 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400'
+            : 'hover:bg-stone-100 dark:hover:bg-stone-700'
+        }`}
+        onClick={onToggleMobilePanel}
+        aria-label="書籍資訊／目錄／註記"
+        title="書籍資訊／目錄／註記"
+      >
+        <IconPanels />
+      </button>
+
+      {/* 桌面：個別按鈕（手機隱藏） */}
+      <button
+        className={`hidden md:block p-2 rounded transition text-stone-500 dark:text-stone-400 ${
+          activePanel === 'bookinfo'
+            ? 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400'
+            : 'hover:bg-stone-100 dark:hover:bg-stone-700'
+        }`}
+        onClick={onToggleBookInfo}
+        aria-label="書籍資訊"
+        title="書籍資訊"
+      >
+        <IconBook />
+      </button>
       <button
         className={`p-2 rounded transition text-stone-500 dark:text-stone-400 ${
           activePanel === 'settings'
@@ -107,7 +154,7 @@ const Toolbar = ({
         <IconSettings />
       </button>
       <button
-        className={`p-2 rounded transition text-stone-500 dark:text-stone-400 ${
+        className={`hidden md:block p-2 rounded transition text-stone-500 dark:text-stone-400 ${
           activePanel === 'chapters'
             ? 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400'
             : 'hover:bg-stone-100 dark:hover:bg-stone-700'
@@ -119,7 +166,7 @@ const Toolbar = ({
         <IconChapters />
       </button>
       <button
-        className={`p-2 rounded transition text-stone-500 dark:text-stone-400 ${
+        className={`hidden md:block p-2 rounded transition text-stone-500 dark:text-stone-400 ${
           activePanel === 'notes'
             ? 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400'
             : 'hover:bg-stone-100 dark:hover:bg-stone-700'

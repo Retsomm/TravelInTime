@@ -50,6 +50,8 @@ const App = () => {
           <Reader
             bookPath={activeBookUrl}
             bookId={activeBookId}
+            bookRecord={records.find((r) => r.id === activeBookId) ?? null}
+            getCoverDataUrl={getCoverDataUrl}
             onBack={backToLibrary}
             darkMode={darkMode}
             onToggleDark={() => setDarkMode(!darkMode)}

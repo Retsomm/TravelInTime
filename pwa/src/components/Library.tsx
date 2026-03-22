@@ -144,22 +144,22 @@ const Library = ({
           </button>
         </div>
         <div className="flex flex-col items-center justify-center flex-1 p-8">
-        <h1 className="text-4xl font-bold text-stone-800 dark:text-stone-100 mb-8">
-          Travel in Time
-        </h1>
-        <p className="text-stone-500 dark:text-stone-400 mb-10 text-center max-w-md leading-relaxed">
-          一款沉靜式閱讀器，支援 ePub 格式。
-          <br />
-          匯入書籍，開始旅行。
-        </p>
-        <button
-          className="px-8 py-4 bg-stone-800 dark:bg-stone-100 text-white dark:text-stone-900 rounded-2xl text-lg font-medium hover:bg-stone-700 dark:hover:bg-stone-200 transition disabled:opacity-50"
-          onClick={triggerPicker}
-          disabled={loading}
-        >
-          {loading ? '載入中…' : '匯入 ePub 書籍'}
-        </button>
-        <input ref={fileInputRef} type="file" accept=".epub" multiple className="hidden" onChange={handleFileChange} />
+          <h1 className="text-4xl font-bold text-stone-800 dark:text-stone-100 mb-8">
+            Travel in Time
+          </h1>
+          <p className="text-stone-500 dark:text-stone-400 mb-10 text-center max-w-md leading-relaxed">
+            一款沉靜式閱讀器，支援 ePub 格式。
+            <br />
+            匯入書籍，開始旅行。
+          </p>
+          <button
+            className="px-8 py-4 bg-stone-800 dark:bg-stone-100 text-white dark:text-stone-900 rounded-2xl text-lg font-medium hover:bg-stone-700 dark:hover:bg-stone-200 transition disabled:opacity-50"
+            onClick={triggerPicker}
+            disabled={loading}
+          >
+            {loading ? '載入中…' : '匯入 ePub 書籍'}
+          </button>
+          <input ref={fileInputRef} type="file" accept=".epub" multiple className="hidden" onChange={handleFileChange} />
         </div>
       </div>
     )

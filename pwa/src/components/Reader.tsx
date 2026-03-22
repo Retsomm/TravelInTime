@@ -12,6 +12,7 @@ import { useReaderStore } from '../store/useReaderStore'
 import type { Script } from '../store/useReaderStore'
 import { useAnnotationStore, loadAnnotationsForBook, saveAnnotationsForBook } from '../store/useAnnotationStore'
 import { saveProgress, loadProgress } from '../hooks/useLibrary'
+import type { BookRecord } from '../hooks/useLibrary'
 
 let _toSC: ((s: string) => string) | null = null
 let _toTC: ((s: string) => string) | null = null
@@ -105,21 +106,96 @@ const restoreDoc = (doc: Document) => {
 interface Props {
   bookPath: string
   bookId: string
+  bookRecord: BookRecord | null
+  getCoverDataUrl: (id: string) => Promise<string | null>
   onBack: () => void
   darkMode: boolean
   onToggleDark: () => void
 }
 
-const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => {
+const GRADIENTS = [
+  'from-indigo-400 to-purple-500',
+  'from-amber-400 to-orange-500',
+  'from-emerald-400 to-teal-500',
+  'from-rose-400 to-pink-500',
+  'from-sky-400 to-blue-500',
+  'from-violet-400 to-fuchsia-500',
+]
+const gradientFor = (id: string) => GRADIENTS[id.charCodeAt(0) % GRADIENTS.length]
+const formatDate = (ts: number) =>
+  ts ? new Date(ts).toLocaleDateString('zh-TW', { year: 'numeric', month: 'long', day: 'numeric' }) : '—'
+
+const BookInfoPanel = ({ record, getCoverDataUrl, embedded }: { record: BookRecord; getCoverDataUrl: (id: string) => Promise<string | null>; embedded?: boolean }) => {
+  const [coverUrl, setCoverUrl] = useState<string | null>(null)
+  useEffect(() => {
+    setCoverUrl(null)
+    if (!record.hasCover) return
+    getCoverDataUrl(record.id).then((url) => { if (url) setCoverUrl(url) })
+  }, [record.id, record.hasCover, getCoverDataUrl])
+
+  const body = (
+    <div className="overflow-y-auto flex flex-col">
+      <div className="px-5 pt-5 pb-3">
+        <div className="aspect-[2/3] rounded-xl overflow-hidden shadow-md">
+          {coverUrl ? (
+            <img src={coverUrl} alt={record.title} className="w-full h-full object-cover" />
+          ) : (
+            <div className={`w-full h-full bg-gradient-to-br ${gradientFor(record.id)} flex items-end p-3`}>
+              <span className="text-white text-4xl font-bold leading-none opacity-60 select-none">
+                {record.title.charAt(0)}
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="px-4 flex flex-col gap-3 pb-5">
+        <div>
+          <p className="text-sm font-semibold text-stone-800 dark:text-stone-100 leading-snug">{record.title}</p>
+          {record.author && (
+            <p className="text-xs text-stone-500 dark:text-stone-400 mt-1">{record.author}</p>
+          )}
+        </div>
+        <div className="flex flex-col gap-1.5 text-xs text-stone-400 dark:text-stone-500">
+          <div className="flex flex-col gap-0.5">
+            <span>新增日期</span>
+            <span className="text-stone-600 dark:text-stone-300">{formatDate(record.addedAt)}</span>
+          </div>
+          <div className="flex flex-col gap-0.5">
+            <span>上次開啟</span>
+            <span className="text-stone-600 dark:text-stone-300">
+              {record.lastOpenedAt ? formatDate(record.lastOpenedAt) : '尚未記錄'}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+
+  if (embedded) return body
+
+  return (
+    <div className="w-56 shrink-0 flex flex-col border-l border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-gray-900 overflow-hidden">
+      <div className="px-4 py-3 border-b border-stone-200 dark:border-stone-700 shrink-0">
+        <span className="text-sm font-medium text-stone-600 dark:text-stone-300">書籍資訊</span>
+      </div>
+      {body}
+    </div>
+  )
+}
+
+const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMode, onToggleDark }: Props) => {
   const viewerRef = useRef<HTMLDivElement>(null)
   const bookRef = useRef<Book | null>(null)
   const renditionRef = useRef<Rendition | null>(null)
+  const chapterPagesRef = useRef<Map<number, number>>(new Map()) // spineIndex → 已渲染的章節總頁數
+
   const scriptRef = useRef<Script>('tc')
   const baseScriptRef = useRef<Script>('tc') // 書本原始語言，切換時用來判斷方向
   const readingDirectionRef = useRef<'ltr' | 'rtl'>('ltr')
   const darkModeRef = useRef(darkMode)
   const lastIframeClickRef = useRef({ x: 0, y: 0 }) // iframe 內最後一次點擊的主視窗座標
-  const [activePanel, setActivePanel] = useState<'notes' | 'chapters' | 'settings' | null>(null)
+  const [activePanel, setActivePanel] = useState<'notes' | 'chapters' | 'settings' | 'bookinfo' | 'mobilepanel' | null>(null)
+  const [mobilePanelTab, setMobilePanelTab] = useState<'bookinfo' | 'chapters' | 'notes'>('chapters')
   const [toc, setToc] = useState<TocItem[]>([])
   const [currentHref, setCurrentHref] = useState('')
   const [ready, setReady] = useState(false)
@@ -369,14 +445,21 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
           const d = l?.start?.displayed as { page: number; total: number } | undefined
           if (d) setChapterRemaining(d.total - d.page)
 
-          // 全書頁碼（右下角）：優先使用 locations 索引，未生成時 fallback 章節頁
-          const locIdx = l?.start?.location as number | undefined
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const bookTotal = (bookRef.current as any)?.locations?.total ?? 0
-          if (locIdx !== undefined && bookTotal > 0) {
-            setPageInfo({ page: locIdx + 1, total: bookTotal })
-          } else if (d) {
-            setPageInfo({ page: d.page, total: d.total })
+          // 全書頁碼（右下角）：以 chapterPagesRef 累計真實渲染頁數，無需非同步 locations
+          const spineIdx = l?.start?.index as number | undefined
+          if (d && spineIdx !== undefined) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const spineTotal: number = (bookRef.current as any)?.spine?.items?.length ?? 1
+            chapterPagesRef.current.set(spineIdx, d.total)
+            const known = chapterPagesRef.current
+            const knownValues = [...known.values()]
+            const avg = Math.round(knownValues.reduce((a, b) => a + b, 0) / knownValues.length)
+            let prevPages = 0
+            for (let i = 0; i < spineIdx; i++) prevPages += known.get(i) ?? avg
+            let totalPages = 0
+            for (let i = 0; i < spineTotal; i++) totalPages += known.get(i) ?? avg
+            const globalPage = prevPages + d.page
+            setPageInfo({ page: Math.max(globalPage, 1), total: Math.max(totalPages, globalPage) })
           }
         })
 
@@ -441,19 +524,6 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
           })
           .then(() => {
             if (!destroyed) setReady(true)
-            // 背景生成全書 locations，完成後更新右下頁碼
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            ;(book as any).locations.generate(700).then(() => {
-              if (destroyed) return
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const total = (book as any).locations.total ?? 0
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const curLoc = (rendition as any).currentLocation?.()
-              const locIdx = curLoc?.start?.location as number | undefined
-              if (locIdx !== undefined && total > 0) {
-                setPageInfo({ page: locIdx + 1, total })
-              }
-            })
           })
       })
       .catch((err: unknown) => {
@@ -469,6 +539,7 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
       setCurrentHref('')
       setBookTitle('')
       setPageInfo(null)
+      chapterPagesRef.current.clear()
       setChapterRemaining(null)
       setAtStart(false)
       setAtEnd(false)
@@ -484,6 +555,7 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
   // 字體大小（獨立，不影響其他設定）
   useEffect(() => {
     if (!ready) return
+    chapterPagesRef.current.clear()
     try { renditionRef.current?.themes.fontSize(`${fontSize}px`) } catch { /* epubjs 時序問題，忽略 */ }
   }, [fontSize, ready])
 
@@ -519,6 +591,7 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
   // 行距（獨立，不影響其他設定）
   useEffect(() => {
     if (!ready) return
+    chapterPagesRef.current.clear()
     lineHeightRef.current = lineHeight
     try { renditionRef.current?.themes.override('line-height', String(lineHeight)) } catch { /* epubjs 時序問題，忽略 */ }
     applyToCurrentDoc(doc => applyLineHeightOverride(doc, lineHeight))
@@ -528,6 +601,7 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
   // 字距（獨立，不影響其他設定）
   useEffect(() => {
     if (!ready) return
+    chapterPagesRef.current.clear()
     letterSpacingRef.current = letterSpacing
     try { renditionRef.current?.themes.override('letter-spacing', `${letterSpacing}em`) } catch { /* epubjs 時序問題，忽略 */ }
     applyToCurrentDoc(doc => applyLetterSpacingOverride(doc, letterSpacing))
@@ -676,7 +750,7 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
     })
   }
 
-  const togglePanel = (panel: 'notes' | 'chapters' | 'settings') =>
+  const togglePanel = (panel: 'notes' | 'chapters' | 'settings' | 'bookinfo' | 'mobilepanel') =>
     setActivePanel((cur) => (cur === panel ? null : panel))
 
   const speakCurrentPage = useCallback(() => {
@@ -794,6 +868,8 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
         bookTitle={bookTitle}
         darkMode={darkMode}
         onToggleDark={onToggleDark}
+        onToggleMobilePanel={() => togglePanel('mobilepanel')}
+        onToggleBookInfo={() => togglePanel('bookinfo')}
         onToggleNotes={() => togglePanel('notes')}
         onToggleChapters={() => togglePanel('chapters')}
         onToggleSettings={() => togglePanel('settings')}
@@ -807,14 +883,14 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
             </div>
           )}
           <button
-            className="absolute left-2 top-1/2 -translate-y-1/2 z-10 w-10 h-10 flex items-center justify-center rounded-full bg-stone-200 dark:bg-stone-700 hover:bg-stone-300 dark:hover:bg-stone-600 transition text-xl disabled:opacity-30"
+            className="absolute left-2 top-1/2 -translate-y-1/2 z-10 w-10 h-10 flex items-center justify-center rounded-full bg-transparent hover:bg-stone-300/50 dark:hover:bg-stone-600/50 transition text-xl disabled:opacity-30 text-stone-400 dark:text-stone-500 drop-shadow-[0_1px_2px_rgba(0,0,0,0.4)]"
             onClick={readingDirection === 'rtl' ? nextPage : prevPage}
             disabled={!ready || (readingDirection === 'rtl' ? atEnd : atStart)}
             aria-label={readingDirection === 'rtl' ? '下一頁' : '上一頁'}
           >
             ‹
           </button>
-          <div ref={viewerRef} className="absolute top-2 bottom-7 left-12 right-12 overflow-hidden" />
+          <div ref={viewerRef} className="absolute top-2 bottom-7 left-0 right-0 overflow-hidden" />
 
           {/* 頁面資訊：底部 */}
           {ready && (
@@ -828,7 +904,7 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
             </div>
           )}
           <button
-            className="absolute right-2 top-1/2 -translate-y-1/2 z-10 w-10 h-10 flex items-center justify-center rounded-full bg-stone-200 dark:bg-stone-700 hover:bg-stone-300 dark:hover:bg-stone-600 transition text-xl disabled:opacity-30"
+            className="absolute right-2 top-1/2 -translate-y-1/2 z-10 w-10 h-10 flex items-center justify-center rounded-full bg-transparent hover:bg-stone-300/50 dark:hover:bg-stone-600/50 transition text-xl disabled:opacity-30 text-stone-400 dark:text-stone-500 drop-shadow-[0_1px_2px_rgba(0,0,0,0.4)]"
             onClick={readingDirection === 'rtl' ? prevPage : nextPage}
             disabled={!ready || (readingDirection === 'rtl' ? atStart : atEnd)}
             aria-label={readingDirection === 'rtl' ? '上一頁' : '下一頁'}
@@ -927,6 +1003,52 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
             currentHref={currentHref}
             onNavigate={handleNavigateToChapter}
           />
+        )}
+        {activePanel === 'bookinfo' && bookRecord && (
+          <BookInfoPanel record={bookRecord} getCoverDataUrl={getCoverDataUrl} />
+        )}
+        {activePanel === 'mobilepanel' && (
+          <div className="w-64 shrink-0 flex flex-col border-l border-stone-200 dark:border-stone-700 bg-white dark:bg-gray-800 overflow-hidden">
+            {/* Tab 切換列 */}
+            <div className="flex shrink-0 border-b border-stone-200 dark:border-stone-700">
+              {([
+                { key: 'bookinfo', label: '書籍' },
+                { key: 'chapters', label: '目錄' },
+                { key: 'notes',    label: '註記' },
+              ] as const).map(({ key, label }) => (
+                <button
+                  key={key}
+                  className={`flex-1 py-2.5 text-xs font-medium transition border-b-2 ${
+                    mobilePanelTab === key
+                      ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400'
+                      : 'border-transparent text-stone-500 dark:text-stone-400 hover:text-stone-700 dark:hover:text-stone-200'
+                  }`}
+                  onClick={() => setMobilePanelTab(key)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {/* 內容區 */}
+            <div className="flex-1 overflow-hidden flex flex-col">
+              {mobilePanelTab === 'bookinfo' && bookRecord && (
+                <BookInfoPanel record={bookRecord} getCoverDataUrl={getCoverDataUrl} embedded />
+              )}
+              {mobilePanelTab === 'chapters' && (
+                <ChapterPanel toc={toc} currentHref={currentHref} onNavigate={handleNavigateToChapter} embedded />
+              )}
+              {mobilePanelTab === 'notes' && (
+                <NotePanel
+                  onNavigate={handleNavigateToAnnotation}
+                  onChangeColor={handleChangeColor}
+                  onRemoveAnnotation={handleDeleteMark}
+                  darkMode={darkMode}
+                  bookTitle={bookTitle}
+                  embedded
+                />
+              )}
+            </div>
+          </div>
         )}
       </div>
     </div>

@@ -68,10 +68,33 @@ interface Props {
   toc: TocItem[]
   currentHref: string
   onNavigate: (href: string) => void
+  embedded?: boolean
 }
 
-const ChapterPanel = ({ toc, currentHref, onNavigate }: Props) => {
+const ChapterPanel = ({ toc, currentHref, onNavigate, embedded }: Props) => {
   const totalChapters = toc.length
+
+  const content = (
+    <div className="flex-1 overflow-y-auto">
+      {toc.length === 0 ? (
+        <p className="text-sm text-stone-400 dark:text-stone-500 p-4">此書籍無目錄資料</p>
+      ) : (
+        <ul>
+          {toc.map((item) => (
+            <TocRow
+              key={item.id || item.href}
+              item={item}
+              depth={0}
+              currentHref={currentHref}
+              onNavigate={onNavigate}
+            />
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+
+  if (embedded) return content
 
   return (
     <div className="w-80 border-l border-stone-200 dark:border-stone-700 bg-white dark:bg-gray-800 flex flex-col overflow-hidden">
@@ -79,24 +102,7 @@ const ChapterPanel = ({ toc, currentHref, onNavigate }: Props) => {
         <h2 className="font-semibold text-stone-700 dark:text-stone-200">章節目錄</h2>
         <p className="text-xs text-stone-400 dark:text-stone-500 mt-0.5">共 {totalChapters} 章</p>
       </div>
-
-      <div className="flex-1 overflow-y-auto">
-        {toc.length === 0 ? (
-          <p className="text-sm text-stone-400 dark:text-stone-500 p-4">此書籍無目錄資料</p>
-        ) : (
-          <ul>
-            {toc.map((item) => (
-              <TocRow
-                key={item.id || item.href}
-                item={item}
-                depth={0}
-                currentHref={currentHref}
-                onNavigate={onNavigate}
-              />
-            ))}
-          </ul>
-        )}
-      </div>
+      {content}
     </div>
   )
 }
