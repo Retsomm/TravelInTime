@@ -403,45 +403,41 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
             }
           })
           // mousedown / touchstart 關閉現有 popup
+          // popupSetTime 防止 removeAllRanges() 後 iOS 重新選取觸發的 touchstart 誤關 popup
+          let popupSetTime = 0
           doc.addEventListener('mousedown', () => { setPopup(null); setEditPopup(null) })
-          doc.addEventListener('touchstart', () => { setPopup(null); setEditPopup(null) }, { passive: true })
+          doc.addEventListener('touchstart', () => {
+            if (Date.now() - popupSetTime < 600) return
+            setPopup(null)
+            setEditPopup(null)
+          }, { passive: true })
 
-          // hooks.content 的 callback 收到的第一個參數即為 Contents 物件本身
-          // （epub.js 的 afterDisplayed 路徑呼叫 hooks.content.trigger(view.contents, this)）
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const viewContents = view as any
-          // 手機觸控選取：iOS 長按選文字觸發 touchcancel（非 touchend），
-          // 所以改用 selectionchange 偵測選取完成。
-          // 300ms debounce 等使用者停止調整選取把手後再觸發。
-          // removeAllRanges() 清除選取，讓 iOS 原生選單找不到選取範圍而不顯示。
           if (navigator.maxTouchPoints > 0) {
             let selTimer: ReturnType<typeof setTimeout> | null = null
             doc.addEventListener('selectionchange', () => {
-              console.log('[iOS] iframe selectionchange fired')
               if (selTimer) clearTimeout(selTimer)
               selTimer = setTimeout(() => {
                 const sel = doc.defaultView?.getSelection()
-                console.log('[iOS] sel:', sel, 'isCollapsed:', sel?.isCollapsed, 'rangeCount:', sel?.rangeCount)
                 if (!sel || sel.isCollapsed || !sel.rangeCount) return
                 const text = sel.toString().trim()
-                console.log('[iOS] text:', text, 'viewContents:', !!viewContents)
                 if (!text || !viewContents) return
                 const range = sel.getRangeAt(0).cloneRange()
                 let cfi: string
-                try { cfi = viewContents.cfiFromRange(range); console.log('[iOS] cfi:', cfi) } catch (e) { console.log('[iOS] cfiFromRange failed:', e); return }
+                try { cfi = viewContents.cfiFromRange(range) } catch { return }
                 const rect = range.getBoundingClientRect()
                 const iframeEl = viewerRef.current?.querySelector('iframe')
                 const iframeRect = iframeEl?.getBoundingClientRect()
-                console.log('[iOS] rect:', rect, 'iframeRect:', iframeRect)
                 if (!iframeRect) return
                 sel.removeAllRanges()
+                popupSetTime = Date.now()
                 setPopup({
                   x: iframeRect.left + rect.left + rect.width / 2,
-                  y: iframeRect.top + rect.top,
+                  y: Math.max(iframeRect.top + rect.top, 80),
                   cfi,
                   text,
                 })
-                console.log('[iOS] setPopup called')
               }, 300)
             }, { passive: true })
           }

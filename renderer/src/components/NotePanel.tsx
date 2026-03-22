@@ -182,7 +182,7 @@ const NotePanel = ({ onNavigate, onChangeColor, onRemoveAnnotation, bookTitle }:
                   </div>
 
                   <button
-                    className="shrink-0 opacity-0 group-hover:opacity-100 transition text-stone-300 hover:text-red-400 dark:text-stone-600 dark:hover:text-red-400 text-xs ml-1 mt-0.5"
+                    className="shrink-0 inline-flex items-center justify-center w-6 h-6 rounded-full border border-stone-200 dark:border-stone-600 bg-stone-100 text-stone-500 hover:text-red-500 hover:bg-red-50 dark:bg-stone-700 dark:text-stone-300 dark:hover:text-red-400 dark:hover:bg-red-500/10 transition text-xs ml-1 mt-0.5"
                     onClick={(e) => {
                       e.stopPropagation()
                       onRemoveAnnotation(a.id)

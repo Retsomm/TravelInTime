@@ -97,6 +97,42 @@ const NotePanel = ({ onNavigate, onChangeColor, onRemoveAnnotation, bookTitle, e
     exportAnnotations(selected, bookTitle)
   }
 
+  const header = (
+    <div className="px-4 py-3 border-b border-stone-100 dark:border-stone-700 shrink-0">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <h2 className="font-semibold text-stone-700 dark:text-stone-200">我的註記</h2>
+          <p className="text-xs text-stone-400 dark:text-stone-500 mt-0.5">共 {annotations.length} 筆</p>
+        </div>
+        {annotations.length > 0 && (
+          <div className="flex items-center gap-1.5 shrink-0">
+            <label className="flex items-center gap-1 text-xs text-stone-500 dark:text-stone-400 cursor-pointer select-none">
+              <input
+                ref={selectAllRef}
+                type="checkbox"
+                checked={allSelected}
+                onChange={toggleSelectAll}
+                className="accent-indigo-500 cursor-pointer"
+              />
+              全選
+            </label>
+            <button
+              className={`px-2 py-1 rounded text-xs transition ${
+                selectedIds.size > 0
+                  ? 'bg-indigo-500 text-white hover:bg-indigo-600'
+                  : 'bg-stone-100 dark:bg-stone-700 text-stone-400 dark:text-stone-500 cursor-not-allowed'
+              }`}
+              onClick={handleExport}
+              disabled={selectedIds.size === 0}
+            >
+              匯出{selectedIds.size > 0 ? ` (${selectedIds.size})` : ''}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+
   const content = (
     <div className="flex-1 overflow-y-auto">
       {annotations.length === 0 ? (
@@ -142,7 +178,7 @@ const NotePanel = ({ onNavigate, onChangeColor, onRemoveAnnotation, bookTitle, e
                   ) : null}
                 </div>
                 <button
-                  className="shrink-0 opacity-0 group-hover:opacity-100 transition text-stone-300 hover:text-red-400 dark:text-stone-600 dark:hover:text-red-400 text-xs ml-1 mt-0.5"
+                  className="shrink-0 inline-flex items-center justify-center w-6 h-6 rounded-full border border-stone-200 dark:border-stone-600 bg-stone-100 text-stone-500 hover:text-red-500 hover:bg-red-50 dark:bg-stone-700 dark:text-stone-300 dark:hover:text-red-400 dark:hover:bg-red-500/10 transition text-xs ml-1 mt-0.5"
                   onClick={(e) => {
                     e.stopPropagation()
                     onRemoveAnnotation(a.id)
@@ -190,43 +226,18 @@ const NotePanel = ({ onNavigate, onChangeColor, onRemoveAnnotation, bookTitle, e
     </div>
   )
 
-  if (embedded) return content
+  if (embedded) {
+    return (
+      <div className="h-full min-h-0 flex flex-col">
+        {header}
+        {content}
+      </div>
+    )
+  }
 
   return (
     <div className="w-80 border-l border-stone-200 dark:border-stone-700 bg-white dark:bg-gray-800 flex flex-col overflow-hidden">
-      <div className="px-4 py-3 border-b border-stone-100 dark:border-stone-700 shrink-0">
-        <div className="flex items-center justify-between gap-2">
-          <div className="min-w-0">
-            <h2 className="font-semibold text-stone-700 dark:text-stone-200">我的註記</h2>
-            <p className="text-xs text-stone-400 dark:text-stone-500 mt-0.5">共 {annotations.length} 筆</p>
-          </div>
-          {annotations.length > 0 && (
-            <div className="flex items-center gap-1.5 shrink-0">
-              <label className="flex items-center gap-1 text-xs text-stone-500 dark:text-stone-400 cursor-pointer select-none">
-                <input
-                  ref={selectAllRef}
-                  type="checkbox"
-                  checked={allSelected}
-                  onChange={toggleSelectAll}
-                  className="accent-indigo-500 cursor-pointer"
-                />
-                全選
-              </label>
-              <button
-                className={`px-2 py-1 rounded text-xs transition ${
-                  selectedIds.size > 0
-                    ? 'bg-indigo-500 text-white hover:bg-indigo-600'
-                    : 'bg-stone-100 dark:bg-stone-700 text-stone-400 dark:text-stone-500 cursor-not-allowed'
-                }`}
-                onClick={handleExport}
-                disabled={selectedIds.size === 0}
-              >
-                匯出{selectedIds.size > 0 ? ` (${selectedIds.size})` : ''}
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
+      {header}
       {content}
     </div>
   )
