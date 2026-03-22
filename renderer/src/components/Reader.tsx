@@ -36,16 +36,35 @@ const applyDarkOverride = (doc: Document, isDark: boolean) => {
   injectStyle(doc, 'tit-dark', `html, body { background-color: ${bg} !important; } ${colorRule}`)
 }
 
+const WEB_FONT_URLS: Record<string, string> = {
+  Huninn: 'https://fonts.googleapis.com/css2?family=Huninn&display=swap',
+}
+
+const injectWebFontLink = (doc: Document, href: string | null) => {
+  const id = 'tit-webfont-link'
+  let el = doc.getElementById(id) as HTMLLinkElement | null
+  if (!href) { el?.remove(); return }
+  if (!el) {
+    el = doc.createElement('link')
+    el.id = id
+    el.rel = 'stylesheet'
+    doc.head?.appendChild(el)
+  }
+  el.href = href
+}
+
 const applyFontFamilyOverride = (doc: Document, family: string) => {
-  injectStyle(doc, 'tit-font', `* { font-family: ${family} !important; }`)
+  injectStyle(doc, 'tit-font', `:root * { font-family: ${family} !important; }`)
+  const fontKey = Object.keys(WEB_FONT_URLS).find(k => family.includes(k))
+  injectWebFontLink(doc, fontKey ? WEB_FONT_URLS[fontKey] : null)
 }
 
 const applyLineHeightOverride = (doc: Document, lh: number) => {
-  injectStyle(doc, 'tit-lh', `* { line-height: ${lh} !important; }`)
+  injectStyle(doc, 'tit-lh', `:root * { line-height: ${lh} !important; }`)
 }
 
 const applyLetterSpacingOverride = (doc: Document, ls: number) => {
-  injectStyle(doc, 'tit-ls', `* { letter-spacing: ${ls}em !important; }`)
+  injectStyle(doc, 'tit-ls', `:root * { letter-spacing: ${ls}em !important; }`)
 }
 
 
@@ -97,7 +116,9 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
   const renditionRef = useRef<Rendition | null>(null)
   const scriptRef = useRef<Script>('tc')
   const baseScriptRef = useRef<Script>('tc') // 書本原始語言，切換時用來判斷方向
+  const readingDirectionRef = useRef<'ltr' | 'rtl'>('ltr')
   const darkModeRef = useRef(darkMode)
+  const currentDocRef = useRef<Document | null>(null)
   const lastIframeClickRef = useRef({ x: 0, y: 0 }) // iframe 內最後一次點擊的主視窗座標
   const [activePanel, setActivePanel] = useState<'notes' | 'chapters' | 'settings' | null>(null)
   const [toc, setToc] = useState<TocItem[]>([])
@@ -112,8 +133,8 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
   const [atEnd, setAtEnd] = useState(false)
 
   const {
-    fontSize, fontFamily, script, lineHeight, letterSpacing,
-    setFontSize, setFontFamily, setScript, resetScript, setLineHeight, setLetterSpacing,
+    fontSize, fontFamily, script, lineHeight, letterSpacing, readingDirection,
+    setFontSize, setFontFamily, setScript, resetScript, setLineHeight, setLetterSpacing, setReadingDirection,
   } = useReaderStore()
   const lineHeightRef = useRef(lineHeight)
   const fontFamilyRef = useRef(fontFamily)
@@ -132,12 +153,16 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
   // 同步 darkModeRef
   useEffect(() => { darkModeRef.current = darkMode }, [darkMode])
 
+  // 同步 readingDirectionRef
+  useEffect(() => { readingDirectionRef.current = readingDirection }, [readingDirection])
+
   // 外層 document 鍵盤左右鍵翻頁（焦點在 iframe 外時）
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
-      if (e.key === 'ArrowLeft') { e.preventDefault(); prevPageRef.current() }
-      if (e.key === 'ArrowRight') { e.preventDefault(); nextPageRef.current() }
+      const isRtl = readingDirectionRef.current === 'rtl'
+      if (e.key === 'ArrowLeft') { e.preventDefault(); isRtl ? nextPageRef.current() : prevPageRef.current() }
+      if (e.key === 'ArrowRight') { e.preventDefault(); isRtl ? prevPageRef.current() : nextPageRef.current() }
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
@@ -270,6 +295,7 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
           }
 
           const doc = (view as { document: Document }).document
+          currentDocRef.current = doc
 
           // 腳本轉換：只在顯示腳本與書本原始語言不同時才轉換
           if (scriptRef.current !== baseScriptRef.current) {
@@ -293,8 +319,9 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
 
           // iframe 內的鍵盤左右鍵翻頁（epub 內容取得焦點時，鍵盤事件不冒泡到外層）
           doc.addEventListener('keydown', (e: KeyboardEvent) => {
-            if (e.key === 'ArrowLeft') { e.preventDefault(); prevPageRef.current() }
-            if (e.key === 'ArrowRight') { e.preventDefault(); nextPageRef.current() }
+            const isRtl = readingDirectionRef.current === 'rtl'
+            if (e.key === 'ArrowLeft') { e.preventDefault(); isRtl ? nextPageRef.current() : prevPageRef.current() }
+            if (e.key === 'ArrowRight') { e.preventDefault(); isRtl ? prevPageRef.current() : nextPageRef.current() }
           })
 
           // 各功能獨立注入 !important 樣式，互不干擾
@@ -472,13 +499,36 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
     }, 50)
   }
 
+  // 對當前 epub 頁面的 document 套用樣式
+  // 優先使用 hooks.content 中直接取得並快取的 currentDocRef（最可靠）
+  // fallback 至 getContents() 公開 API，再 fallback 至 views() 內部屬性
+  const applyToCurrentDoc = (fn: (doc: Document) => void) => {
+    if (currentDocRef.current) {
+      fn(currentDocRef.current)
+      return
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const contents = (renditionRef.current?.getContents() ?? []) as any[]
+    if (contents.length > 0) {
+      contents.forEach((c: any) => {
+        const doc = c?.document as Document | undefined
+        if (doc) fn(doc)
+      })
+      return
+    }
+    renditionRef.current?.views().forEach((view: unknown) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const doc = (view as any).document as Document | undefined
+      if (doc) fn(doc)
+    })
+  }
+
   // 字體家族（獨立，不影響其他設定）
   useEffect(() => {
     if (!ready) return
     fontFamilyRef.current = fontFamily
     try { renditionRef.current?.themes.override('font-family', fontFamily) } catch { /* epubjs 時序問題，忽略 */ }
-    const doc = viewerRef.current?.querySelector('iframe')?.contentDocument
-    if (doc) applyFontFamilyOverride(doc, fontFamily)
+    applyToCurrentDoc(doc => applyFontFamilyOverride(doc, fontFamily))
     rerenderAnnotationPane()
   }, [fontFamily, ready])
 
@@ -487,8 +537,7 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
     if (!ready) return
     lineHeightRef.current = lineHeight
     try { renditionRef.current?.themes.override('line-height', String(lineHeight)) } catch { /* epubjs 時序問題，忽略 */ }
-    const doc = viewerRef.current?.querySelector('iframe')?.contentDocument
-    if (doc) applyLineHeightOverride(doc, lineHeight)
+    applyToCurrentDoc(doc => applyLineHeightOverride(doc, lineHeight))
     rerenderAnnotationPane()
   }, [lineHeight, ready])
 
@@ -497,8 +546,7 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
     if (!ready) return
     letterSpacingRef.current = letterSpacing
     try { renditionRef.current?.themes.override('letter-spacing', `${letterSpacing}em`) } catch { /* epubjs 時序問題，忽略 */ }
-    const doc = viewerRef.current?.querySelector('iframe')?.contentDocument
-    if (doc) applyLetterSpacingOverride(doc, letterSpacing)
+    applyToCurrentDoc(doc => applyLetterSpacingOverride(doc, letterSpacing))
     rerenderAnnotationPane()
   }, [letterSpacing, ready])
 
@@ -515,8 +563,7 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
         renditionRef.current?.themes.override('background', '#fafaf9')
       }
     } catch { /* epubjs 時序問題，忽略 */ }
-    const doc = viewerRef.current?.querySelector('iframe')?.contentDocument
-    if (doc) applyDarkOverride(doc, darkMode)
+    applyToCurrentDoc(doc => applyDarkOverride(doc, darkMode))
   }, [darkMode, ready])
 
   const prevPage = () => {
@@ -776,9 +823,9 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
           )}
           <button
             className="absolute left-2 top-1/2 -translate-y-1/2 z-10 w-10 h-10 flex items-center justify-center rounded-full bg-stone-200 dark:bg-stone-700 hover:bg-stone-300 dark:hover:bg-stone-600 transition text-xl disabled:opacity-30"
-            onClick={prevPage}
-            disabled={!ready || atStart}
-            aria-label="上一頁"
+            onClick={readingDirection === 'rtl' ? nextPage : prevPage}
+            disabled={!ready || (readingDirection === 'rtl' ? atEnd : atStart)}
+            aria-label={readingDirection === 'rtl' ? '下一頁' : '上一頁'}
           >
             ‹
           </button>
@@ -797,9 +844,9 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
           )}
           <button
             className="absolute right-2 top-1/2 -translate-y-1/2 z-10 w-10 h-10 flex items-center justify-center rounded-full bg-stone-200 dark:bg-stone-700 hover:bg-stone-300 dark:hover:bg-stone-600 transition text-xl disabled:opacity-30"
-            onClick={nextPage}
-            disabled={!ready || atEnd}
-            aria-label="下一頁"
+            onClick={readingDirection === 'rtl' ? prevPage : nextPage}
+            disabled={!ready || (readingDirection === 'rtl' ? atStart : atEnd)}
+            aria-label={readingDirection === 'rtl' ? '上一頁' : '下一頁'}
           >
             ›
           </button>
@@ -861,6 +908,8 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
             onFontChange={setFontFamily}
             script={script}
             onScriptToggle={handleScriptToggle}
+            readingDirection={readingDirection}
+            onReadingDirectionChange={setReadingDirection}
             ttsPlaying={playing}
             onTTSPlay={handleTTSPlay}
             onTTSStop={handleTTSStop}

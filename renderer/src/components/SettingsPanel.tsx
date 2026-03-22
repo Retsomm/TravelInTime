@@ -8,6 +8,8 @@ interface Props {
   onFontChange: (font: string) => void
   script: Script
   onScriptToggle: () => void
+  readingDirection: 'ltr' | 'rtl'
+  onReadingDirectionChange: (d: 'ltr' | 'rtl') => void
   ttsPlaying: boolean
   onTTSPlay: () => void
   onTTSStop: () => void
@@ -32,6 +34,8 @@ const SettingsPanel = ({
   onFontChange,
   script,
   onScriptToggle,
+  readingDirection,
+  onReadingDirectionChange,
   ttsPlaying,
   onTTSPlay,
   onTTSStop,
@@ -80,6 +84,17 @@ const SettingsPanel = ({
               title={script === 'tc' ? '切換至簡體' : '切換至繁體'}
             >
               {script === 'tc' ? '繁體' : '簡體'}
+            </button>
+            <button
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition shrink-0 ${
+                readingDirection === 'ltr'
+                  ? 'bg-teal-100 text-teal-700 dark:bg-teal-900 dark:text-teal-300'
+                  : 'bg-violet-100 text-violet-700 dark:bg-violet-900 dark:text-violet-300'
+              }`}
+              onClick={() => onReadingDirectionChange(readingDirection === 'ltr' ? 'rtl' : 'ltr')}
+              title={readingDirection === 'ltr' ? '切換至右翻（RTL）' : '切換至左翻（LTR）'}
+            >
+              {readingDirection === 'ltr' ? '左→右' : '右→左'}
             </button>
           </div>
 
