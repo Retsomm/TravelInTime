@@ -294,6 +294,18 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     if (!container) return
 
     let destroyed = false
+
+    // iOS 某些版本的 selectionchange 在外層 document 觸發，轉發到 iframe document
+    let forwardSelChange: (() => void) | null = null
+    if (navigator.maxTouchPoints > 0) {
+      forwardSelChange = () => {
+        const iframe = viewerRef.current?.querySelector('iframe')
+        const iframeDoc = iframe?.contentDocument
+        if (iframeDoc) iframeDoc.dispatchEvent(new Event('selectionchange'))
+      }
+      document.addEventListener('selectionchange', forwardSelChange)
+    }
+
     resetScript()
     scriptRef.current = 'tc'
 
@@ -393,32 +405,43 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
           doc.addEventListener('mousedown', () => { setPopup(null); setEditPopup(null) })
           doc.addEventListener('touchstart', () => { setPopup(null); setEditPopup(null) }, { passive: true })
 
-          // 手機觸控選取：touchend 時同步讀取並立刻清除 iframe 的選取範圍
-          // iOS 的原生選單是在 touchend 後非同步渲染，清除選取後找不到文字就不顯示
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const viewContents = (view as any).contents
-          doc.addEventListener('touchend', () => {
-            // 必須用 iframe window 的 getSelection，iOS 的 iframe 選取不在外層 document
-            const sel = doc.defaultView?.getSelection()
-            if (!sel || sel.isCollapsed || !sel.rangeCount) return
-            const text = sel.toString().trim()
-            if (!text || !viewContents) return
-            const range = sel.getRangeAt(0).cloneRange()
-            let cfi: string
-            try { cfi = viewContents.cfiFromRange(range) } catch { return }
-            // rect 是 iframe viewport 座標，需加 iframeRect offset 轉換為螢幕座標
-            const rect = range.getBoundingClientRect()
-            const iframeEl = viewerRef.current?.querySelector('iframe')
-            const iframeRect = iframeEl?.getBoundingClientRect()
-            if (!iframeRect) return
-            sel.removeAllRanges() // 清除選取 → iOS 原生選單不再顯示
-            setPopup({
-              x: iframeRect.left + rect.left + rect.width / 2,
-              y: iframeRect.top + rect.top,
-              cfi,
-              text,
-            })
-          }, { passive: true })
+          // 手機觸控選取：iOS 長按選文字觸發 touchcancel（非 touchend），
+          // 所以改用 selectionchange 偵測選取完成。
+          // 300ms debounce 等使用者停止調整選取把手後再觸發。
+          // removeAllRanges() 清除選取，讓 iOS 原生選單找不到選取範圍而不顯示。
+          if (navigator.maxTouchPoints > 0) {
+            let selTimer: ReturnType<typeof setTimeout> | null = null
+            doc.addEventListener('selectionchange', () => {
+              console.log('[iOS] iframe selectionchange fired')
+              if (selTimer) clearTimeout(selTimer)
+              selTimer = setTimeout(() => {
+                const sel = doc.defaultView?.getSelection()
+                console.log('[iOS] sel:', sel, 'isCollapsed:', sel?.isCollapsed, 'rangeCount:', sel?.rangeCount)
+                if (!sel || sel.isCollapsed || !sel.rangeCount) return
+                const text = sel.toString().trim()
+                console.log('[iOS] text:', text, 'viewContents:', !!viewContents)
+                if (!text || !viewContents) return
+                const range = sel.getRangeAt(0).cloneRange()
+                let cfi: string
+                try { cfi = viewContents.cfiFromRange(range); console.log('[iOS] cfi:', cfi) } catch (e) { console.log('[iOS] cfiFromRange failed:', e); return }
+                const rect = range.getBoundingClientRect()
+                const iframeEl = viewerRef.current?.querySelector('iframe')
+                const iframeRect = iframeEl?.getBoundingClientRect()
+                console.log('[iOS] rect:', rect, 'iframeRect:', iframeRect)
+                if (!iframeRect) return
+                sel.removeAllRanges()
+                setPopup({
+                  x: iframeRect.left + rect.left + rect.width / 2,
+                  y: iframeRect.top + rect.top,
+                  cfi,
+                  text,
+                })
+                console.log('[iOS] setPopup called')
+              }, 300)
+            }, { passive: true })
+          }
 
           // iframe 內的鍵盤左右鍵翻頁（epub 內容取得焦點時，鍵盤事件不冒泡到外層）
           doc.addEventListener('keydown', (e: KeyboardEvent) => {
@@ -443,6 +466,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
 
         // 監聽文字選取
         rendition.on('selected', (cfiRange: string, contents: unknown) => {
+          if (navigator.maxTouchPoints > 0) return  // 觸控裝置由 selectionchange 路徑處理
           const c = contents as { window: Window }
           const selection = c.window.getSelection()
           if (!selection || selection.isCollapsed) { setPopup(null); return }
@@ -561,6 +585,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
 
     return () => {
       destroyed = true
+      if (forwardSelChange) document.removeEventListener('selectionchange', forwardSelChange)
 document.getElementById('tit-epub-layout-fix')?.remove()
       setReady(false)
       setPopup(null)
