@@ -534,9 +534,8 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
             const dy = e.changedTouches[0].clientY - start.y
             swipeStartRef.current = null
             if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy) * 1.5) return
-            const isRtl = readingDirectionRef.current === 'rtl'
-            if (dx < 0) isRtl ? prevPageRef.current() : nextPageRef.current()
-            else isRtl ? nextPageRef.current() : prevPageRef.current()
+            if (dx < 0) nextPageRef.current()
+            else prevPageRef.current()
           }, { passive: true })
 
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1082,9 +1081,8 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
             const dy = e.changedTouches[0].clientY - start.y
             swipeStartRef.current = null
             if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy) * 1.5) return
-            const isRtl = readingDirection === 'rtl'
-            if (dx < 0) isRtl ? prevPage() : nextPage()
-            else isRtl ? nextPage() : prevPage()
+            if (dx < 0) nextPage()
+            else prevPage()
           }}
         >
           {!ready && (
