@@ -11,7 +11,7 @@ import useTTS from '../hooks/useTTS'
 import { useReaderStore } from '../store/useReaderStore'
 import type { Script } from '../store/useReaderStore'
 import { useAnnotationStore, loadAnnotationsForBook, saveAnnotationsForBook } from '../store/useAnnotationStore'
-import { saveProgress, loadProgress } from '../hooks/useLibrary'
+import { saveProgress, loadProgress, saveBookSettings, loadBookSettings } from '../hooks/useLibrary'
 import type { BookRecord } from '../hooks/useLibrary'
 
 let _toSC: ((s: string) => string) | null = null
@@ -306,9 +306,21 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
       document.addEventListener('selectionchange', forwardSelChange)
     }
 
-    resetScript()
-    scriptRef.current = 'tc'
-
+    // 載入此書上次儲存的閱讀設定，套用到 store
+    const savedSettings = loadBookSettings(bookId)
+    if (savedSettings) {
+      const store = useReaderStore.getState()
+      store.setFontSize(savedSettings.fontSize)
+      store.setFontFamily(savedSettings.fontFamily)
+      store.setLineHeight(savedSettings.lineHeight)
+      store.setLetterSpacing(savedSettings.letterSpacing)
+      store.setReadingDirection(savedSettings.readingDirection)
+      store.setScript(savedSettings.script)
+      scriptRef.current = savedSettings.script
+    } else {
+      resetScript()
+      scriptRef.current = 'tc'
+    }
 
     // 設定 annotation 自動儲存（先 unsub 再 clearAll，避免 clear 覆蓋 localStorage）
     const unsubAnnotations = useAnnotationStore.subscribe((state) => {
@@ -522,10 +534,13 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
             const lang = (pkg?.language as string | undefined) ?? ''
             setBookTitle((pkg?.title as string | undefined)?.trim() ?? '')
             // 簡體判斷：zh-CN / zh-Hans / zh-SG，或單獨的 "zh"（不帶 region code）
+            // baseScriptRef 永遠反映書本原始語言，scriptRef / store script 優先使用使用者儲存的偏好
             if (/^zh$|zh[-_]?(cn|hans|sg)/i.test(lang)) {
-              scriptRef.current = 'sc'
               baseScriptRef.current = 'sc'
-              setScript('sc')
+              if (!savedSettings) {
+                scriptRef.current = 'sc'
+                setScript('sc')
+              }
             } else {
               baseScriptRef.current = 'tc'
             }
@@ -585,7 +600,10 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     return () => {
       destroyed = true
       if (forwardSelChange) document.removeEventListener('selectionchange', forwardSelChange)
-document.getElementById('tit-epub-layout-fix')?.remove()
+      document.getElementById('tit-epub-layout-fix')?.remove()
+      // 離開書本前儲存目前閱讀設定
+      const { fontSize: fs, fontFamily: ff, script: sc, lineHeight: lh, letterSpacing: ls, readingDirection: rd } = useReaderStore.getState()
+      saveBookSettings(bookId, { fontSize: fs, fontFamily: ff, script: sc, lineHeight: lh, letterSpacing: ls, readingDirection: rd })
       setReady(false)
       setPopup(null)
       setToc([])

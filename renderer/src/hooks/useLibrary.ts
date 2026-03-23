@@ -135,6 +135,31 @@ export const saveProgress = (bookId: string, cfi: string) =>
 export const loadProgress = (bookId: string): string | null =>
   localStorage.getItem(progressKey(bookId))
 
+// ── Book settings ──────────────────────────────────────────────────────
+
+export interface BookSettings {
+  fontSize: number
+  fontFamily: string
+  script: 'tc' | 'sc'
+  lineHeight: number
+  letterSpacing: number
+  readingDirection: 'ltr' | 'rtl'
+}
+
+const settingsKey = (bookId: string) => `tit-settings-${bookId}`
+
+export const saveBookSettings = (bookId: string, settings: BookSettings) =>
+  localStorage.setItem(settingsKey(bookId), JSON.stringify(settings))
+
+export const loadBookSettings = (bookId: string): BookSettings | null => {
+  try {
+    const raw = localStorage.getItem(settingsKey(bookId))
+    return raw ? (JSON.parse(raw) as BookSettings) : null
+  } catch {
+    return null
+  }
+}
+
 // ── Hook ───────────────────────────────────────────────────────────────
 
 export const useLibrary = () => {
@@ -191,6 +216,7 @@ export const useLibrary = () => {
     await idbDelete('files', id)
     await idbDelete('covers', id)
     localStorage.removeItem(progressKey(id))
+    localStorage.removeItem(settingsKey(id))
     setRecords((prev) => {
       const next = prev.filter((r) => r.id !== id)
       saveMeta(next)
