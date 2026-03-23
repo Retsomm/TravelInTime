@@ -188,6 +188,8 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
   const bookRef = useRef<Book | null>(null)
   const renditionRef = useRef<Rendition | null>(null)
   const chapterPagesRef = useRef<Map<number, number>>(new Map()) // spineIndex → 已渲染的章節總頁數
+  const scanAbortRef = useRef<{ aborted: boolean }>({ aborted: false })
+  const scanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const scriptRef = useRef<Script>('tc')
   const baseScriptRef = useRef<Script>('tc') // 書本原始語言，切換時用來判斷方向
@@ -211,6 +213,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     fontSize, fontFamily, script, lineHeight, letterSpacing, readingDirection,
     setFontSize, setFontFamily, setScript, resetScript, setLineHeight, setLetterSpacing, setReadingDirection,
   } = useReaderStore()
+  const fontSizeRef = useRef(fontSize)
   const lineHeightRef = useRef(lineHeight)
   const fontFamilyRef = useRef(fontFamily)
   const letterSpacingRef = useRef(letterSpacing)
@@ -224,6 +227,89 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
   // 供鍵盤事件存取最新的 prevPage/nextPage（避免閉包 stale 問題）
   const prevPageRef = useRef<() => void>(() => {})
   const nextPageRef = useRef<() => void>(() => {})
+
+  // 背景逐章渲染以取得精確全書頁數（反映當前字型、字距、行距）
+  const scanAllChapterPages = useCallback(async () => {
+    const book = bookRef.current
+    const viewer = viewerRef.current
+    if (!book || !viewer) return
+
+    scanAbortRef.current.aborted = true
+    const token = { aborted: false }
+    scanAbortRef.current = token
+    chapterPagesRef.current.clear()
+
+    const { width, height } = viewer.getBoundingClientRect()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const spineItems = ((book as any).spine?.items ?? []) as any[]
+    if (!spineItems.length || width === 0 || height === 0) return
+
+    const hiddenEl = document.createElement('div')
+    Object.assign(hiddenEl.style, {
+      position: 'fixed', top: '-9999px', left: '-9999px',
+      width: `${width}px`, height: `${height}px`,
+      overflow: 'hidden', visibility: 'hidden', pointerEvents: 'none',
+    })
+    document.body.appendChild(hiddenEl)
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const hiddenRendition = (book as any).renderTo(hiddenEl, {
+      width, height, spread: 'none', flow: 'paginated', allowScriptedContent: true,
+    })
+
+    try {
+      hiddenRendition.themes.fontSize(`${fontSizeRef.current}px`)
+      hiddenRendition.themes.override('font-family', fontFamilyRef.current)
+      hiddenRendition.themes.override('line-height', String(lineHeightRef.current))
+      hiddenRendition.themes.override('letter-spacing', `${letterSpacingRef.current}em`)
+    } catch { /* ignore */ }
+
+    hiddenRendition.hooks.content.register((view: unknown) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const doc = (view as any).document as Document | undefined
+      if (!doc) return
+      applyFontFamilyOverride(doc, fontFamilyRef.current)
+      applyLineHeightOverride(doc, lineHeightRef.current)
+      applyLetterSpacingOverride(doc, letterSpacingRef.current)
+    })
+
+    const spineTotal = spineItems.length
+    try {
+      for (const item of spineItems) {
+        if (token.aborted) break
+        const href = item.href as string | undefined
+        if (!href) continue
+        try {
+          await hiddenRendition.display(href)
+          if (token.aborted) break
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const loc = (hiddenRendition as any).currentLocation?.()
+          const d = loc?.start?.displayed as { page: number; total: number } | undefined
+          const idx = item.index as number | undefined
+          if (d && idx !== undefined) {
+            chapterPagesRef.current.set(idx, d.total)
+            // 逐章更新總頁數估算
+            const known = chapterPagesRef.current
+            const knownValues = [...known.values()]
+            const avg = knownValues.reduce((a, b) => a + b, 0) / knownValues.length
+            let totalPages = 0
+            for (let i = 0; i < spineTotal; i++) totalPages += known.get(i) ?? avg
+            setPageInfo(prev => prev ? { page: prev.page, total: Math.round(totalPages) } : prev)
+          }
+        } catch { /* 略過無法渲染的章節 */ }
+        await new Promise<void>(r => setTimeout(r, 0)) // 讓 UI 有機會更新
+      }
+    } finally {
+      hiddenEl.remove()
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      try { (hiddenRendition as any).destroy() } catch { /* ignore */ }
+    }
+  }, [])
+
+  const triggerScan = useCallback(() => {
+    if (scanTimerRef.current) clearTimeout(scanTimerRef.current)
+    scanTimerRef.current = setTimeout(scanAllChapterPages, 600)
+  }, [scanAllChapterPages])
 
   // 同步 darkModeRef
   useEffect(() => { darkModeRef.current = darkMode }, [darkMode])
@@ -343,6 +429,20 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
           allowScriptedContent: true, // 允許 iframe sandbox 加入 allow-scripts，讓 selectionchange 在 iOS 正常觸發
         })
         renditionRef.current = rendition
+
+        // epub.js bug 修補：Rendition.injectIdentifier 在 book.destroy() 後 this.book 會變成
+        // undefined，若此時仍有非同步 section content hook 在觸發就會 crash。
+        // 在 prototype 上 wrap 一次即覆蓋所有 rendition。
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const renditionProto = Object.getPrototypeOf(rendition) as any
+        if (renditionProto.injectIdentifier && !renditionProto._injectIdentifierGuard) {
+          const origInjectIdentifier = renditionProto.injectIdentifier
+          renditionProto.injectIdentifier = function (this: { book?: { packaging?: unknown } }, doc: Document, section: unknown) {
+            if (!this.book?.packaging) return doc
+            return origInjectIdentifier.call(this, doc, section)
+          }
+          renditionProto._injectIdentifierGuard = true
+        }
 
         // 修復預分頁 ePub 圖片重複問題：epub-container 是 flex 容器，預設 justify-content: center
         // 會將 1258px 的 spread epub-view 置中於 629px 容器，使可視區域落在 x=314~943，
@@ -509,21 +609,22 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
           const d = l?.start?.displayed as { page: number; total: number } | undefined
           if (d) setChapterRemaining(d.total - d.page)
 
-          // 全書頁碼（右下角）：以 chapterPagesRef 累計真實渲染頁數，無需非同步 locations
+          // 全書頁碼（右下角）：以 chapterPagesRef 累計章節真實頁數計算當前位置
+          // 背景掃描（scanAllChapterPages）會逐章填入精確頁數，這裡同步更新主渲染章節並重新計算
           const spineIdx = l?.start?.index as number | undefined
           if (d && spineIdx !== undefined) {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const spineTotal: number = (bookRef.current as any)?.spine?.items?.length ?? 1
-            chapterPagesRef.current.set(spineIdx, d.total)
+            chapterPagesRef.current.set(spineIdx, d.total) // 主渲染的真實章節頁數
             const known = chapterPagesRef.current
             const knownValues = [...known.values()]
-            const avg = Math.round(knownValues.reduce((a, b) => a + b, 0) / knownValues.length)
+            const avg = knownValues.reduce((a, b) => a + b, 0) / knownValues.length
             let prevPages = 0
             for (let i = 0; i < spineIdx; i++) prevPages += known.get(i) ?? avg
             let totalPages = 0
             for (let i = 0; i < spineTotal; i++) totalPages += known.get(i) ?? avg
             const globalPage = prevPages + d.page
-            setPageInfo({ page: Math.max(globalPage, 1), total: Math.max(totalPages, globalPage) })
+            setPageInfo({ page: Math.max(Math.round(globalPage), 1), total: Math.max(Math.round(totalPages), Math.round(globalPage)) })
           }
         })
 
@@ -590,7 +691,11 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
             })
           })
           .then(() => {
-            if (!destroyed) setReady(true)
+            if (!destroyed) {
+              setReady(true)
+              // 書本就緒後立即掃描所有章節，取得精確全書頁數
+              scanAllChapterPages()
+            }
           })
       })
       .catch((err: unknown) => {
@@ -604,6 +709,8 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
       // 離開書本前儲存目前閱讀設定
       const { fontSize: fs, fontFamily: ff, script: sc, lineHeight: lh, letterSpacing: ls, readingDirection: rd } = useReaderStore.getState()
       saveBookSettings(bookId, { fontSize: fs, fontFamily: ff, script: sc, lineHeight: lh, letterSpacing: ls, readingDirection: rd })
+      scanAbortRef.current.aborted = true
+      if (scanTimerRef.current) clearTimeout(scanTimerRef.current)
       setReady(false)
       setPopup(null)
       setToc([])
@@ -626,9 +733,10 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
   // 字體大小（獨立，不影響其他設定）
   useEffect(() => {
     if (!ready) return
-    chapterPagesRef.current.clear()
+    fontSizeRef.current = fontSize
     try { renditionRef.current?.themes.fontSize(`${fontSize}px`) } catch { /* epubjs 時序問題，忽略 */ }
-  }, [fontSize, ready])
+    triggerScan()
+  }, [fontSize, ready, triggerScan])
 
   // 取得當前 epubjs view 的 document（比 querySelector('iframe').contentDocument 更可靠，
   // 避免 blob: iframe cross-origin 限制導致 contentDocument 為 null）
@@ -657,27 +765,28 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     try { renditionRef.current?.themes.override('font-family', fontFamily) } catch { /* epubjs 時序問題，忽略 */ }
     applyToCurrentDoc(doc => applyFontFamilyOverride(doc, fontFamily))
     rerenderAnnotationPane()
-  }, [fontFamily, ready])
+    triggerScan()
+  }, [fontFamily, ready, triggerScan])
 
   // 行距（獨立，不影響其他設定）
   useEffect(() => {
     if (!ready) return
-    chapterPagesRef.current.clear()
     lineHeightRef.current = lineHeight
     try { renditionRef.current?.themes.override('line-height', String(lineHeight)) } catch { /* epubjs 時序問題，忽略 */ }
     applyToCurrentDoc(doc => applyLineHeightOverride(doc, lineHeight))
     rerenderAnnotationPane()
-  }, [lineHeight, ready])
+    triggerScan()
+  }, [lineHeight, ready, triggerScan])
 
   // 字距（獨立，不影響其他設定）
   useEffect(() => {
     if (!ready) return
-    chapterPagesRef.current.clear()
     letterSpacingRef.current = letterSpacing
     try { renditionRef.current?.themes.override('letter-spacing', `${letterSpacing}em`) } catch { /* epubjs 時序問題，忽略 */ }
     applyToCurrentDoc(doc => applyLetterSpacingOverride(doc, letterSpacing))
     rerenderAnnotationPane()
-  }, [letterSpacing, ready])
+    triggerScan()
+  }, [letterSpacing, ready, triggerScan])
 
   // 深色模式（獨立，不影響其他設定）
   useEffect(() => {

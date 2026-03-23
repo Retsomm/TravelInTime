@@ -8,7 +8,7 @@ export const FONT_OPTIONS = [
   { label: '宋體', value: '"STSong", "Songti TC", "SimSun", serif' },
   { label: '楷體', value: '"STKaiti", "Kaiti TC", "KaiTi", cursive' },
   { label: '黑體', value: '"Heiti TC", "STHeiti", "Microsoft JhengHei", "SimHei", sans-serif' },
-  { label: '明體', value: '"LiSong Pro", "Apple LiSung Light", "PMingLiU", "MingLiU", serif' },
+  { label: '源雲明體', value: '"Gen\'YouMin TW", "源雲明體", serif' },
   { label: '粉圓體', value: '"Huninn", sans-serif' },
 ]
 
