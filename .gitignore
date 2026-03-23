@@ -9,3 +9,4 @@ database/*.db-wal
 renderer/dist/
 renderer/playwright-report/
 server/dist/
+.claude/

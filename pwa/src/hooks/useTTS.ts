@@ -5,6 +5,9 @@ const ALLOWED = /Meijia|Tingting|美佳|婷婷/i
 const pickBest = (voices: SpeechSynthesisVoice[]) =>
   voices.find((v) => /Meijia|美佳/i.test(v.name)) ?? voices[0] ?? null
 
+// iOS 上 speechSynthesis 約每 15 秒會被系統靜默，需定期 pause/resume 保活
+const IOS_KEEPALIVE_INTERVAL = 10000
+
 const useTTS = () => {
   const [playing, setPlaying] = useState(false)
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([])
@@ -25,8 +28,28 @@ const useTTS = () => {
   const onEndRef = useRef<(() => void) | undefined>(undefined)
   const onBoundaryRef = useRef<((charIdx: number) => void) | undefined>(undefined)
 
+  // iOS keepalive timer ref
+  const keepaliveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
   useEffect(() => { rateRef.current = rate }, [rate])
   useEffect(() => { selectedVoiceRef.current = selectedVoice }, [selectedVoice])
+
+  // iOS keepalive：定期 pause + resume 防止系統在 15 秒後靜默語音
+  const startKeepalive = useCallback(() => {
+    if (keepaliveTimerRef.current !== null) return
+    keepaliveTimerRef.current = setInterval(() => {
+      if (!playingRef.current) return
+      window.speechSynthesis.pause()
+      window.speechSynthesis.resume()
+    }, IOS_KEEPALIVE_INTERVAL)
+  }, [])
+
+  const stopKeepalive = useCallback(() => {
+    if (keepaliveTimerRef.current !== null) {
+      clearInterval(keepaliveTimerRef.current)
+      keepaliveTimerRef.current = null
+    }
+  }, [])
 
   useEffect(() => {
     const load = () => {
@@ -51,6 +74,18 @@ const useTTS = () => {
     }
   }, [])
 
+  // iOS visibilitychange：頁面回到前台時，若正在播放則呼叫 resume() 恢復被系統暫停的語音
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (!playingRef.current) return
+      if (document.visibilityState === 'visible') {
+        window.speechSynthesis.resume()
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
+  }, [])
+
   // 建立並播放 utterance（內部用，使用當前 refs 值）
   const createAndPlay = useCallback((text: string) => {
     const generation = ++generationRef.current
@@ -72,27 +107,47 @@ const useTTS = () => {
     }
     utterance.onend = () => {
       if (generationRef.current !== generation) return
+      stopKeepalive()
       playingRef.current = false
       setPlaying(false)
       onEndRef.current?.()
     }
-    utterance.onerror = () => {
+    utterance.onerror = (e) => {
       if (generationRef.current !== generation) return
+
+      // iOS 上 'interrupted' 錯誤代表被系統強制中斷，嘗試從斷點自動繼續
+      if ((e as SpeechSynthesisErrorEvent).error === 'interrupted' && playingRef.current) {
+        const absolutePos = textOffsetRef.current + charIndexRef.current
+        const remaining = currentTextRef.current.slice(absolutePos)
+        if (remaining.trim()) {
+          textOffsetRef.current = absolutePos
+          charIndexRef.current = 0
+          // 短暫延遲後重啟，避免與系統 cancel 時序衝突
+          setTimeout(() => {
+            if (playingRef.current) createAndPlay(remaining)
+          }, 300)
+          return
+        }
+      }
+
+      stopKeepalive()
       playingRef.current = false
       setPlaying(false)
     }
 
     utteranceRef.current = utterance
     window.speechSynthesis.speak(utterance)
-  }, [])
+    startKeepalive()
+  }, [startKeepalive, stopKeepalive])
 
   const stop = useCallback(() => {
     generationRef.current++ // 令所有舊 callback 失效
+    stopKeepalive()
     window.speechSynthesis.cancel()
     utteranceRef.current = null
     playingRef.current = false
     setPlaying(false)
-  }, [])
+  }, [stopKeepalive])
 
   // onBoundary：每個 word boundary 時回呼，參數為在本次 speak() 文字中的絕對位置
   const speak = useCallback((

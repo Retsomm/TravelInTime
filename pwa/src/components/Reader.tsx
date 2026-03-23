@@ -680,13 +680,13 @@ document.getElementById('tit-epub-layout-fix')?.remove()
 
   const prevPage = () => {
     if (!ready) return
-    stop(); setPopup(null)
+    setPopup(null)
     renditionRef.current?.prev()
   }
 
   const nextPage = () => {
     if (!ready) return
-    stop(); setPopup(null)
+    setPopup(null)
     renditionRef.current?.next()
   }
 
