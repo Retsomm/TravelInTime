@@ -227,6 +227,8 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
   // 供鍵盤事件存取最新的 prevPage/nextPage（避免閉包 stale 問題）
   const prevPageRef = useRef<() => void>(() => {})
   const nextPageRef = useRef<() => void>(() => {})
+  // 滑動翻頁起始點
+  const swipeStartRef = useRef<{ x: number; y: number } | null>(null)
 
   // 背景逐章渲染以取得精確全書頁數（反映當前字型、字距、行距）
   const scanAllChapterPages = useCallback(async () => {
@@ -518,10 +520,23 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
           // popupSetTime 防止 removeAllRanges() 後 iOS 重新選取觸發的 touchstart 誤關 popup
           let popupSetTime = 0
           doc.addEventListener('mousedown', () => { setPopup(null); setEditPopup(null) })
-          doc.addEventListener('touchstart', () => {
+          doc.addEventListener('touchstart', (e: TouchEvent) => {
+            swipeStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }
             if (Date.now() - popupSetTime < 600) return
             setPopup(null)
             setEditPopup(null)
+          }, { passive: true })
+          doc.addEventListener('touchend', (e: TouchEvent) => {
+            if (window.innerWidth >= 768) return
+            const start = swipeStartRef.current
+            if (!start) return
+            const dx = e.changedTouches[0].clientX - start.x
+            const dy = e.changedTouches[0].clientY - start.y
+            swipeStartRef.current = null
+            if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy) * 1.5) return
+            const isRtl = readingDirectionRef.current === 'rtl'
+            if (dx < 0) isRtl ? prevPageRef.current() : nextPageRef.current()
+            else isRtl ? nextPageRef.current() : prevPageRef.current()
           }, { passive: true })
 
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1056,14 +1071,29 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
         activePanel={activePanel}
       />
       <div className="flex flex-1 overflow-hidden">
-        <div className="flex-1 relative overflow-hidden">
+        <div
+          className="flex-1 relative overflow-hidden"
+          onTouchStart={(e) => { swipeStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY } }}
+          onTouchEnd={(e) => {
+            if (window.innerWidth >= 768) return
+            const start = swipeStartRef.current
+            if (!start) return
+            const dx = e.changedTouches[0].clientX - start.x
+            const dy = e.changedTouches[0].clientY - start.y
+            swipeStartRef.current = null
+            if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy) * 1.5) return
+            const isRtl = readingDirection === 'rtl'
+            if (dx < 0) isRtl ? prevPage() : nextPage()
+            else isRtl ? nextPage() : prevPage()
+          }}
+        >
           {!ready && (
             <div className="absolute inset-0 flex items-center justify-center text-stone-400 dark:text-stone-500">
               載入中…
             </div>
           )}
           <button
-            className="absolute left-2 top-1/2 -translate-y-1/2 z-10 w-10 h-10 flex items-center justify-center rounded-full bg-transparent hover:bg-stone-300/50 dark:hover:bg-stone-600/50 transition text-xl disabled:opacity-30 text-stone-400 dark:text-stone-500 drop-shadow-[0_1px_2px_rgba(0,0,0,0.4)]"
+            className="absolute left-2 top-1/2 -translate-y-1/2 z-10 w-10 h-10 hidden md:flex items-center justify-center rounded-full bg-transparent hover:bg-stone-300/50 dark:hover:bg-stone-600/50 transition text-xl disabled:opacity-30 text-stone-400 dark:text-stone-500 drop-shadow-[0_1px_2px_rgba(0,0,0,0.4)]"
             onClick={readingDirection === 'rtl' ? nextPage : prevPage}
             disabled={!ready || (readingDirection === 'rtl' ? atEnd : atStart)}
             aria-label={readingDirection === 'rtl' ? '下一頁' : '上一頁'}
@@ -1084,7 +1114,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
             </div>
           )}
           <button
-            className="absolute right-2 top-1/2 -translate-y-1/2 z-10 w-10 h-10 flex items-center justify-center rounded-full bg-transparent hover:bg-stone-300/50 dark:hover:bg-stone-600/50 transition text-xl disabled:opacity-30 text-stone-400 dark:text-stone-500 drop-shadow-[0_1px_2px_rgba(0,0,0,0.4)]"
+            className="absolute right-2 top-1/2 -translate-y-1/2 z-10 w-10 h-10 hidden md:flex items-center justify-center rounded-full bg-transparent hover:bg-stone-300/50 dark:hover:bg-stone-600/50 transition text-xl disabled:opacity-30 text-stone-400 dark:text-stone-500 drop-shadow-[0_1px_2px_rgba(0,0,0,0.4)]"
             onClick={readingDirection === 'rtl' ? prevPage : nextPage}
             disabled={!ready || (readingDirection === 'rtl' ? atStart : atEnd)}
             aria-label={readingDirection === 'rtl' ? '上一頁' : '下一頁'}
