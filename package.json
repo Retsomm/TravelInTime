@@ -1,6 +1,6 @@
 {
   "name": "travel-in-time",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Travel in Time — 沉靜式閱讀器",
   "main": "dist/electron/main.js",
   "scripts": {
