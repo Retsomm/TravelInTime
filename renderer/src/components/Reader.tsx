@@ -38,6 +38,9 @@ const applyDarkOverride = (doc: Document, isDark: boolean) => {
 
 const WEB_FONT_URLS: Record<string, string> = {
   Huninn: 'https://fonts.googleapis.com/css2?family=Huninn&display=swap',
+  'Noto Serif TC': 'https://fonts.googleapis.com/css2?family=Noto+Serif+TC&display=swap',
+  'Noto Sans TC': 'https://fonts.googleapis.com/css2?family=Noto+Sans+TC&display=swap',
+  'LXGW WenKai TC': 'https://fonts.googleapis.com/css2?family=LXGW+WenKai+TC&display=swap',
 }
 
 const injectWebFontLink = (doc: Document, href: string | null) => {

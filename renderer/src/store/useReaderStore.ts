@@ -4,10 +4,9 @@ export type Script = 'tc' | 'sc'
 export type ReadingDirection = 'ltr' | 'rtl'
 
 export const FONT_OPTIONS = [
-  { label: '蘋方', value: '"PingFang TC", "PingFang SC", sans-serif' },
-  { label: '宋體', value: '"STSong", "Songti TC", "SimSun", serif' },
-  { label: '楷體', value: '"STKaiti", "Kaiti TC", "KaiTi", cursive' },
-  { label: '黑體', value: '"Heiti TC", "STHeiti", "Microsoft JhengHei", "SimHei", sans-serif' },
+  { label: '思源宋體', value: '"Noto Serif TC", serif' },
+  { label: '霞鶩文楷', value: '"LXGW WenKai TC", cursive' },
+  { label: '思源黑體', value: '"Noto Sans TC", sans-serif' },
   { label: '源雲明體', value: '"Gen\'YouMin TW", "源雲明體", serif' },
   { label: '粉圓體', value: '"Huninn", sans-serif' },
 ]
