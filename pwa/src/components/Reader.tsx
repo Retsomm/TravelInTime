@@ -260,7 +260,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     })
 
     try {
-      hiddenRendition.themes.fontSize(`${fontSizeRef.current}px`)
+      hiddenRendition.themes.override('font-size', `${fontSizeRef.current}px`)
       hiddenRendition.themes.override('font-family', fontFamilyRef.current)
       hiddenRendition.themes.override('line-height', String(lineHeightRef.current))
       hiddenRendition.themes.override('letter-spacing', `${letterSpacingRef.current}em`)
@@ -748,7 +748,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
   useEffect(() => {
     if (!ready) return
     fontSizeRef.current = fontSize
-    try { renditionRef.current?.themes.fontSize(`${fontSize}px`) } catch { /* epubjs 時序問題，忽略 */ }
+    try { renditionRef.current?.themes.override('font-size', `${fontSize}px`) } catch { /* epubjs 時序問題，忽略 */ }
     triggerScan()
   }, [fontSize, ready, triggerScan])
 
