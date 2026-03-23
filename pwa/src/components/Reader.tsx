@@ -534,7 +534,8 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
             const dy = e.changedTouches[0].clientY - start.y
             swipeStartRef.current = null
             if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy) * 1.5) return
-            if (dx < 0) nextPageRef.current()
+            const isRtl = readingDirectionRef.current === 'rtl'
+            if ((dx < 0) !== isRtl) nextPageRef.current()
             else prevPageRef.current()
           }, { passive: true })
 
@@ -1081,7 +1082,8 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
             const dy = e.changedTouches[0].clientY - start.y
             swipeStartRef.current = null
             if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy) * 1.5) return
-            if (dx < 0) nextPage()
+            const isRtl = readingDirection === 'rtl'
+            if ((dx < 0) !== isRtl) nextPage()
             else prevPage()
           }}
         >
