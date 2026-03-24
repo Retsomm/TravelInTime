@@ -208,6 +208,9 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
   const [chapterRemaining, setChapterRemaining] = useState<number | null>(null)
   const [atStart, setAtStart] = useState(false)
   const [atEnd, setAtEnd] = useState(false)
+  const atEndRef = useRef(false)
+  const ttsAutoAdvanceRef = useRef(false)
+  const speakCurrentPageRef = useRef<() => void>(() => {})
 
   const {
     fontSize, fontFamily, script, lineHeight, letterSpacing, readingDirection,
@@ -619,6 +622,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
           if (l?.start?.cfi) saveProgress(bookId, l.start.cfi)
           setAtStart(l?.atStart ?? false)
           setAtEnd(l?.atEnd ?? false)
+          atEndRef.current = l?.atEnd ?? false
 
           // 章節剩餘頁（左側小字）
           const d = l?.start?.displayed as { page: number; total: number } | undefined
@@ -1000,8 +1004,22 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     const textToRead = fullText.slice(startOffset)
     if (!textToRead.trim()) return
 
-    speak(textToRead)
+    speak(textToRead, () => {
+      // 章節讀完後，若仍在自動播放狀態且未到書尾，翻頁繼續朗讀
+      if (!ttsAutoAdvanceRef.current || atEndRef.current) return
+      renditionRef.current?.next()
+      const onRelocated = () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ;(renditionRef.current as any)?.off('relocated', onRelocated)
+        if (ttsAutoAdvanceRef.current) speakCurrentPageRef.current()
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(renditionRef.current as any)?.on('relocated', onRelocated)
+    })
   }, [speak])
+
+  // 保持 ref 同步，供 onEnd 閉包內遞迴呼叫
+  useEffect(() => { speakCurrentPageRef.current = speakCurrentPage }, [speakCurrentPage])
 
   const clearSleepTimer = useCallback(() => {
     if (sleepIntervalRef.current !== null) {
@@ -1043,11 +1061,13 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
   }, [playing, startSleepTimer, clearSleepTimer])
 
   const handleTTSPlay = () => {
+    ttsAutoAdvanceRef.current = true
     speakCurrentPage()
     if (sleepMinutesRef.current > 0) startSleepTimer(sleepMinutesRef.current)
   }
 
   const handleTTSStop = () => {
+    ttsAutoAdvanceRef.current = false
     stop()
     clearSleepTimer()
   }
