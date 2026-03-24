@@ -39,6 +39,7 @@ const useTTS = () => {
     if (keepaliveTimerRef.current !== null) return
     keepaliveTimerRef.current = setInterval(() => {
       if (!playingRef.current) return
+      console.log('[TTS] keepalive ping', { speaking: window.speechSynthesis.speaking, paused: window.speechSynthesis.paused })
       window.speechSynthesis.pause()
       window.speechSynthesis.resume()
     }, IOS_KEEPALIVE_INTERVAL)
@@ -119,7 +120,13 @@ const useTTS = () => {
     }
     utterance.onend = () => {
       if (generationRef.current !== generation) return
-      console.log('[TTS] onend（正常結束）', { generation, charIndex: charIndexRef.current, offset: textOffsetRef.current })
+      const readChars = textOffsetRef.current + charIndexRef.current
+      const totalChars = currentTextRef.current.length
+      const isTruncated = readChars < totalChars - 10  // 若距終點超過10字，視為提前截斷
+      console.log(
+        isTruncated ? '[TTS] onend ⚠️ 疑似 iOS 截斷' : '[TTS] onend（正常結束）',
+        { generation, charIndex: charIndexRef.current, offset: textOffsetRef.current, readChars, totalChars, remaining: totalChars - readChars }
+      )
       stopKeepalive()
       playingRef.current = false
       setPlaying(false)
