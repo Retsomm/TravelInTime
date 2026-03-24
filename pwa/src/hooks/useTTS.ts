@@ -99,6 +99,18 @@ const useTTS = () => {
     utterance.pitch = 1.0
     utterance.volume = 1.0
 
+    utterance.onstart = () => {
+      if (generationRef.current !== generation) return
+      console.log('[TTS] onstart', { generation, textLength: text.length, offset: textOffsetRef.current })
+    }
+    utterance.onpause = () => {
+      if (generationRef.current !== generation) return
+      console.warn('[TTS] onpause（系統暫停）', { generation, charIndex: charIndexRef.current })
+    }
+    utterance.onresume = () => {
+      if (generationRef.current !== generation) return
+      console.log('[TTS] onresume', { generation })
+    }
     utterance.onboundary = (e) => {
       if (generationRef.current !== generation) return
       charIndexRef.current = e.charIndex
@@ -107,19 +119,23 @@ const useTTS = () => {
     }
     utterance.onend = () => {
       if (generationRef.current !== generation) return
+      console.log('[TTS] onend（正常結束）', { generation, charIndex: charIndexRef.current, offset: textOffsetRef.current })
       stopKeepalive()
       playingRef.current = false
       setPlaying(false)
       onEndRef.current?.()
     }
     utterance.onerror = (e) => {
+      const err = (e as SpeechSynthesisErrorEvent).error
+      console.error('[TTS] onerror', { generation, error: err, charIndex: charIndexRef.current, offset: textOffsetRef.current, isStaleGen: generationRef.current !== generation })
       if (generationRef.current !== generation) return
 
       // iOS 上 'interrupted' 錯誤代表被系統強制中斷，嘗試從斷點自動繼續
-      if ((e as SpeechSynthesisErrorEvent).error === 'interrupted' && playingRef.current) {
+      if (err === 'interrupted' && playingRef.current) {
         const absolutePos = textOffsetRef.current + charIndexRef.current
         const remaining = currentTextRef.current.slice(absolutePos)
         if (remaining.trim()) {
+          console.log('[TTS] interrupted → 從位置重試', { absolutePos })
           textOffsetRef.current = absolutePos
           charIndexRef.current = 0
           // 短暫延遲後重啟，避免與系統 cancel 時序衝突
@@ -136,11 +152,13 @@ const useTTS = () => {
     }
 
     utteranceRef.current = utterance
+    console.log('[TTS] speak()', { generation, textLength: text.length, offset: textOffsetRef.current, voice: voice?.name })
     window.speechSynthesis.speak(utterance)
     startKeepalive()
   }, [startKeepalive, stopKeepalive])
 
   const stop = useCallback(() => {
+    console.log('[TTS] stop() 被呼叫', { generation: generationRef.current })
     generationRef.current++ // 令所有舊 callback 失效
     stopKeepalive()
     window.speechSynthesis.cancel()
