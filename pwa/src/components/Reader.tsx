@@ -190,6 +190,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
   const chapterPagesRef = useRef<Map<number, number>>(new Map()) // spineIndex → 已渲染的章節總頁數
   const scanAbortRef = useRef<{ aborted: boolean }>({ aborted: false })
   const scanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pendingAnnotationCfiRef = useRef<string | null>(null)
 
   const scriptRef = useRef<Script>('tc')
   const baseScriptRef = useRef<Script>('tc') // 書本原始語言，切換時用來判斷方向
@@ -379,6 +380,23 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     }, 300)
   }
 
+  const addPendingAnnotation = (rendition: Rendition, cfi: string) => {
+    if (pendingAnnotationCfiRef.current) {
+      try { rendition.annotations.remove(pendingAnnotationCfiRef.current, 'underline') } catch {}
+    }
+    pendingAnnotationCfiRef.current = cfi
+    try {
+      rendition.annotations.add('underline', cfi, {}, undefined, 'tit-pending',
+        { stroke: '#6366f1', 'stroke-opacity': '0.8', 'stroke-width': '2.5', fill: 'none' })
+    } catch {}
+  }
+
+  const removePendingAnnotation = (rendition: Rendition) => {
+    if (!pendingAnnotationCfiRef.current) return
+    try { rendition.annotations.remove(pendingAnnotationCfiRef.current, 'underline') } catch {}
+    pendingAnnotationCfiRef.current = null
+  }
+
   // 初始化書本
   useEffect(() => {
     const container = viewerRef.current
@@ -522,7 +540,11 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
           // mousedown / touchstart 關閉現有 popup
           // popupSetTime 防止 removeAllRanges() 後 iOS 重新選取觸發的 touchstart 誤關 popup
           let popupSetTime = 0
-          doc.addEventListener('mousedown', () => { setPopup(null); setEditPopup(null) })
+          doc.addEventListener('mousedown', () => {
+            if (renditionRef.current) removePendingAnnotation(renditionRef.current)
+            setPopup(null)
+            setEditPopup(null)
+          })
           doc.addEventListener('touchstart', (e: TouchEvent) => {
             swipeStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }
             if (Date.now() - popupSetTime < 600) return
@@ -560,6 +582,8 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
                 const iframeEl = viewerRef.current?.querySelector('iframe')
                 const iframeRect = iframeEl?.getBoundingClientRect()
                 if (!iframeRect) return
+                // 行動裝置：新增暫時視覺高亮，避免 native selection 消失後使用者看不到選取範圍
+                if (renditionRef.current) addPendingAnnotation(renditionRef.current, cfi)
                 sel.removeAllRanges()
                 popupSetTime = Date.now()
                 setPopup({
@@ -888,6 +912,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     const iframe = viewerRef.current?.querySelector('iframe')
     const win = iframe?.contentWindow
     if (win) win.getSelection()?.removeAllRanges()
+    if (renditionRef.current) removePendingAnnotation(renditionRef.current)
 
     const ann = { cfi: popup.cfi, text: popup.text, color, chapter: getChapterTitle() }
     addAnnotation(ann)
@@ -1146,8 +1171,13 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
           {editPopup && (
             <div
               className="fixed z-50 flex items-center gap-1.5 p-2 bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-stone-200 dark:border-stone-700"
-              style={{ left: editPopup.x, top: editPopup.y - 52, transform: 'translateX(-50%)' }}
+              style={{
+                left: Math.min(Math.max(editPopup.x, 115), window.innerWidth - 115),
+                top: editPopup.y - 52 >= 8 ? editPopup.y - 52 : Math.min(editPopup.y + 8, window.innerHeight - 52),
+                transform: 'translateX(-50%)',
+              }}
               onClick={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
             >
               {HIGHLIGHT_COLORS.map((c) => (
                 <button
@@ -1174,8 +1204,13 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
           {popup && (
             <div
               className="fixed z-50 flex gap-1.5 p-2 bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-stone-200 dark:border-stone-700"
-              style={{ left: popup.x, top: popup.y - 52, transform: 'translateX(-50%)' }}
+              style={{
+                left: Math.min(Math.max(popup.x, 98), window.innerWidth - 98),
+                top: popup.y - 52 >= 8 ? popup.y - 52 : Math.min(popup.y + 8, window.innerHeight - 52),
+                transform: 'translateX(-50%)',
+              }}
               onClick={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
             >
               {HIGHLIGHT_COLORS.map((c) => (
                 <button
