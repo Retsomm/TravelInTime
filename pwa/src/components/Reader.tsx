@@ -210,7 +210,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
   const [atStart, setAtStart] = useState(false)
   const [atEnd, setAtEnd] = useState(false)
   const atEndRef = useRef(false)
-  const speakNextChapterRef = useRef<(spineIdx: number) => void>(() => {})
+  const continueFromSpineRef = useRef<(spineIdx: number) => void>(() => {})
 
   const {
     fontSize, fontFamily, script, lineHeight, letterSpacing, readingDirection,
@@ -1056,15 +1056,12 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     if (!textToRead.trim()) return
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const currentSpineIdx = (loc as any)?.start?.index as number | undefined
-    speak(textToRead, currentSpineIdx !== undefined
-      ? () => speakNextChapterRef.current(currentSpineIdx + 1)
-      : undefined
-    )
+    const currentSpineIdx = (loc as any)?.start?.index as number ?? -1
+    speak(textToRead, () => continueFromSpineRef.current(currentSpineIdx + 1))
   }, [speak])
 
-  // 在不翻頁的情況下載入後續章節文字並繼續朗讀
-  const speakNextChapter = useCallback((spineIdx: number) => {
+  // 背景載入後續章節並繼續朗讀，不翻頁
+  const continueFromSpine = useCallback((spineIdx: number) => {
     const book = bookRef.current
     if (!book) return
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1076,27 +1073,25 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const section = (book as any).spine.get(item.href ?? item.idref)
-        if (!section) { speakNextChapterRef.current(spineIdx + 1); return }
+        if (!section) { continueFromSpineRef.current(spineIdx + 1); return }
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const doc: Document = await section.load((book as any).load.bind(book))
-        // 移除 script/style 後取純文字，避免朗讀到程式碼或 CSS
-        const bodyClone = doc.body?.cloneNode(true) as HTMLElement | undefined
-        bodyClone?.querySelectorAll('script, style').forEach(el => el.remove())
-        let text = bodyClone?.textContent?.trim() ?? ''
-        // 依使用者設定的繁簡轉換
+        // epub 章節可能是 XHTML/XML 格式，doc.body 可能為 null
+        const root = (doc.body ?? doc.documentElement)?.cloneNode(true) as Element | undefined
+        root?.querySelectorAll('script, style').forEach(el => el.remove())
+        let text = (root?.textContent ?? '').replace(/\s+/g, ' ').trim()
         if (text && scriptRef.current !== baseScriptRef.current)
           text = (scriptRef.current === 'sc' ? getToSC() : getToTC())(text)
         section.unload?.()
-        if (!text) { speakNextChapterRef.current(spineIdx + 1); return }
-        speak(text, () => speakNextChapterRef.current(spineIdx + 1))
+        if (!text) { continueFromSpineRef.current(spineIdx + 1); return }
+        speak(text, () => continueFromSpineRef.current(spineIdx + 1))
       } catch {
-        speakNextChapterRef.current(spineIdx + 1)
+        continueFromSpineRef.current(spineIdx + 1)
       }
     })()
   }, [speak])
 
-  // 保持 ref 同步，供 onEnd 閉包內遞迴呼叫（避免 stale closure）
-  useEffect(() => { speakNextChapterRef.current = speakNextChapter }, [speakNextChapter])
+  useEffect(() => { continueFromSpineRef.current = continueFromSpine }, [continueFromSpine])
 
   const clearSleepTimer = useCallback(() => {
     if (sleepIntervalRef.current !== null) {
