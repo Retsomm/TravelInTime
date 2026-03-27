@@ -145,9 +145,11 @@ const useTTS = () => {
           console.log('[TTS] interrupted → 從位置重試', { absolutePos })
           textOffsetRef.current = absolutePos
           charIndexRef.current = 0
-          // 短暫延遲後重啟，避免與系統 cancel 時序衝突
+          // 立即遞增 generation，防止同一 utterance 的 onend 在 300ms 等待期間通過
+          // generation 檢查並呼叫 onEndRef，否則會觸發下一章、再被 recovery 覆蓋造成重複朗讀
+          const recoveryGen = ++generationRef.current
           setTimeout(() => {
-            if (playingRef.current) createAndPlay(remaining)
+            if (playingRef.current && generationRef.current === recoveryGen) createAndPlay(remaining)
           }, 300)
           return
         }

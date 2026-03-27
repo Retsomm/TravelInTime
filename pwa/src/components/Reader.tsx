@@ -210,8 +210,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
   const [atStart, setAtStart] = useState(false)
   const [atEnd, setAtEnd] = useState(false)
   const atEndRef = useRef(false)
-  const ttsAutoAdvanceRef = useRef(false)
-  const speakCurrentPageRef = useRef<() => void>(() => {})
+  const speakNextChapterRef = useRef<(spineIdx: number) => void>(() => {})
 
   const {
     fontSize, fontFamily, script, lineHeight, letterSpacing, readingDirection,
@@ -999,36 +998,56 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     const totalPages = Math.max(displayed?.total ?? 1, 1)
     const currentPageIdx = Math.max((displayed?.page ?? 1) - 1, 0) // 0-indexed
 
-    // 用 epub.js CFI 取得當前頁第一個字，在 fullText 中搜尋其精確位置
-    // 比線性比例估算更準確，直接對應 DOM 渲染位置
+    // 計算當前頁在章節全文中的起始位置
+    // 優先用 percentage（epub.js 提供，最準確）；其次用 page/total 估算
     let startOffset = 0
     try {
-      const startCfi = loc?.start?.cfi as string | undefined
-      if (startCfi) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const range = (renditionRef.current as any).getRange?.(startCfi) as Range | null | undefined
-        const startNode = range?.startContainer
-        if (startNode?.nodeType === Node.TEXT_NODE) {
-          const nodeText = (startNode.nodeValue ?? '').slice(range!.startOffset)
-          // 取前 20 個非空白字元作為搜尋樣本
-          const sample = nodeText.replace(/\s+/g, '').substring(0, 20)
-          if (sample) {
-            // 以百分比位置為中心，在前後各 500 字元的範圍內搜尋，避免同字句重複的誤判
-            const approx = Math.floor(currentPageIdx / totalPages * fullText.length)
-            const searchFrom = Math.max(0, approx - 500)
-            const normalSlice = fullText.slice(searchFrom).replace(/\s+/g, '')
-            const sampleIdx = normalSlice.indexOf(sample)
-            if (sampleIdx >= 0) {
-              // 將壓縮後的索引還原為 fullText 原始索引
-              let normCount = 0
-              for (let i = searchFrom; i < fullText.length; i++) {
-                if (!/\s/.test(fullText[i])) {
-                  if (normCount === sampleIdx) { startOffset = i; break }
-                  normCount++
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const percentage = (loc as any)?.start?.percentage as number | undefined
+      const approx = (typeof percentage === 'number' && percentage > 0)
+        ? Math.floor(percentage * fullText.length)
+        : Math.floor(currentPageIdx / totalPages * fullText.length)
+
+      if (approx > 0) {
+        // 嘗試從當前頁 CFI 取得文字樣本，在全文中搜尋最近似位置（精確定位）
+        const startCfi = loc?.start?.cfi as string | undefined
+        let found = false
+        if (startCfi) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const range = (renditionRef.current as any).getRange?.(startCfi) as Range | null | undefined
+          const startNode = range?.startContainer
+          if (startNode?.nodeType === Node.TEXT_NODE) {
+            const nodeText = (startNode.nodeValue ?? '').slice(range!.startOffset)
+            const sample = nodeText.replace(/\s+/g, '').substring(0, 15)
+            if (sample.length >= 3) {
+              // 搜尋全文，選擇距離 approx 最近的符合位置（解決舊版窗口過窄問題）
+              const normalFull = fullText.replace(/\s+/g, '')
+              const approxNorm = Math.round(approx / fullText.length * normalFull.length)
+              let bestNormIdx = -1, bestDist = Infinity, pos = 0
+              while (true) {
+                const idx = normalFull.indexOf(sample, pos)
+                if (idx < 0) break
+                const dist = Math.abs(idx - approxNorm)
+                if (dist < bestDist) { bestDist = dist; bestNormIdx = idx }
+                pos = idx + 1
+              }
+              if (bestNormIdx >= 0) {
+                let normCount = 0
+                for (let i = 0; i < fullText.length; i++) {
+                  if (!/\s/.test(fullText[i])) {
+                    if (normCount === bestNormIdx) { startOffset = i; break }
+                    normCount++
+                  }
                 }
+                found = true
               }
             }
           }
+        }
+        // CFI 定位失敗時，直接採用 approx（percentage/page-based），對齊到詞首
+        if (!found) {
+          startOffset = approx
+          while (startOffset > 0 && !/[\s\n]/.test(fullText[startOffset - 1])) startOffset--
         }
       }
     } catch { /* 保持 startOffset = 0 */ }
@@ -1036,22 +1055,48 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     const textToRead = fullText.slice(startOffset)
     if (!textToRead.trim()) return
 
-    speak(textToRead, () => {
-      // 章節讀完後，若仍在自動播放狀態且未到書尾，翻頁繼續朗讀
-      if (!ttsAutoAdvanceRef.current || atEndRef.current) return
-      renditionRef.current?.next()
-      const onRelocated = () => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ;(renditionRef.current as any)?.off('relocated', onRelocated)
-        if (ttsAutoAdvanceRef.current) speakCurrentPageRef.current()
-      }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ;(renditionRef.current as any)?.on('relocated', onRelocated)
-    })
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const currentSpineIdx = (loc as any)?.start?.index as number | undefined
+    speak(textToRead, currentSpineIdx !== undefined
+      ? () => speakNextChapterRef.current(currentSpineIdx + 1)
+      : undefined
+    )
   }, [speak])
 
-  // 保持 ref 同步，供 onEnd 閉包內遞迴呼叫
-  useEffect(() => { speakCurrentPageRef.current = speakCurrentPage }, [speakCurrentPage])
+  // 在不翻頁的情況下載入後續章節文字並繼續朗讀
+  const speakNextChapter = useCallback((spineIdx: number) => {
+    const book = bookRef.current
+    if (!book) return
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const spineItems: any[] = (book as any)?.spine?.items ?? []
+    if (spineIdx >= spineItems.length) return
+
+    const item = spineItems[spineIdx]
+    ;(async () => {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const section = (book as any).spine.get(item.href ?? item.idref)
+        if (!section) { speakNextChapterRef.current(spineIdx + 1); return }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const doc: Document = await section.load((book as any).load.bind(book))
+        // 移除 script/style 後取純文字，避免朗讀到程式碼或 CSS
+        const bodyClone = doc.body?.cloneNode(true) as HTMLElement | undefined
+        bodyClone?.querySelectorAll('script, style').forEach(el => el.remove())
+        let text = bodyClone?.textContent?.trim() ?? ''
+        // 依使用者設定的繁簡轉換
+        if (text && scriptRef.current !== baseScriptRef.current)
+          text = (scriptRef.current === 'sc' ? getToSC() : getToTC())(text)
+        section.unload?.()
+        if (!text) { speakNextChapterRef.current(spineIdx + 1); return }
+        speak(text, () => speakNextChapterRef.current(spineIdx + 1))
+      } catch {
+        speakNextChapterRef.current(spineIdx + 1)
+      }
+    })()
+  }, [speak])
+
+  // 保持 ref 同步，供 onEnd 閉包內遞迴呼叫（避免 stale closure）
+  useEffect(() => { speakNextChapterRef.current = speakNextChapter }, [speakNextChapter])
 
   const clearSleepTimer = useCallback(() => {
     if (sleepIntervalRef.current !== null) {
@@ -1095,13 +1140,11 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
   const handleTTSPlay = () => {
     if (renditionRef.current) removePendingAnnotation(renditionRef.current)
     setPopup(null)
-    ttsAutoAdvanceRef.current = true
     speakCurrentPage()
     if (sleepMinutesRef.current > 0) startSleepTimer(sleepMinutesRef.current)
   }
 
   const handleTTSStop = () => {
-    ttsAutoAdvanceRef.current = false
     stop()
     clearSleepTimer()
   }
