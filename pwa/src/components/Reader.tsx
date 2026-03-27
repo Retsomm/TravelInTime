@@ -640,6 +640,11 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
         })
 
         rendition.on('relocated', (loc: unknown) => {
+          // 頁面跳轉時立即清除暫時高亮，防止舊 CFI 在新章節 inject 時污染 annotation pane
+          if (pendingAnnotationCfiRef.current && renditionRef.current) {
+            removePendingAnnotation(renditionRef.current)
+            setPopup(null)
+          }
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const l = loc as any
           setCurrentHref((l?.start?.href ?? '').split('#')[0])
@@ -850,12 +855,14 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
 
   const prevPage = () => {
     if (!ready) return
+    if (renditionRef.current) removePendingAnnotation(renditionRef.current)
     setPopup(null)
     renditionRef.current?.prev()
   }
 
   const nextPage = () => {
     if (!ready) return
+    if (renditionRef.current) removePendingAnnotation(renditionRef.current)
     setPopup(null)
     renditionRef.current?.next()
   }
@@ -1086,6 +1093,8 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
   }, [playing, startSleepTimer, clearSleepTimer])
 
   const handleTTSPlay = () => {
+    if (renditionRef.current) removePendingAnnotation(renditionRef.current)
+    setPopup(null)
     ttsAutoAdvanceRef.current = true
     speakCurrentPage()
     if (sleepMinutesRef.current > 0) startSleepTimer(sleepMinutesRef.current)
