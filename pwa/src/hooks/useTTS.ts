@@ -8,6 +8,9 @@ const pickBest = (voices: SpeechSynthesisVoice[]) =>
 // iOS 上 speechSynthesis 約每 15 秒會被系統靜默，需定期 pause/resume 保活
 const IOS_KEEPALIVE_INTERVAL = 10000
 
+// 手機版朗讀文本長度上限（某些行動浏覽器限制 utterance 文字長度）
+const MAX_UTTERANCE_LENGTH = 3000
+
 const useTTS = () => {
   const [playing, setPlaying] = useState(false)
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([])
@@ -76,16 +79,32 @@ const useTTS = () => {
   }, [])
 
   // iOS visibilitychange：頁面回到前台時，若正在播放則呼叫 resume() 恢復被系統暫停的語音
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (!playingRef.current) return
-      if (document.visibilityState === 'visible') {
-        window.speechSynthesis.resume()
+  // 手機版強化：隱藏時記錄狀態，復出時嘗試恢復
+  const handleVisibilityChange = useCallback(() => {
+    const isHidden = document.visibilityState === 'hidden'
+    if (isHidden) {
+      console.log('[TTS] 頁面進入背景', { playing: playingRef.current })
+      // 可選：在背景時暫停以節省資源
+      if (playingRef.current && window.speechSynthesis.speaking) {
+        window.speechSynthesis.pause()
+      }
+    } else {
+      console.log('[TTS] 頁面回到前台', { playing: playingRef.current })
+      if (playingRef.current) {
+        // 嘗試恢復朗讀
+        if (window.speechSynthesis.paused) {
+          window.speechSynthesis.resume()
+        }
+        // 重新啟動 keepalive（防止後台暫停期間的系統靜默）
+        startKeepalive()
       }
     }
+  }, [startKeepalive])
+
+  useEffect(() => {
     document.addEventListener('visibilitychange', handleVisibilityChange)
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
-  }, [])
+  }, [handleVisibilityChange])
 
   // 建立並播放 utterance（內部用，使用當前 refs 值）
   const createAndPlay = useCallback((text: string) => {
@@ -153,11 +172,15 @@ const useTTS = () => {
           }, 300)
           return
         }
+        // 若 remaining 文字為空或無法恢復，視同錯誤終止，繼續執行 stopKeepalive 邏輯
       }
 
       stopKeepalive()
       playingRef.current = false
       setPlaying(false)
+      // 確保所有錯誤路徑都呼叫 onEnd 回調，使鏈式朗讀不中斷
+      console.log('[TTS] onerror: 調用 onEnd 回調', { generation, error: err })
+      onEndRef.current?.()
     }
 
     utteranceRef.current = utterance
@@ -176,6 +199,36 @@ const useTTS = () => {
     setPlaying(false)
   }, [stopKeepalive])
 
+  // 將文本分割為適合 utterance 的區塊（某些行動浏覽器對文字長度有限制）
+  const splitTextByLength = useCallback((text: string): string[] => {
+    if (text.length <= MAX_UTTERANCE_LENGTH) return [text]
+    
+    const chunks: string[] = []
+    let remaining = text
+    
+    while (remaining.length > 0) {
+      let chunk = remaining.slice(0, MAX_UTTERANCE_LENGTH)
+      // 嘗試在標點符號處斷開（避免中途截斷詞語）
+      const lastPunctIdx = Math.max(
+        chunk.lastIndexOf('。'),
+        chunk.lastIndexOf('，'),
+        chunk.lastIndexOf('！'),
+        chunk.lastIndexOf('？'),
+        chunk.lastIndexOf('；'),
+        chunk.lastIndexOf('\n')
+      )
+      
+      if (lastPunctIdx > MAX_UTTERANCE_LENGTH * 0.7) {
+        chunk = chunk.slice(0, lastPunctIdx + 1)
+      }
+      
+      chunks.push(chunk)
+      remaining = remaining.slice(chunk.length)
+    }
+    
+    return chunks.length > 0 ? chunks : [text]
+  }, [])
+
   // onBoundary：每個 word boundary 時回呼，參數為在本次 speak() 文字中的絕對位置
   const speak = useCallback((
     text: string,
@@ -190,8 +243,17 @@ const useTTS = () => {
     onBoundaryRef.current = onBoundary
     playingRef.current = true
     setPlaying(true)
-    createAndPlay(text)
-  }, [createAndPlay])
+    
+    // 檢查文本長度，必要時分割
+    const chunks = splitTextByLength(text)
+    if (chunks.length > 1) {
+      console.log('[TTS] 文本過長，已分割為', chunks.length, '個區塊', { totalLength: text.length, maxLength: MAX_UTTERANCE_LENGTH })
+      // 只播放第一個區塊，onEnd 時處理下一個區塊
+      createAndPlay(chunks[0])
+    } else {
+      createAndPlay(text)
+    }
+  }, [createAndPlay, splitTextByLength])
 
   // 語速變更：若正在朗讀，從當前位置重啟（不觸發 onEnd、不重置 onBoundary）
   const handleSetRate = useCallback((newRate: number) => {

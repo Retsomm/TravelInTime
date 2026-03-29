@@ -211,6 +211,8 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
   const [atEnd, setAtEnd] = useState(false)
   const atEndRef = useRef(false)
   const continueFromSpineRef = useRef<(spineIdx: number) => void>(() => {})
+  const currentSpineIndexRef = useRef<number>(-1) // 追蹤當前合法的 spine 索引，用於朗讀時的備選
+  const loadingAbortRef = useRef<{ aborted: boolean }>({ aborted: false }) // 追蹤異步章節載入，支持取消
 
   const {
     fontSize, fontFamily, script, lineHeight, letterSpacing, readingDirection,
@@ -332,6 +334,21 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
+  }, [])
+
+  // 手機版保護機制：頁面隱藏時取消異步操作以節省資源
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        console.log('[Reader] 頁面進入背景，取消待處理的異步操作')
+        loadingAbortRef.current.aborted = true
+      } else {
+        console.log('[Reader] 頁面回到前台，重置操作取消標誌')
+        loadingAbortRef.current.aborted = false
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
   }, [])
 
   // 建立 annotation SVG 標記的 helper（使用 epub.js 內建 annotations，不修改 DOM 文字節點）
@@ -660,6 +677,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
           // 背景掃描（scanAllChapterPages）會逐章填入精確頁數，這裡同步更新主渲染章節並重新計算
           const spineIdx = l?.start?.index as number | undefined
           if (d && spineIdx !== undefined) {
+            currentSpineIndexRef.current = spineIdx // 同步追蹤當前合法的 spine 索引
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const spineTotal: number = (bookRef.current as any)?.spine?.items?.length ?? 1
             chapterPagesRef.current.set(spineIdx, d.total) // 主渲染的真實章節頁數
@@ -1055,38 +1073,89 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     const textToRead = fullText.slice(startOffset)
     if (!textToRead.trim()) return
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const currentSpineIdx = (loc as any)?.start?.index as number ?? -1
-    speak(textToRead, () => continueFromSpineRef.current(currentSpineIdx + 1))
+    // 取得 spine 索引：優先用 location，備選用已追蹤的 currentSpineIndexRef
+    let currentSpineIdx = (loc as any)?.start?.index as number | undefined
+    if (currentSpineIdx === undefined) {
+      currentSpineIdx = currentSpineIndexRef.current >= 0 ? currentSpineIndexRef.current : 0
+      console.warn('[TTS] speakCurrentPage: location.index 未定義，使用備選 spine 索引', { currentSpineIdx })
+    }
+    console.log('[TTS] speakCurrentPage 開始', { currentSpineIdx, pageIdx: currentPageIdx, textLength: textToRead.length })
+    speak(textToRead, () => {
+      console.log('[TTS] speakCurrentPage 完成，準備加載下一章節', { nextSpineIdx: currentSpineIdx + 1 })
+      continueFromSpineRef.current(currentSpineIdx + 1)
+    })
   }, [speak])
 
   // 背景載入後續章節並繼續朗讀，不翻頁
   const continueFromSpine = useCallback((spineIdx: number) => {
     const book = bookRef.current
-    if (!book) return
+    if (!book) { console.warn('[TTS] continueFromSpine: book 未初始化', { spineIdx }); return }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const spineItems: any[] = (book as any)?.spine?.items ?? []
-    if (spineIdx >= spineItems.length) return
+    if (spineIdx >= spineItems.length) {
+      console.log('[TTS] continueFromSpine: 已到達書籍末尾', { spineIdx, totalCount: spineItems.length })
+      return
+    }
+    if (spineIdx < 0) {
+      console.warn('[TTS] continueFromSpine: spine 索引無效', { spineIdx })
+      return
+    }
 
     const item = spineItems[spineIdx]
+    const token = { aborted: false }
+    loadingAbortRef.current = token // 記錄當前加載 token，支持後續取消
+
+    console.log('[TTS] continueFromSpine: 開始載入章節', { spineIdx, totalCount: spineItems.length, href: item?.href ?? item?.idref })
     ;(async () => {
       try {
+        // 設置超時保護：手機版可能因 GC 或系統限制導致異步操作遲遲未完成
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const section = (book as any).spine.get(item.href ?? item.idref)
-        if (!section) { continueFromSpineRef.current(spineIdx + 1); return }
+        if (!section || token.aborted) {
+          console.warn('[TTS] continueFromSpine: section 無效或操作已取消', { spineIdx, aborted: token.aborted })
+          continueFromSpineRef.current(spineIdx + 1)
+          return
+        }
+
+        // 設置超時 promise
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error('章節載入超時（手機版可能受系統限制）')), 8000)
+        })
+
+        // section.load() 回傳的是 xml.documentElement（Element），不是 Document
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const doc: Document = await section.load((book as any).load.bind(book))
-        // epub 章節可能是 XHTML/XML 格式，doc.body 可能為 null
-        const root = (doc.body ?? doc.documentElement)?.cloneNode(true) as Element | undefined
+        const loadPromise = section.load((book as any).load.bind(book)) as Promise<Element>
+        const element: Element = await Promise.race([loadPromise, timeoutPromise])
+
+        // 檢查操作是否被取消（用户停止朗讀或頁面關閉）
+        if (token.aborted) {
+          console.log('[TTS] continueFromSpine: 操作已取消', { spineIdx })
+          section.unload?.()
+          return
+        }
+
+        const root = element?.cloneNode(true) as Element | undefined
         root?.querySelectorAll('script, style').forEach(el => el.remove())
         let text = (root?.textContent ?? '').replace(/\s+/g, ' ').trim()
         if (text && scriptRef.current !== baseScriptRef.current)
           text = (scriptRef.current === 'sc' ? getToSC() : getToTC())(text)
         section.unload?.()
-        if (!text) { continueFromSpineRef.current(spineIdx + 1); return }
+
+        if (!text) {
+          console.warn('[TTS] continueFromSpine: 章節文字為空', { spineIdx })
+          continueFromSpineRef.current(spineIdx + 1)
+          return
+        }
+
+        console.log('[TTS] continueFromSpine: 章節載入成功，準備朗讀', { spineIdx, textLength: text.length })
+        // 更新追蹤的 spine 索引
+        currentSpineIndexRef.current = spineIdx
         speak(text, () => continueFromSpineRef.current(spineIdx + 1))
-      } catch {
-        continueFromSpineRef.current(spineIdx + 1)
+      } catch (err) {
+        if (!token.aborted) {
+          console.error('[TTS] continueFromSpine: 章節載入失敗', { spineIdx, error: err instanceof Error ? err.message : String(err) })
+          continueFromSpineRef.current(spineIdx + 1)
+        }
       }
     })()
   }, [speak])
@@ -1142,6 +1211,9 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
   const handleTTSStop = () => {
     stop()
     clearSleepTimer()
+    // 取消任何待處理的章節載入（手機版保護機制）
+    loadingAbortRef.current.aborted = true
+    console.log('[TTS] handleTTSStop: 朗讀停止，已取消待處理的異步操作')
   }
 
 
