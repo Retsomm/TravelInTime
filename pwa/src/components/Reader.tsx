@@ -213,6 +213,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
   const continueFromSpineRef = useRef<(spineIdx: number) => void>(() => {})
   const currentSpineIndexRef = useRef<number>(-1) // 追蹤當前合法的 spine 索引，用於朗讀時的備選
   const loadingAbortRef = useRef<{ aborted: boolean }>({ aborted: false }) // 追蹤異步章節載入，支持取消
+  const isSelectingRef = useRef(false) // 追蹤是否正在選取文字，避免選取期間翻頁
 
   const {
     fontSize, fontFamily, script, lineHeight, letterSpacing, readingDirection,
@@ -563,7 +564,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
           })
           doc.addEventListener('touchstart', (e: TouchEvent) => {
             swipeStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }
-            if (Date.now() - popupSetTime < 600) return
+            if (isSelectingRef.current || Date.now() - popupSetTime < 600) return
             setPopup(null)
             setEditPopup(null)
           }, { passive: true })
@@ -575,6 +576,8 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
             const dy = e.changedTouches[0].clientY - start.y
             swipeStartRef.current = null
             if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy) * 1.5) return
+            // 防止在註解選取期間翻頁
+            if (isSelectingRef.current) return
             const isRtl = readingDirectionRef.current === 'rtl'
             if ((dx < 0) !== isRtl) nextPageRef.current()
             else prevPageRef.current()
@@ -587,17 +590,30 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
             doc.addEventListener('selectionchange', () => {
               if (selTimer) clearTimeout(selTimer)
               selTimer = setTimeout(() => {
+                isSelectingRef.current = true
                 const sel = doc.defaultView?.getSelection()
-                if (!sel || sel.isCollapsed || !sel.rangeCount) return
+                if (!sel || sel.isCollapsed || !sel.rangeCount) {
+                  isSelectingRef.current = false
+                  return
+                }
                 const text = sel.toString().trim()
-                if (!text || !viewContents) return
+                if (!text || !viewContents) {
+                  isSelectingRef.current = false
+                  return
+                }
                 const range = sel.getRangeAt(0).cloneRange()
                 let cfi: string
-                try { cfi = viewContents.cfiFromRange(range) } catch { return }
+                try { cfi = viewContents.cfiFromRange(range) } catch {
+                  isSelectingRef.current = false
+                  return
+                }
                 const rect = range.getBoundingClientRect()
                 const iframeEl = viewerRef.current?.querySelector('iframe')
                 const iframeRect = iframeEl?.getBoundingClientRect()
-                if (!iframeRect) return
+                if (!iframeRect) {
+                  isSelectingRef.current = false
+                  return
+                }
                 // 行動裝置：新增暫時視覺高亮，避免 native selection 消失後使用者看不到選取範圍
                 if (renditionRef.current) addPendingAnnotation(renditionRef.current, cfi)
                 sel.removeAllRanges()
@@ -608,6 +624,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
                   cfi,
                   text,
                 })
+                isSelectingRef.current = false
               }, 300)
             }, { passive: true })
           }
