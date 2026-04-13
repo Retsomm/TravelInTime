@@ -567,7 +567,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
           })
           doc.addEventListener('touchstart', (e: TouchEvent) => {
             swipeStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }
-            if (isSelectingRef.current || Date.now() - popupSetTime < 600) return
+            if (Date.now() - popupSetTime < 600) return
             setPopup(null)
             setEditPopup(null)
           }, { passive: true })
@@ -579,7 +579,6 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
             const dy = e.changedTouches[0].clientY - start.y
             swipeStartRef.current = null
             if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy) * 1.5) return
-            // 防止在註解選取期間翻頁
             if (isSelectingRef.current) return
             const isRtl = readingDirectionRef.current === 'rtl'
             if ((dx < 0) !== isRtl) nextPageRef.current()
@@ -598,29 +597,18 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
                 isSelectingRef.current = true
               }
               selTimer = setTimeout(() => {
+                isSelectingRef.current = false
                 const sel = doc.defaultView?.getSelection()
-                if (!sel || sel.isCollapsed || !sel.rangeCount) {
-                  isSelectingRef.current = false
-                  return
-                }
+                if (!sel || sel.isCollapsed || !sel.rangeCount) return
                 const text = sel.toString().trim()
-                if (!text || !viewContents) {
-                  isSelectingRef.current = false
-                  return
-                }
+                if (!text || !viewContents) return
                 const range = sel.getRangeAt(0).cloneRange()
                 let cfi: string
-                try { cfi = viewContents.cfiFromRange(range) } catch {
-                  isSelectingRef.current = false
-                  return
-                }
+                try { cfi = viewContents.cfiFromRange(range) } catch { return }
                 const rect = range.getBoundingClientRect()
                 const iframeEl = viewerRef.current?.querySelector('iframe')
                 const iframeRect = iframeEl?.getBoundingClientRect()
-                if (!iframeRect) {
-                  isSelectingRef.current = false
-                  return
-                }
+                if (!iframeRect) return
                 // 行動裝置：新增暫時視覺高亮，避免 native selection 消失後使用者看不到選取範圍
                 if (renditionRef.current) addPendingAnnotation(renditionRef.current, cfi)
                 sel.removeAllRanges()
@@ -631,7 +619,6 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
                   cfi,
                   text,
                 })
-                isSelectingRef.current = false
               }, 300)
             }, { passive: true })
           }
