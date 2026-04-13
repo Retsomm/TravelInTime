@@ -100,6 +100,48 @@ interface Props {
   onToggleDark: () => void
 }
 
+const ConfirmModal = ({
+  bookTitle,
+  onConfirm,
+  onCancel,
+}: {
+  bookTitle: string
+  onConfirm: () => void
+  onCancel: () => void
+}) => (
+  <div
+    className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+    onClick={onCancel}
+  >
+    <div
+      className="bg-white dark:bg-stone-800 rounded-2xl shadow-xl p-6 w-80 max-w-full mx-4"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <h2 className="text-base font-semibold text-stone-800 dark:text-stone-100 mb-2">
+        確認刪除書籍
+      </h2>
+      <p className="text-sm text-stone-500 dark:text-stone-400 mb-6 leading-relaxed">
+        確定要刪除《{bookTitle}》？<br />
+        書籍與所有相關註解將一併移除，無法復原。
+      </p>
+      <div className="flex gap-3 justify-end">
+        <button
+          className="px-4 py-2 rounded-xl text-sm text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-700 transition"
+          onClick={onCancel}
+        >
+          取消
+        </button>
+        <button
+          className="px-4 py-2 rounded-xl text-sm font-medium bg-red-500 text-white hover:bg-red-600 transition"
+          onClick={onConfirm}
+        >
+          確認刪除
+        </button>
+      </div>
+    </div>
+  </div>
+)
+
 const Library = ({
   records,
   getCoverDataUrl,
@@ -111,6 +153,19 @@ const Library = ({
 }: Props) => {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [loading, setLoading] = useState(false)
+  const [pendingRemove, setPendingRemove] = useState<{ id: string; title: string } | null>(null)
+
+  const handleRemoveRequest = (id: string) => {
+    const record = records.find((r) => r.id === id)
+    if (record) setPendingRemove({ id, title: record.title })
+  }
+
+  const handleConfirmRemove = () => {
+    if (pendingRemove) {
+      onRemoveBook(pendingRemove.id)
+      setPendingRemove(null)
+    }
+  }
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
@@ -170,47 +225,56 @@ const Library = ({
   }
 
   return (
-    <div className="drag-region min-h-screen flex flex-col bg-stone-50 dark:bg-gray-900">
-      {/* 頂部導覽 */}
-      <div className="flex items-center gap-3 pl-20 pr-4 py-4 border-b border-stone-200 dark:border-stone-700">
-        <h1 className="text-xl font-bold text-stone-800 dark:text-stone-100 flex-1 text-center">
-          Travel in Time
-        </h1>
-        <button
-          className="no-drag p-2 rounded-full text-stone-500 hover:bg-stone-200 dark:hover:bg-stone-700 transition"
-          onClick={onToggleDark}
-          aria-label={darkMode ? '切換淺色模式' : '切換深色模式'}
-        >
-          {darkMode ? <IconSun /> : <IconMoon />}
-        </button>
-        <button
-          className="no-drag flex items-center gap-2 px-4 py-2 bg-stone-800 dark:bg-stone-100 text-white dark:text-stone-900 rounded-xl text-sm font-medium hover:bg-stone-700 dark:hover:bg-stone-200 transition disabled:opacity-50"
-          onClick={triggerPicker}
-          disabled={loading}
-        >
-          {loading ? '載入中…' : '＋ 匯入書籍'}
-        </button>
-        <input ref={fileInputRef} type="file" accept=".epub" multiple className="hidden" onChange={handleFileChange} />
-      </div>
+    <>
+      {pendingRemove && (
+        <ConfirmModal
+          bookTitle={pendingRemove.title}
+          onConfirm={handleConfirmRemove}
+          onCancel={() => setPendingRemove(null)}
+        />
+      )}
+      <div className="drag-region min-h-screen flex flex-col bg-stone-50 dark:bg-gray-900">
+        {/* 頂部導覽 */}
+        <div className="flex items-center gap-3 pl-20 pr-4 py-4 border-b border-stone-200 dark:border-stone-700">
+          <h1 className="text-xl font-bold text-stone-800 dark:text-stone-100 flex-1 text-center">
+            Travel in Time
+          </h1>
+          <button
+            className="no-drag p-2 rounded-full text-stone-500 hover:bg-stone-200 dark:hover:bg-stone-700 transition"
+            onClick={onToggleDark}
+            aria-label={darkMode ? '切換淺色模式' : '切換深色模式'}
+          >
+            {darkMode ? <IconSun /> : <IconMoon />}
+          </button>
+          <button
+            className="no-drag flex items-center gap-2 px-4 py-2 bg-stone-800 dark:bg-stone-100 text-white dark:text-stone-900 rounded-xl text-sm font-medium hover:bg-stone-700 dark:hover:bg-stone-200 transition disabled:opacity-50"
+            onClick={triggerPicker}
+            disabled={loading}
+          >
+            {loading ? '載入中…' : '＋ 匯入書籍'}
+          </button>
+          <input ref={fileInputRef} type="file" accept=".epub" multiple className="hidden" onChange={handleFileChange} />
+        </div>
 
-      {/* 書籍格狀清單 */}
-      <div className="flex-1 overflow-y-auto px-8 py-6">
-        <p className="text-xs text-stone-400 dark:text-stone-500 mb-4">
-          書庫 · 共 {records.length} 本
-        </p>
-        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-4">
-          {records.map((r) => (
-            <BookCard
-              key={r.id}
-              record={r}
-              getCoverDataUrl={getCoverDataUrl}
-              onOpen={onOpenBook}
-              onRemove={onRemoveBook}
-            />
-          ))}
+        {/* 書籍格狀清單 */}
+        <div className="flex-1 overflow-y-auto px-8 py-6">
+          <p className="text-xs text-stone-400 dark:text-stone-500 mb-4">
+            書庫 · 共 {records.length} 本
+          </p>
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-4">
+            {[...records].sort((a, b) => b.lastOpenedAt - a.lastOpenedAt).map((r) => (
+              <BookCard
+                key={r.id}
+                record={r}
+                getCoverDataUrl={getCoverDataUrl}
+                onOpen={onOpenBook}
+                onRemove={handleRemoveRequest}
+              />
+            ))}
+          </div>
         </div>
       </div>
-    </div>
+    </>
   )
 }
 

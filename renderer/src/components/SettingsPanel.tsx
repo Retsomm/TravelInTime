@@ -1,5 +1,102 @@
+import { useEffect, useRef, useState } from 'react'
 import { FONT_OPTIONS } from '../store/useReaderStore'
 import type { Script } from '../store/useReaderStore'
+
+interface SelectOption { label: string; value: string }
+
+const CustomSelect = ({
+  value,
+  options,
+  onChange,
+  ariaLabel,
+  className = '',
+}: {
+  value: string
+  options: SelectOption[]
+  onChange: (v: string) => void
+  ariaLabel?: string
+  className?: string
+}) => {
+  const [open, setOpen] = useState(false)
+  const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({})
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
+
+  const selected = options.find((o) => o.value === value)
+
+  const openDropdown = () => {
+    if (!triggerRef.current) return
+    const rect = triggerRef.current.getBoundingClientRect()
+    const spaceBelow = window.innerHeight - rect.bottom
+    const estimatedHeight = Math.min(options.length * 32 + 8, 240)
+    const showAbove = spaceBelow < estimatedHeight && rect.top > estimatedHeight
+    setDropdownStyle({
+      position: 'fixed',
+      left: rect.left,
+      width: rect.width,
+      ...(showAbove
+        ? { bottom: window.innerHeight - rect.top, top: 'auto' }
+        : { top: rect.bottom, bottom: 'auto' }),
+      zIndex: 9999,
+    })
+    setOpen(true)
+  }
+
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (
+        !triggerRef.current?.contains(e.target as Node) &&
+        !listRef.current?.contains(e.target as Node)
+      ) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  return (
+    <div className={`relative ${className}`}>
+      <button
+        ref={triggerRef}
+        type="button"
+        className="w-full flex items-center justify-between text-sm rounded-lg pl-2 pr-2 py-1.5 bg-stone-100 dark:bg-stone-700 text-stone-700 dark:text-stone-200 cursor-pointer text-left"
+        onClick={() => open ? setOpen(false) : openDropdown()}
+        aria-label={ariaLabel}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
+        <span className="truncate">{selected?.label ?? ''}</span>
+        <svg className="shrink-0 ml-1 text-stone-400 dark:text-stone-500" width="12" height="12" viewBox="0 0 12 12" fill="none">
+          <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      </button>
+      {open && (
+        <div
+          ref={listRef}
+          style={dropdownStyle}
+          className="bg-white dark:bg-stone-800 rounded-lg shadow-lg border border-stone-200 dark:border-stone-600 overflow-y-auto max-h-60 py-1"
+          role="listbox"
+        >
+          {options.map((o) => (
+            <div
+              key={o.value}
+              role="option"
+              aria-selected={o.value === value}
+              className={`px-3 py-1.5 text-sm cursor-pointer ${
+                o.value === value
+                  ? 'bg-stone-100 dark:bg-stone-700 text-stone-900 dark:text-stone-100 font-medium'
+                  : 'text-stone-700 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-700'
+              }`}
+              onMouseDown={() => { onChange(o.value); setOpen(false) }}
+            >
+              {o.label}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
 
 interface Props {
   fontSize: number
@@ -64,16 +161,13 @@ const SettingsPanel = ({
         <section>
           <p className="text-xs font-semibold text-stone-400 dark:text-stone-500 uppercase tracking-wider mb-2">字體</p>
           <div className="flex items-center gap-2 mb-3">
-            <select
-              className="flex-1 text-sm rounded-lg px-2 py-1.5 bg-stone-100 dark:bg-stone-700 text-stone-700 dark:text-stone-200 border-none outline-none cursor-pointer"
+            <CustomSelect
+              className="flex-1"
               value={fontFamily}
-              onChange={(e) => onFontChange(e.target.value)}
-              aria-label="選擇字體"
-            >
-              {FONT_OPTIONS.map((f) => (
-                <option key={f.value} value={f.value}>{f.label}</option>
-              ))}
-            </select>
+              options={FONT_OPTIONS}
+              onChange={onFontChange}
+              ariaLabel="選擇字體"
+            />
             <button
               className={`px-3 py-1.5 rounded-lg text-sm font-medium transition shrink-0 ${
                 script === 'tc'
@@ -159,21 +253,19 @@ const SettingsPanel = ({
           <p className="text-xs font-semibold text-stone-400 dark:text-stone-500 uppercase tracking-wider mb-2">語音朗讀</p>
 
           {ttsVoices.length > 0 && (
-            <select
-              className="w-full text-sm rounded-lg px-2 py-1.5 bg-stone-100 dark:bg-stone-700 text-stone-700 dark:text-stone-200 border-none outline-none cursor-pointer mb-3"
+            <CustomSelect
+              className="mb-3"
               value={ttsSelectedVoice?.name ?? ''}
-              onChange={(e) => {
-                const v = ttsVoices.find((v) => v.name === e.target.value)
+              options={ttsVoices.map((v) => ({
+                value: v.name,
+                label: v.name.replace(/^(Google|Microsoft|Apple)\s*/i, ''),
+              }))}
+              onChange={(name) => {
+                const v = ttsVoices.find((v) => v.name === name)
                 if (v) onTTSVoiceChange(v)
               }}
-              aria-label="選擇語音"
-            >
-              {ttsVoices.map((v) => (
-                <option key={v.name} value={v.name}>
-                  {v.name.replace(/^(Google|Microsoft|Apple)\s*/i, '')}
-                </option>
-              ))}
-            </select>
+              ariaLabel="選擇語音"
+            />
           )}
 
           <div className="flex items-center gap-2 mb-3">
@@ -232,9 +324,9 @@ const SettingsPanel = ({
                 : 'bg-stone-100 dark:bg-stone-700 text-stone-600 dark:text-stone-300 hover:bg-stone-200 dark:hover:bg-stone-600'
             }`}
             onClick={ttsPlaying ? onTTSStop : onTTSPlay}
-            aria-label={ttsPlaying ? '停止朗讀' : '朗讀本頁'}
+            aria-label={ttsPlaying ? '停止朗讀' : '開始朗讀'}
           >
-            {ttsPlaying ? '⏹ 停止朗讀' : '🔊 朗讀本頁'}
+            {ttsPlaying ? '⏹ 停止朗讀' : '🔊 開始朗讀'}
           </button>
         </section>
       </div>
