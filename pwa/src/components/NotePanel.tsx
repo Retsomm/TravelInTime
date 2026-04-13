@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useRef, useState, useEffect } from 'react'
 import { useAnnotationStore } from '../store/useAnnotationStore'
 import type { Annotation } from '../store/useAnnotationStore'
 
@@ -6,7 +6,7 @@ const COLORS = [
   { label: '黃', value: '#eab308' },
   { label: '綠', value: '#22c55e' },
   { label: '藍', value: '#3b82f6' },
-  { label: '粉', value: '#ec4899' },
+  { label: '粉', value: '#f9b9d7' },
   { label: '橘', value: '#f97316' },
 ]
 
@@ -28,8 +28,9 @@ const formatDate = (ts: number) =>
   })
 
 const exportAnnotations = (selected: Annotation[], bookTitle: string) => {
+  const sorted = [...selected].sort((a, b) => a.createdAt - b.createdAt)
   const grouped = new Map<string, Annotation[]>()
-  selected.forEach((a) => {
+  sorted.forEach((a) => {
     const ch = a.chapter || '未分類'
     if (!grouped.has(ch)) grouped.set(ch, [])
     grouped.get(ch)!.push(a)
@@ -75,9 +76,11 @@ const NotePanel = ({ onNavigate, onChangeColor, onRemoveAnnotation, bookTitle, e
   const allSelected = annotations.length > 0 && selectedIds.size === annotations.length
   const someSelected = selectedIds.size > 0 && !allSelected
 
-  if (selectAllRef.current) {
-    selectAllRef.current.indeterminate = someSelected
-  }
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = someSelected
+    }
+  }, [someSelected])
 
   const toggleSelectAll = () => {
     setSelectedIds(allSelected ? new Set() : new Set(annotations.map((a) => a.id)))

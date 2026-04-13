@@ -326,7 +326,7 @@ const SettingsPanel = ({
             onClick={ttsPlaying ? onTTSStop : onTTSPlay}
             aria-label={ttsPlaying ? '停止朗讀' : '開始朗讀'}
           >
-            {ttsPlaying ? '⏹ 停止朗讀' : '🔊 開始朗讀'}
+            {ttsPlaying ? '⏹ 停止朗讀' : '開始朗讀'}
           </button>
         </section>
       </div>

@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react'
+import { useState, useRef, useEffect } from 'react'
 
 const ALLOWED = /Meijia|Tingting|美佳|婷婷/i
 
@@ -52,7 +52,7 @@ const useTTS = () => {
   }, [])
 
   // 建立並播放 utterance（內部用，使用當前 refs 值）
-  const createAndPlay = useCallback((text: string) => {
+  const createAndPlay = (text: string) => {
     const generation = ++generationRef.current
     window.speechSynthesis.cancel()
 
@@ -84,18 +84,18 @@ const useTTS = () => {
 
     utteranceRef.current = utterance
     window.speechSynthesis.speak(utterance)
-  }, [])
+  }
 
-  const stop = useCallback(() => {
+  const stop = () => {
     generationRef.current++ // 令所有舊 callback 失效
     window.speechSynthesis.cancel()
     utteranceRef.current = null
     playingRef.current = false
     setPlaying(false)
-  }, [])
+  }
 
   // onBoundary：每個 word boundary 時回呼，參數為在本次 speak() 文字中的絕對位置
-  const speak = useCallback((
+  const speak = (
     text: string,
     onEnd?: () => void,
     onBoundary?: (charIdx: number) => void,
@@ -109,10 +109,10 @@ const useTTS = () => {
     playingRef.current = true
     setPlaying(true)
     createAndPlay(text)
-  }, [createAndPlay])
+  }
 
   // 語速變更：若正在朗讀，從當前位置重啟（不觸發 onEnd、不重置 onBoundary）
-  const handleSetRate = useCallback((newRate: number) => {
+  const handleSetRate = (newRate: number) => {
     setRate(newRate)
     rateRef.current = newRate
 
@@ -126,7 +126,7 @@ const useTTS = () => {
     charIndexRef.current = 0
     // playing 狀態維持 true，直接重建 utterance
     createAndPlay(remaining)
-  }, [createAndPlay])
+  }
 
   return { playing, speak, stop, voices, selectedVoice, setSelectedVoice, rate, setRate: handleSetRate }
 }

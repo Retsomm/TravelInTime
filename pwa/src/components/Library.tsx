@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { BookRecord } from '../hooks/useLibrary'
 
 const IconSun = () => (
@@ -169,11 +169,13 @@ const Library = ({
     }
   }
 
+  const handleCancelRemove = () => setPendingRemove(null)
+
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
     if (!files || files.length === 0) return
     const fileArray = Array.from(files)
-    e.target.value = ''
+    if (fileInputRef.current) fileInputRef.current.value = ''
     setLoading(true)
     try {
       await onAddBooks(fileArray)
@@ -185,6 +187,11 @@ const Library = ({
   }
 
   const triggerPicker = () => fileInputRef.current?.click()
+
+  const sortedRecords = useMemo(
+    () => [...records].sort((a, b) => b.lastOpenedAt - a.lastOpenedAt),
+    [records]
+  )
 
   // 無書籍時顯示原始歡迎畫面
   if (records.length === 0) {
@@ -228,7 +235,7 @@ const Library = ({
         <ConfirmModal
           bookTitle={pendingRemove.title}
           onConfirm={handleConfirmRemove}
-          onCancel={() => setPendingRemove(null)}
+          onCancel={handleCancelRemove}
         />
       )}
       <div className="min-h-screen flex flex-col bg-stone-50 dark:bg-gray-900">
@@ -260,7 +267,7 @@ const Library = ({
           書庫 · 共 {records.length} 本
         </p>
         <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-4">
-          {[...records].sort((a, b) => b.lastOpenedAt - a.lastOpenedAt).map((r) => (
+          {sortedRecords.map((r) => (
             <BookCard
               key={r.id}
               record={r}

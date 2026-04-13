@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useRef, useState, useEffect } from 'react'
 import { useAnnotationStore } from '../store/useAnnotationStore'
 import type { Annotation } from '../store/useAnnotationStore'
 
@@ -6,7 +6,7 @@ const COLORS = [
   { label: '黃', value: '#eab308' },
   { label: '綠', value: '#22c55e' },
   { label: '藍', value: '#3b82f6' },
-  { label: '粉', value: '#ec4899' },
+  { label: '粉', value: '#f9b9d7' },
   { label: '橘', value: '#f97316' },
 ]
 
@@ -27,8 +27,9 @@ const formatDate = (ts: number) =>
   })
 
 const exportAnnotations = (selected: Annotation[], bookTitle: string) => {
+  const sorted = [...selected].sort((a, b) => a.createdAt - b.createdAt)
   const grouped = new Map<string, Annotation[]>()
-  selected.forEach((a) => {
+  sorted.forEach((a) => {
     const ch = a.chapter || '未分類'
     if (!grouped.has(ch)) grouped.set(ch, [])
     grouped.get(ch)!.push(a)
@@ -74,10 +75,11 @@ const NotePanel = ({ onNavigate, onChangeColor, onRemoveAnnotation, bookTitle }:
   const allSelected = annotations.length > 0 && selectedIds.size === annotations.length
   const someSelected = selectedIds.size > 0 && !allSelected
 
-  // 更新全選 checkbox 的 indeterminate 狀態
-  if (selectAllRef.current) {
-    selectAllRef.current.indeterminate = someSelected
-  }
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = someSelected
+    }
+  }, [someSelected])
 
   const toggleSelectAll = () => {
     setSelectedIds(allSelected ? new Set() : new Set(annotations.map((a) => a.id)))
@@ -149,7 +151,6 @@ const NotePanel = ({ onNavigate, onChangeColor, onRemoveAnnotation, bookTitle }:
                     onNavigate(a.cfi)
                   }}
                 >
-                  {/* 勾選框 */}
                   <input
                     type="checkbox"
                     checked={selectedIds.has(a.id)}
@@ -157,8 +158,6 @@ const NotePanel = ({ onNavigate, onChangeColor, onRemoveAnnotation, bookTitle }:
                     onClick={(e) => e.stopPropagation()}
                     className="mt-1 shrink-0 accent-indigo-500 cursor-pointer"
                   />
-
-                  {/* 顏色點 */}
                   <button
                     className="mt-1 shrink-0 w-3.5 h-3.5 rounded-full border border-black/10 hover:scale-125 transition-transform"
                     style={{ backgroundColor: a.color }}
@@ -169,7 +168,6 @@ const NotePanel = ({ onNavigate, onChangeColor, onRemoveAnnotation, bookTitle }:
                     aria-label="更換顏色"
                     title="點擊更換顏色"
                   />
-
                   <div className="flex-1 min-w-0">
                     <p className="text-sm text-stone-700 dark:text-stone-200 leading-relaxed break-words line-clamp-3">
                       {a.text}
@@ -180,7 +178,6 @@ const NotePanel = ({ onNavigate, onChangeColor, onRemoveAnnotation, bookTitle }:
                       </p>
                     ) : null}
                   </div>
-
                   <button
                     className="shrink-0 inline-flex items-center justify-center w-6 h-6 rounded-full border border-stone-200 dark:border-stone-600 bg-stone-100 text-stone-500 hover:text-red-500 hover:bg-red-50 dark:bg-stone-700 dark:text-stone-300 dark:hover:text-red-400 dark:hover:bg-red-500/10 transition text-xs ml-1 mt-0.5"
                     onClick={(e) => {
@@ -199,7 +196,6 @@ const NotePanel = ({ onNavigate, onChangeColor, onRemoveAnnotation, bookTitle }:
                   </button>
                 </div>
 
-                {/* 換色面板 */}
                 {pickerOpenId === a.id && (
                   <div className="flex gap-1.5 px-4 pb-2" onClick={(e) => e.stopPropagation()}>
                     {COLORS.map((c) => (

@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react'
+import { useState, useRef, useEffect } from 'react'
 
 const ALLOWED = /Meijia|Tingting|美佳|婷婷/i
 
@@ -38,7 +38,7 @@ const useTTS = () => {
   useEffect(() => { selectedVoiceRef.current = selectedVoice }, [selectedVoice])
 
   // iOS keepalive：定期 pause + resume 防止系統在 15 秒後靜默語音
-  const startKeepalive = useCallback(() => {
+  const startKeepalive = () => {
     if (keepaliveTimerRef.current !== null) return
     keepaliveTimerRef.current = setInterval(() => {
       if (!playingRef.current) return
@@ -46,14 +46,14 @@ const useTTS = () => {
       window.speechSynthesis.pause()
       window.speechSynthesis.resume()
     }, IOS_KEEPALIVE_INTERVAL)
-  }, [])
+  }
 
-  const stopKeepalive = useCallback(() => {
+  const stopKeepalive = () => {
     if (keepaliveTimerRef.current !== null) {
       clearInterval(keepaliveTimerRef.current)
       keepaliveTimerRef.current = null
     }
-  }, [])
+  }
 
   useEffect(() => {
     const load = () => {
@@ -80,7 +80,7 @@ const useTTS = () => {
 
   // iOS visibilitychange：頁面回到前台時，若正在播放則呼叫 resume() 恢復被系統暫停的語音
   // 手機版強化：隱藏時記錄狀態，復出時嘗試恢復
-  const handleVisibilityChange = useCallback(() => {
+  const handleVisibilityChange = () => {
     const isHidden = document.visibilityState === 'hidden'
     if (isHidden) {
       console.log('[TTS] 頁面進入背景', { playing: playingRef.current })
@@ -99,7 +99,7 @@ const useTTS = () => {
         startKeepalive()
       }
     }
-  }, [startKeepalive])
+  }
 
   useEffect(() => {
     document.addEventListener('visibilitychange', handleVisibilityChange)
@@ -107,7 +107,7 @@ const useTTS = () => {
   }, [handleVisibilityChange])
 
   // 建立並播放 utterance（內部用，使用當前 refs 值）
-  const createAndPlay = useCallback((text: string) => {
+  const createAndPlay = (text: string) => {
     const generation = ++generationRef.current
     window.speechSynthesis.cancel()
 
@@ -187,9 +187,9 @@ const useTTS = () => {
     console.log('[TTS] speak()', { generation, textLength: text.length, offset: textOffsetRef.current, voice: voice?.name })
     window.speechSynthesis.speak(utterance)
     startKeepalive()
-  }, [startKeepalive, stopKeepalive])
+  }
 
-  const stop = useCallback(() => {
+  const stop = () => {
     console.log('[TTS] stop() 被呼叫', { generation: generationRef.current })
     generationRef.current++ // 令所有舊 callback 失效
     stopKeepalive()
@@ -197,15 +197,15 @@ const useTTS = () => {
     utteranceRef.current = null
     playingRef.current = false
     setPlaying(false)
-  }, [stopKeepalive])
+  }
 
   // 將文本分割為適合 utterance 的區塊（某些行動浏覽器對文字長度有限制）
-  const splitTextByLength = useCallback((text: string): string[] => {
+  const splitTextByLength = (text: string): string[] => {
     if (text.length <= MAX_UTTERANCE_LENGTH) return [text]
-    
+
     const chunks: string[] = []
     let remaining = text
-    
+
     while (remaining.length > 0) {
       let chunk = remaining.slice(0, MAX_UTTERANCE_LENGTH)
       // 嘗試在標點符號處斷開（避免中途截斷詞語）
@@ -217,20 +217,20 @@ const useTTS = () => {
         chunk.lastIndexOf('；'),
         chunk.lastIndexOf('\n')
       )
-      
+
       if (lastPunctIdx > MAX_UTTERANCE_LENGTH * 0.7) {
         chunk = chunk.slice(0, lastPunctIdx + 1)
       }
-      
+
       chunks.push(chunk)
       remaining = remaining.slice(chunk.length)
     }
-    
+
     return chunks.length > 0 ? chunks : [text]
-  }, [])
+  }
 
   // onBoundary：每個 word boundary 時回呼，參數為在本次 speak() 文字中的絕對位置
-  const speak = useCallback((
+  const speak = (
     text: string,
     onEnd?: () => void,
     onBoundary?: (charIdx: number) => void,
@@ -243,7 +243,7 @@ const useTTS = () => {
     onBoundaryRef.current = onBoundary
     playingRef.current = true
     setPlaying(true)
-    
+
     // 檢查文本長度，必要時分割
     const chunks = splitTextByLength(text)
     if (chunks.length > 1) {
@@ -253,10 +253,10 @@ const useTTS = () => {
     } else {
       createAndPlay(text)
     }
-  }, [createAndPlay, splitTextByLength])
+  }
 
   // 語速變更：若正在朗讀，從當前位置重啟（不觸發 onEnd、不重置 onBoundary）
-  const handleSetRate = useCallback((newRate: number) => {
+  const handleSetRate = (newRate: number) => {
     setRate(newRate)
     rateRef.current = newRate
 
@@ -270,7 +270,7 @@ const useTTS = () => {
     charIndexRef.current = 0
     // playing 狀態維持 true，直接重建 utterance
     createAndPlay(remaining)
-  }, [createAndPlay])
+  }
 
   return { playing, speak, stop, voices, selectedVoice, setSelectedVoice, rate, setRate: handleSetRate }
 }

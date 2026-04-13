@@ -77,7 +77,7 @@ const HIGHLIGHT_COLORS = [
   { label: '黃', value: '#eab308' },
   { label: '綠', value: '#22c55e' },
   { label: '藍', value: '#3b82f6' },
-  { label: '粉', value: '#ec4899' },
+  { label: '粉', value: '#f9b9d7' },
   { label: '橘', value: '#f97316' },
 ]
 
@@ -111,6 +111,53 @@ interface Props {
   onBack: () => void
   darkMode: boolean
   onToggleDark: () => void
+}
+
+// epub.js prototype patch helpers（移到元件外；使用 Proxy.apply trap 完全避免 this 關鍵字）
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const patchRenditionPrototype = (renditionProto: any) => {
+  if (!renditionProto.injectIdentifier || renditionProto._injectIdentifierGuard) return
+  const orig = renditionProto.injectIdentifier
+  renditionProto.injectIdentifier = new Proxy(orig, {
+    apply(target, thisArg: { book?: { packaging?: unknown } }, args: [Document, unknown]) {
+      if (!thisArg.book?.packaging) return args[0]
+      return target.apply(thisArg, args)
+    },
+  })
+  renditionProto._injectIdentifierGuard = true
+}
+
+const patchIframeViewPrototype = (proto: Record<string, unknown>) => {
+  if (!proto._nullRangeGuard) {
+    const origUnderline = proto.underline as (...a: unknown[]) => unknown
+    proto.underline = new Proxy(origUnderline, {
+      apply(target, thisArg: Record<string, unknown>, args: unknown[]) {
+        const cfiRange = args[0] as string
+        const c = thisArg.contents as { range: (cfi: string) => Range | null } | undefined
+        if (!c) return null
+        const range = c.range(cfiRange)
+        if (!range) {
+          console.warn('[Annotation] CFI 解析失敗，略過建立 underline（可能為舊版無效資料）:', cfiRange)
+          return null
+        }
+        return target.apply(thisArg, args)
+      },
+    })
+    proto._nullRangeGuard = true
+  }
+  if (!proto._reframeGuard) {
+    const origReframe = proto.reframe as ((...a: unknown[]) => unknown) | undefined
+    if (typeof origReframe === 'function') {
+      proto.reframe = new Proxy(origReframe, {
+        apply(target, thisArg: unknown, args: unknown[]) {
+          try { return target.apply(thisArg, args) } catch (e) {
+            console.warn('[epubjs] reframe null range 異常，已略過:', e)
+          }
+        },
+      })
+    }
+    proto._reframeGuard = true
+  }
 }
 
 const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => {
@@ -158,7 +205,7 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
   const nextPageRef = useRef<() => void>(() => {})
 
   // 背景逐章渲染以取得精確全書頁數（反映當前字型、字距、行距）
-  const scanAllChapterPages = useCallback(async () => {
+  const scanAllChapterPages = async () => {
     const book = bookRef.current
     const viewer = viewerRef.current
     if (!book || !viewer) return
@@ -166,7 +213,7 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
     scanAbortRef.current.aborted = true
     const token = { aborted: false }
     scanAbortRef.current = token
-    chapterPagesRef.current.clear()
+    chapterPagesRef.current = new Map()
 
     const { width, height } = viewer.getBoundingClientRect()
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -216,13 +263,17 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
           const d = loc?.start?.displayed as { page: number; total: number } | undefined
           const idx = item.index as number | undefined
           if (d && idx !== undefined) {
-            chapterPagesRef.current.set(idx, d.total)
-            const known = chapterPagesRef.current
-            const knownValues = [...known.values()]
-            const avg = knownValues.reduce((a, b) => a + b, 0) / knownValues.length
-            let totalPages = 0
-            for (let i = 0; i < spineTotal; i++) totalPages += known.get(i) ?? avg
-            setPageInfo(prev => prev ? { page: prev.page, total: Math.round(totalPages) } : prev)
+            chapterPagesRef.current = new Map(chapterPagesRef.current).set(idx, d.total)
+            // 掃描全部完成才更新 total，避免 avg 隨掃描進度改變造成總頁數持續跳動
+            const scannedCount = chapterPagesRef.current.size
+            if (scannedCount === spineTotal) {
+              const known = chapterPagesRef.current
+              const knownValues = [...known.values()]
+              const avg = knownValues.reduce((a, b) => a + b, 0) / knownValues.length
+              let totalPages = 0
+              for (let i = 0; i < spineTotal; i++) totalPages += known.get(i) ?? avg
+              setPageInfo(prev => prev ? { page: prev.page, total: Math.round(totalPages) } : prev)
+            }
           }
         } catch { /* 略過無法渲染的章節 */ }
         await new Promise<void>(r => setTimeout(r, 0))
@@ -232,12 +283,12 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       try { (hiddenRendition as any).destroy() } catch { /* ignore */ }
     }
-  }, [])
+  }
 
   const triggerScan = useCallback(() => {
     if (scanTimerRef.current) clearTimeout(scanTimerRef.current)
     scanTimerRef.current = setTimeout(scanAllChapterPages, 600)
-  }, [scanAllChapterPages])
+  }, [])
 
   // 同步 darkModeRef
   useEffect(() => { darkModeRef.current = darkMode }, [darkMode])
@@ -348,17 +399,8 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
 
         // epub.js bug 修補：Rendition.injectIdentifier 在 book.destroy() 後 this.book 會變成
         // undefined，若此時仍有非同步 section content hook 在觸發就會 crash。
-        // 在 prototype 上 wrap 一次即覆蓋所有 rendition。
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const renditionProto = Object.getPrototypeOf(rendition) as any
-        if (renditionProto.injectIdentifier && !renditionProto._injectIdentifierGuard) {
-          const origInjectIdentifier = renditionProto.injectIdentifier
-          renditionProto.injectIdentifier = function (this: { book?: { packaging?: unknown } }, doc: Document, section: unknown) {
-            if (!this.book?.packaging) return doc
-            return origInjectIdentifier.call(this, doc, section)
-          }
-          renditionProto._injectIdentifierGuard = true
-        }
+        patchRenditionPrototype(Object.getPrototypeOf(rendition) as any)
 
         // 修復預分頁 ePub 圖片重複問題：epub-container 是 flex 容器，預設 justify-content: center
         // 會將 1258px 的 spread epub-view 置中於 629px 容器，使可視區域落在 x=314~943，
@@ -370,46 +412,7 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
         document.head.appendChild(epubLayoutFix)
 
         rendition.hooks.content.register((view: unknown) => {
-          // hooks.content 的第一個參數是 IframeView（非 Contents）
-          // 利用此時機在 hooks.render（Annotations.inject）執行前修補 IframeView.prototype
-          const proto = Object.getPrototypeOf(view) as Record<string, unknown>
-
-          // epub.js bug 修補：IframeView.underline 未檢查 contents.range() 是否為 null
-          // 若 CFI 在當前章節找不到節點，toRange 回傳 null → Underline(null Range) 被建立
-          // 之後 Pane.render → filteredRanges → this.range.getClientRects() 就會 crash
-          if (!proto._nullRangeGuard) {
-            const origUnderline = proto.underline as (...a: unknown[]) => unknown
-            proto.underline = function (
-              this: Record<string, unknown>,
-              cfiRange: string,
-              ...rest: unknown[]
-            ) {
-              const c = this.contents as { range: (cfi: string) => Range | null } | undefined
-              if (!c) return null
-              const range = c.range(cfiRange)
-              if (!range) {
-                console.warn('[Annotation] CFI 解析失敗，略過建立 underline（可能為舊版無效資料）:', cfiRange)
-                return null
-              }
-              return origUnderline.call(this, cfiRange, ...rest)
-            }
-            proto._nullRangeGuard = true
-          }
-
-          // 第二道防護（prototype 層）：wrap IframeView.prototype.reframe
-          // reframe 在章節跳轉後 layout 更新時呼叫所有 view 的 pane.render()，
-          // 若 Underline 持有 null range 就會 crash；在 prototype 上 wrap 一次即覆蓋所有 view
-          if (!proto._reframeGuard) {
-            const origReframe = proto.reframe as ((...a: unknown[]) => unknown) | undefined
-            if (typeof origReframe === 'function') {
-              proto.reframe = function (this: unknown, ...args: unknown[]) {
-                try { return origReframe.apply(this, args) } catch (e) {
-                  console.warn('[epubjs] reframe null range 異常，已略過:', e)
-                }
-              }
-            }
-            proto._reframeGuard = true
-          }
+          patchIframeViewPrototype(Object.getPrototypeOf(view) as Record<string, unknown>)
 
           const doc = (view as { document: Document }).document
           currentDocRef.current = doc
@@ -489,20 +492,25 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
           if (d) setChapterRemaining(d.total - d.page)
 
           // 全書頁碼（右下角）：以 chapterPagesRef 累計章節真實頁數計算當前位置
+          // total 由背景掃描器負責更新，這裡只更新 page，避免 avg 隨掃描進度改變造成 total 跳動
           const spineIdx = l?.start?.index as number | undefined
           if (d && spineIdx !== undefined) {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const spineTotal: number = (bookRef.current as any)?.spine?.items?.length ?? 1
-            chapterPagesRef.current.set(spineIdx, d.total)
+            chapterPagesRef.current = new Map(chapterPagesRef.current).set(spineIdx, d.total)
             const known = chapterPagesRef.current
             const knownValues = [...known.values()]
             const avg = knownValues.reduce((a, b) => a + b, 0) / knownValues.length
             let prevPages = 0
             for (let i = 0; i < spineIdx; i++) prevPages += known.get(i) ?? avg
-            let totalPages = 0
-            for (let i = 0; i < spineTotal; i++) totalPages += known.get(i) ?? avg
             const globalPage = prevPages + d.page
-            setPageInfo({ page: Math.max(Math.round(globalPage), 1), total: Math.max(Math.round(totalPages), Math.round(globalPage)) })
+            const page = Math.max(Math.round(globalPage), 1)
+            setPageInfo(prev => {
+              if (prev) return { page, total: Math.max(prev.total, page) }
+              let totalPages = 0
+              for (let i = 0; i < spineTotal; i++) totalPages += known.get(i) ?? avg
+              return { page, total: Math.max(Math.round(totalPages), page) }
+            })
           }
         })
 
@@ -593,7 +601,7 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
       setCurrentHref('')
       setBookTitle('')
       setPageInfo(null)
-      chapterPagesRef.current.clear()
+      chapterPagesRef.current = new Map()
       setChapterRemaining(null)
       setAtStart(false)
       setAtEnd(false)
@@ -612,7 +620,7 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
     fontSizeRef.current = fontSize
     try { renditionRef.current?.themes.fontSize(`${fontSize}px`) } catch { /* epubjs 時序問題，忽略 */ }
     triggerScan()
-  }, [fontSize, ready, triggerScan])
+  }, [fontSize, ready])
 
   // 文字排版改變後，重新計算 marks-pane SVG 座標（pane.render 會重呼叫 getClientRects）
   const rerenderAnnotationPane = () => {
@@ -656,7 +664,7 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
     applyToCurrentDoc(doc => applyFontFamilyOverride(doc, fontFamily))
     rerenderAnnotationPane()
     triggerScan()
-  }, [fontFamily, ready, triggerScan])
+  }, [fontFamily, ready])
 
   // 行距（獨立，不影響其他設定）
   useEffect(() => {
@@ -666,7 +674,7 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
     applyToCurrentDoc(doc => applyLineHeightOverride(doc, lineHeight))
     rerenderAnnotationPane()
     triggerScan()
-  }, [lineHeight, ready, triggerScan])
+  }, [lineHeight, ready])
 
   // 字距（獨立，不影響其他設定）
   useEffect(() => {
@@ -676,7 +684,7 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
     applyToCurrentDoc(doc => applyLetterSpacingOverride(doc, letterSpacing))
     rerenderAnnotationPane()
     triggerScan()
-  }, [letterSpacing, ready, triggerScan])
+  }, [letterSpacing, ready])
 
   // 深色模式（獨立，不影響其他設定）
   useEffect(() => {
@@ -706,9 +714,11 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
     renditionRef.current?.next()
   }
 
-  // 保持 ref 指向最新版本，供 iframe 內鍵盤事件使用
-  prevPageRef.current = prevPage
-  nextPageRef.current = nextPage
+  // 保持 ref 指向最新版本，供 iframe 內鍵盤事件使用（useEffect 避免 render 期間 mutation，確保 React Compiler 可正常優化）
+  useEffect(() => {
+    prevPageRef.current = prevPage
+    nextPageRef.current = nextPage
+  }, [prevPage, nextPage])
 
   const handleScriptToggle = () => {
     const newScript: Script = script === 'tc' ? 'sc' : 'tc'
@@ -822,7 +832,7 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
   const togglePanel = (panel: 'notes' | 'chapters' | 'settings') =>
     setActivePanel((cur) => (cur === panel ? null : panel))
 
-  const speakCurrentPage = useCallback(() => {
+  const speakCurrentPage = () => {
     if (!viewerRef.current) return
     const iframe = viewerRef.current.querySelector('iframe')
     if (!iframe?.contentDocument?.body) return
@@ -875,46 +885,47 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
     if (!textToRead.trim()) return
 
     speak(textToRead)
-  }, [speak])
+  }
 
-  const clearSleepTimer = useCallback(() => {
+  const clearSleepTimer = () => {
     if (sleepIntervalRef.current !== null) {
       clearInterval(sleepIntervalRef.current)
       sleepIntervalRef.current = null
     }
     setSleepRemaining(null)
-  }, [])
+  }
 
-  const startSleepTimer = useCallback((minutes: number) => {
+  const startSleepTimer = (minutes: number) => {
     if (sleepIntervalRef.current !== null) {
       clearInterval(sleepIntervalRef.current)
       sleepIntervalRef.current = null
     }
     if (minutes <= 0) { setSleepRemaining(null); return }
-    let remaining = minutes * 60
-    setSleepRemaining(remaining)
+    setSleepRemaining(minutes * 60)
     sleepIntervalRef.current = setInterval(() => {
-      remaining--
-      setSleepRemaining(remaining)
-      if (remaining <= 0) {
-        if (sleepIntervalRef.current !== null) {
-          clearInterval(sleepIntervalRef.current)
-          sleepIntervalRef.current = null
-        }
-        setSleepRemaining(null)
-        stop()
-      }
+      setSleepRemaining(prev => (prev !== null && prev > 0) ? prev - 1 : prev)
     }, 1000)
-  }, [stop])
+  }
 
-  const handleSleepChange = useCallback((minutes: number) => {
+  useEffect(() => {
+    if (sleepRemaining === 0) {
+      if (sleepIntervalRef.current !== null) {
+        clearInterval(sleepIntervalRef.current)
+        sleepIntervalRef.current = null
+      }
+      setSleepRemaining(null)
+      stop()
+    }
+  }, [sleepRemaining, stop])
+
+  const handleSleepChange = (minutes: number) => {
     setSleepMinutes(minutes)
     sleepMinutesRef.current = minutes
     if (playing) {
       if (minutes > 0) startSleepTimer(minutes)
       else clearSleepTimer()
     }
-  }, [playing, startSleepTimer, clearSleepTimer])
+  }
 
   const handleTTSPlay = () => {
     speakCurrentPage()
