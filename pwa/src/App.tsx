@@ -10,7 +10,7 @@ const App = () => {
   const [view, setView] = useState<View>('library')
   const [activeBookUrl, setActiveBookUrl] = useState<string | null>(null)
   const [activeBookId, setActiveBookId] = useState<string>('')
-  const [darkMode, setDarkMode] = useState(false)
+  const [darkMode, setDarkMode] = useState(true)
 
   const handleOpenBook = async (id: string) => {
     const url = await getBookUrl(id)
