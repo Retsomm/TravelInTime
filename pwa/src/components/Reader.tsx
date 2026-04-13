@@ -589,8 +589,12 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
             let selTimer: ReturnType<typeof setTimeout> | null = null
             doc.addEventListener('selectionchange', () => {
               if (selTimer) clearTimeout(selTimer)
-              selTimer = setTimeout(() => {
+              // 立即更新狀態：有非空選取就鎖定，避免 touchend 翻頁
+              const currentSel = doc.defaultView?.getSelection()
+              if (currentSel && !currentSel.isCollapsed && currentSel.rangeCount > 0) {
                 isSelectingRef.current = true
+              }
+              selTimer = setTimeout(() => {
                 const sel = doc.defaultView?.getSelection()
                 if (!sel || sel.isCollapsed || !sel.rangeCount) {
                   isSelectingRef.current = false
