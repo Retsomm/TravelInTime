@@ -56,7 +56,7 @@ const BookCard = ({ record, getCoverDataUrl, onOpen, onRemove }: CardProps) => {
 
   return (
     <div
-      className="group relative cursor-pointer rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow aspect-[2/3]"
+      className="group relative cursor-pointer overflow-hidden shadow-sm hover:shadow-md transition-shadow aspect-[2/3]"
       onClick={() => onOpen(record.id)}
     >
       {coverUrl ? (

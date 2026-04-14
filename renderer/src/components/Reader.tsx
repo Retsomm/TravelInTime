@@ -205,7 +205,7 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
   const nextPageRef = useRef<() => void>(() => {})
 
   // 背景逐章渲染以取得精確全書頁數（反映當前字型、字距、行距）
-  const scanAllChapterPages = async () => {
+  const scanAllChapterPages = useCallback(async () => {
     const book = bookRef.current
     const viewer = viewerRef.current
     if (!book || !viewer) return
@@ -283,12 +283,12 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       try { (hiddenRendition as any).destroy() } catch { /* ignore */ }
     }
-  }
+  }, [])
 
   const triggerScan = useCallback(() => {
     if (scanTimerRef.current) clearTimeout(scanTimerRef.current)
     scanTimerRef.current = setTimeout(scanAllChapterPages, 600)
-  }, [])
+  }, [scanAllChapterPages])
 
   // 同步 darkModeRef
   useEffect(() => { darkModeRef.current = darkMode }, [darkMode])

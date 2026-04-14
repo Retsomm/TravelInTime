@@ -139,7 +139,7 @@ const BookInfoPanel = ({ record, getCoverDataUrl, embedded }: { record: BookReco
   const body = (
     <div className="overflow-y-auto flex flex-col">
       <div className="px-5 pt-5 pb-3">
-        <div className="aspect-[2/3] rounded-xl overflow-hidden shadow-md">
+        <div className="aspect-[2/3] overflow-hidden shadow-md">
           {coverUrl ? (
             <img src={coverUrl} alt={record.title} className="w-full h-full object-cover" />
           ) : (
@@ -202,20 +202,22 @@ const patchRenditionPrototype = (renditionProto: any) => {
 
 const patchIframeViewPrototype = (proto: Record<string, unknown>) => {
   if (!proto._nullRangeGuard) {
-    const origUnderline = proto.underline as (...a: unknown[]) => unknown
-    proto.underline = new Proxy(origUnderline, {
-      apply(target, thisArg: Record<string, unknown>, args: unknown[]) {
-        const cfiRange = args[0] as string
-        const c = thisArg.contents as { range: (cfi: string) => Range | null } | undefined
-        if (!c) return null
-        const range = c.range(cfiRange)
-        if (!range) {
-          console.warn('[Annotation] CFI 解析失敗，略過建立 underline（可能為舊版無效資料）:', cfiRange)
-          return null
-        }
-        return target.apply(thisArg, args)
-      },
-    })
+    const origUnderline = proto.underline
+    if (typeof origUnderline === 'function') {
+      proto.underline = new Proxy(origUnderline as (...a: unknown[]) => unknown, {
+        apply(target, thisArg: Record<string, unknown>, args: unknown[]) {
+          const cfiRange = args[0] as string
+          const c = thisArg.contents as { range: (cfi: string) => Range | null } | undefined
+          if (!c) return null
+          const range = c.range(cfiRange)
+          if (!range) {
+            console.warn('[Annotation] CFI 解析失敗，略過建立 underline（可能為舊版無效資料）:', cfiRange)
+            return null
+          }
+          return target.apply(thisArg, args)
+        },
+      })
+    }
     proto._nullRangeGuard = true
   }
   if (!proto._reframeGuard) {
@@ -252,8 +254,8 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
   const [toc, setToc] = useState<TocItem[]>([])
   const [currentHref, setCurrentHref] = useState('')
   const [ready, setReady] = useState(false)
-  const [popup, setPopup] = useState<{ x: number; y: number; cfi: string; text: string } | null>(null)
-  const [editPopup, setEditPopup] = useState<{ x: number; y: number; annotationId: string } | null>(null)
+  const [popup, setPopup] = useState<{ left: number; top: number; cfi: string; text: string } | null>(null)
+  const [editPopup, setEditPopup] = useState<{ left: number; top: number; annotationId: string } | null>(null)
   const [bookTitle, setBookTitle] = useState('')
   const [pageInfo, setPageInfo] = useState<{ page: number; total: number } | null>(null)
   const [chapterRemaining, setChapterRemaining] = useState<number | null>(null)
@@ -283,11 +285,13 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
   // 供鍵盤事件存取最新的 prevPage/nextPage（避免閉包 stale 問題）
   const prevPageRef = useRef<() => void>(() => {})
   const nextPageRef = useRef<() => void>(() => {})
+  // 供 prevPage/nextPage 讀取最新 ready 狀態（避免 React Compiler 記憶化閉包捕捉到舊值）
+  const readyRef = useRef(false)
   // 滑動翻頁起始點
   const swipeStartRef = useRef<{ x: number; y: number } | null>(null)
 
   // 背景逐章渲染以取得精確全書頁數（反映當前字型、字距、行距）
-  const scanAllChapterPages = async () => {
+  const scanAllChapterPages = useCallback(async () => {
     const book = bookRef.current
     const viewer = viewerRef.current
     if (!book || !viewer) return
@@ -365,12 +369,12 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       try { (hiddenRendition as any).destroy() } catch { /* ignore */ }
     }
-  }
+  }, [])
 
   const triggerScan = useCallback(() => {
     if (scanTimerRef.current) clearTimeout(scanTimerRef.current)
     scanTimerRef.current = setTimeout(scanAllChapterPages, 600)
-  }, [])
+  }, [scanAllChapterPages])
 
   // 同步 darkModeRef
   useEffect(() => { darkModeRef.current = darkMode }, [darkMode])
@@ -432,7 +436,11 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
         }
 
         setPopup(null)
-        setEditPopup({ x, y, annotationId })
+        setEditPopup({
+          left: Math.min(Math.max(x, 115), window.innerWidth - 115),
+          top: y - 52 >= 8 ? y - 52 : Math.min(y + 8, window.innerHeight - 52),
+          annotationId,
+        })
       },
       `ann-${ann.id}`,
       { stroke: ann.color, 'stroke-opacity': '1', 'stroke-width': '1.5', fill: 'none' }
@@ -461,11 +469,11 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     } catch {}
   }
 
-  const removePendingAnnotation = (rendition: Rendition) => {
+  const removePendingAnnotation = useCallback((rendition: Rendition) => {
     if (!pendingAnnotationCfiRef.current) return
     try { rendition.annotations.remove(pendingAnnotationCfiRef.current, 'underline') } catch {}
     pendingAnnotationCfiRef.current = null
-  }
+  }, [])
 
   // 初始化書本
   useEffect(() => {
@@ -582,7 +590,9 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
             const dy = e.changedTouches[0].clientY - start.y
             swipeStartRef.current = null
             if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy) * 1.5) return
-            if (isSelectingRef.current) return
+            // 有實際選取範圍（長按選字）時不翻頁
+            const currentSel = doc.defaultView?.getSelection()
+            if (currentSel && !currentSel.isCollapsed && currentSel.rangeCount > 0) return
             const isRtl = readingDirectionRef.current === 'rtl'
             if ((dx < 0) !== isRtl) nextPageRef.current()
             else prevPageRef.current()
@@ -616,9 +626,11 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
                 if (renditionRef.current) addPendingAnnotation(renditionRef.current, cfi)
                 sel.removeAllRanges()
                 popupSetTime = Date.now()
+                const rawX = iframeRect.left + rect.left + rect.width / 2
+                const rawY = Math.max(iframeRect.top + rect.top, 80)
                 setPopup({
-                  x: iframeRect.left + rect.left + rect.width / 2,
-                  y: Math.max(iframeRect.top + rect.top, 80),
+                  left: Math.min(Math.max(rawX, 98), window.innerWidth - 98),
+                  top: rawY - 52 >= 8 ? rawY - 52 : Math.min(rawY + 8, window.innerHeight - 52),
                   cfi,
                   text,
                 })
@@ -661,9 +673,11 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
           const iframeRect = iframe?.getBoundingClientRect()
           if (!iframeRect) return
 
+          const rawX = iframeRect.left + rect.left + rect.width / 2
+          const rawY = iframeRect.top + rect.top
           setPopup({
-            x: iframeRect.left + rect.left + rect.width / 2,
-            y: iframeRect.top + rect.top,
+            left: Math.min(Math.max(rawX, 98), window.innerWidth - 98),
+            top: rawY - 52 >= 8 ? rawY - 52 : Math.min(rawY + 8, window.innerHeight - 52),
             cfi: cfiRange,
             text,
           })
@@ -888,19 +902,22 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     if (doc) applyDarkOverride(doc, darkMode)
   }, [darkMode, ready])
 
-  const prevPage = () => {
-    if (!ready) return
+  // 同步 ready state 到 ref，讓 prevPage/nextPage 不需捕捉 ready 就能讀到最新值
+  useEffect(() => { readyRef.current = ready }, [ready])
+
+  const prevPage = useCallback(() => {
+    if (!readyRef.current) return
     if (renditionRef.current) removePendingAnnotation(renditionRef.current)
     setPopup(null)
     renditionRef.current?.prev()
-  }
+  }, [removePendingAnnotation])
 
-  const nextPage = () => {
-    if (!ready) return
+  const nextPage = useCallback(() => {
+    if (!readyRef.current) return
     if (renditionRef.current) removePendingAnnotation(renditionRef.current)
     setPopup(null)
     renditionRef.current?.next()
-  }
+  }, [removePendingAnnotation])
 
   // 保持 ref 指向最新版本，供 iframe 內鍵盤事件使用（useEffect 避免 render 期間 mutation，確保 React Compiler 可正常優化）
   useEffect(() => {
@@ -1267,9 +1284,9 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
             const dy = e.changedTouches[0].clientY - start.y
             swipeStartRef.current = null
             if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy) * 1.5) return
-            const isRtl = readingDirection === 'rtl'
-            if ((dx < 0) !== isRtl) nextPage()
-            else prevPage()
+            const isRtl = readingDirectionRef.current === 'rtl'
+            if ((dx < 0) !== isRtl) nextPageRef.current()
+            else prevPageRef.current()
           }}
         >
           {!ready && (
@@ -1311,11 +1328,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
           {editPopup && (
             <div
               className="fixed z-50 flex items-center gap-1.5 p-2 bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-stone-200 dark:border-stone-700"
-              style={{
-                left: Math.min(Math.max(editPopup.x, 115), window.innerWidth - 115),
-                top: editPopup.y - 52 >= 8 ? editPopup.y - 52 : Math.min(editPopup.y + 8, window.innerHeight - 52),
-                transform: 'translateX(-50%)',
-              }}
+              style={{ left: editPopup.left, top: editPopup.top, transform: 'translateX(-50%)' }}
               onClick={(e) => e.stopPropagation()}
               onTouchStart={(e) => e.stopPropagation()}
             >
@@ -1344,11 +1357,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
           {popup && (
             <div
               className="fixed z-50 flex gap-1.5 p-2 bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-stone-200 dark:border-stone-700"
-              style={{
-                left: Math.min(Math.max(popup.x, 98), window.innerWidth - 98),
-                top: popup.y - 52 >= 8 ? popup.y - 52 : Math.min(popup.y + 8, window.innerHeight - 52),
-                transform: 'translateX(-50%)',
-              }}
+              style={{ left: popup.left, top: popup.top, transform: 'translateX(-50%)' }}
               onClick={(e) => e.stopPropagation()}
               onTouchStart={(e) => e.stopPropagation()}
             >
