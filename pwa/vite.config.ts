@@ -1,13 +1,16 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import babel from '@rolldown/plugin-babel'
+import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
   plugins: [
-    react({
-      babel: {
-        plugins: [['babel-plugin-react-compiler', { target: '18' }]],
-      },
+    tailwindcss(),
+    react(),
+    babel({
+      include: /\.[jt]sx?$/,
+      plugins: [['babel-plugin-react-compiler', { target: '18' }]],
     }),
     VitePWA({
       registerType: 'autoUpdate',
@@ -64,10 +67,10 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        manualChunks: {
-          epubjs: ['epubjs'],
-          opencc: ['opencc-js'],
-          vendor: ['react', 'react-dom', 'zustand'],
+        manualChunks: (id) => {
+          if (id.includes('epubjs')) return 'epubjs'
+          if (id.includes('opencc-js')) return 'opencc'
+          if (id.includes('react') || id.includes('zustand')) return 'vendor'
         },
       },
     },
