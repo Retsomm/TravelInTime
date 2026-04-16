@@ -44,12 +44,9 @@ const exportAnnotations = (selected: Annotation[], bookTitle: string) => {
   ]
 
   grouped.forEach((anns, chapter) => {
-    lines.push('─'.repeat(28))
     lines.push(chapter)
-    lines.push('─'.repeat(28))
     anns.forEach((a) => {
       lines.push(`• ${a.text}`)
-      lines.push(`  ${formatDate(a.createdAt)}`)
       lines.push('')
     })
   })
