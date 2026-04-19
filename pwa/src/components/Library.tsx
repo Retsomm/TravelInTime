@@ -304,7 +304,7 @@ const Library = ({ records, getCoverDataUrl, onAddBooks, onOpenBook, onRemoveBoo
                 onClick={() => fileInputRef.current?.click()}
                 disabled={loading}
               >
-                <IconPlus /> {loading ? '載入中…' : '匯入 ePub'}
+                <IconPlus /> <span className="hidden md:inline">{loading ? '載入中…' : '匯入 ePub'}</span>
               </button>
               <input ref={fileInputRef} type="file" accept=".epub" multiple className="hidden" onChange={handleFileChange} />
             </div>
