@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <radialGradient id="bg" cx="38%" cy="32%" r="72%">
+      <stop offset="0%" stop-color="#c96a3a"/>
+      <stop offset="100%" stop-color="#7a2e10"/>
+    </radialGradient>
+    <radialGradient id="glow" cx="50%" cy="42%" r="55%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.10"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Background rounded square -->
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <!-- Subtle light glow -->
+  <rect width="512" height="512" rx="112" fill="url(#glow)"/>
+
+  <!-- Open book — left page -->
+  <path d="M256,138 C232,142 192,154 166,174 L166,362 C194,346 228,338 256,338 Z"
+        fill="#faf6f0" opacity="0.97"/>
+  <!-- Open book — right page (slightly darker to show depth) -->
+  <path d="M256,138 C280,142 320,154 346,174 L346,362 C318,346 284,338 256,338 Z"
+        fill="#f0e8de" opacity="0.97"/>
+
+  <!-- Book spine -->
+  <rect x="252" y="136" width="8" height="204" rx="4"
+        fill="#ffffff" opacity="0.45"/>
+
+  <!-- Text lines — left page -->
+  <line x1="192" y1="218" x2="244" y2="212" stroke="#c49070" stroke-width="3" stroke-linecap="round" opacity="0.55"/>
+  <line x1="189" y1="238" x2="244" y2="232" stroke="#c49070" stroke-width="3" stroke-linecap="round" opacity="0.55"/>
+  <line x1="190" y1="258" x2="244" y2="252" stroke="#c49070" stroke-width="3" stroke-linecap="round" opacity="0.55"/>
+  <line x1="191" y1="278" x2="243" y2="272" stroke="#c49070" stroke-width="3" stroke-linecap="round" opacity="0.40"/>
+  <line x1="192" y1="298" x2="238" y2="293" stroke="#c49070" stroke-width="3" stroke-linecap="round" opacity="0.30"/>
+
+  <!-- Text lines — right page -->
+  <line x1="268" y1="212" x2="320" y2="218" stroke="#b07858" stroke-width="3" stroke-linecap="round" opacity="0.55"/>
+  <line x1="268" y1="232" x2="323" y2="238" stroke="#b07858" stroke-width="3" stroke-linecap="round" opacity="0.55"/>
+  <line x1="268" y1="252" x2="322" y2="258" stroke="#b07858" stroke-width="3" stroke-linecap="round" opacity="0.55"/>
+  <line x1="269" y1="272" x2="321" y2="278" stroke="#b07858" stroke-width="3" stroke-linecap="round" opacity="0.40"/>
+  <line x1="270" y1="293" x2="316" y2="298" stroke="#b07858" stroke-width="3" stroke-linecap="round" opacity="0.30"/>
+
+  <!-- Clock circle — centered on book spine top -->
+  <circle cx="256" cy="148" r="38" fill="#1a1411" opacity="0.82"/>
+  <circle cx="256" cy="148" r="33" fill="none" stroke="#faf6f0" stroke-width="2.2" opacity="0.65"/>
+  <!-- Clock tick marks at 12/3/6/9 -->
+  <line x1="256" y1="118" x2="256" y2="123" stroke="#faf6f0" stroke-width="2" stroke-linecap="round" opacity="0.6"/>
+  <line x1="286" y1="148" x2="281" y2="148" stroke="#faf6f0" stroke-width="2" stroke-linecap="round" opacity="0.6"/>
+  <line x1="256" y1="178" x2="256" y2="173" stroke="#faf6f0" stroke-width="2" stroke-linecap="round" opacity="0.6"/>
+  <line x1="226" y1="148" x2="231" y2="148" stroke="#faf6f0" stroke-width="2" stroke-linecap="round" opacity="0.6"/>
+  <!-- Clock hands -->
+  <line x1="256" y1="148" x2="256" y2="130" stroke="#faf6f0" stroke-width="2.8" stroke-linecap="round"/>
+  <line x1="256" y1="148" x2="271" y2="156" stroke="#faf6f0" stroke-width="2.2" stroke-linecap="round"/>
+  <!-- Center dot -->
+  <circle cx="256" cy="148" r="3.5" fill="#faf6f0"/>
+</svg>
