@@ -142,7 +142,7 @@ const Toolbar = ({
   return (
     <div style={{
       display: 'flex', alignItems: 'center', gap: 2, padding: '0 10px',
-      height: 44, borderBottom: `1px solid ${borderCol}`,
+      height: 56, borderBottom: `1px solid ${borderCol}`,
       background: paperBg, flexShrink: 0,
     }}>
       {/* 左：返回 + 書名作者（固定寬度區塊） */}

@@ -111,7 +111,7 @@ const Toolbar = ({
       className="drag-region"
       style={{
         display: 'flex', alignItems: 'center', gap: 2, padding: '0 10px 0 80px',
-        height: 44, borderBottom: `1px solid ${borderCol}`,
+        height: 56, borderBottom: `1px solid ${borderCol}`,
         background: paperBg, flexShrink: 0,
       }}
     >
