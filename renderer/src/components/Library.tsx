@@ -225,8 +225,8 @@ const Library = ({ records, getCoverDataUrl, onAddBooks, onOpenBook, onRemoveBoo
     return (
       <div className="drag-region flex flex-col min-h-screen" style={{ background: paperBg, color: inkCol }}>
         <div className="flex items-center justify-between pl-20 pr-4 py-3">
-          <div className="flex-1" />
-          <button className="no-drag p-2 rounded-full transition" style={{ color: ink3Col }} onClick={onToggleDark}>
+          <h1 style={{ fontFamily: SERIF, fontSize: 17, fontWeight: 500, letterSpacing: '0.01em', color: inkCol }}>Travel in Time</h1>
+          <button className="no-drag p-2 rounded-full transition" style={{ color: ink3Col }} onClick={onToggleDark} aria-label={darkMode ? '切換淺色模式' : '切換深色模式'} title={darkMode ? '切換淺色模式' : '切換深色模式'}>
             {darkMode ? <IconSun /> : <IconMoon />}
           </button>
         </div>
@@ -237,14 +237,15 @@ const Library = ({ records, getCoverDataUrl, onAddBooks, onOpenBook, onRemoveBoo
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             fontFamily: SERIF, fontStyle: 'italic', fontWeight: 700, fontSize: 28,
           }}>T</div>
-          <h1 style={{ fontFamily: SERIF, fontSize: 36, fontWeight: 400, letterSpacing: '-0.01em', marginBottom: 12 }}>
+          <p style={{ fontFamily: SERIF, fontSize: 36, fontWeight: 400, letterSpacing: '-0.01em', marginBottom: 12 }}>
             一段靜謐的閱讀旅程
-          </h1>
+          </p>
           <p style={{ color: ink3Col, fontSize: 15, lineHeight: 1.65, maxWidth: 380, marginBottom: 32 }}>
             匯入您的 ePub 書籍，在字裡行間緩步前行。<br />所有內容僅保存在您的裝置，離線可用。
           </p>
           <button
             className="no-drag flex items-center gap-2 transition"
+            aria-label="匯入 ePub 書籍"
             style={{
               height: 44, padding: '0 22px', borderRadius: 10,
               background: inkCol, color: paperBg,
@@ -281,7 +282,7 @@ const Library = ({ records, getCoverDataUrl, onAddBooks, onOpenBook, onRemoveBoo
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               fontFamily: SERIF, fontStyle: 'italic', fontWeight: 700, fontSize: 16,
             }}>T</div>
-            <span style={{ fontFamily: SERIF, fontSize: 17, fontWeight: 500, letterSpacing: '0.01em' }}>Travel in Time</span>
+            <h1 style={{ fontFamily: SERIF, fontSize: 17, fontWeight: 500, letterSpacing: '0.01em', color: inkCol }}>Travel in Time</h1>
             <span style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', color: ink3Col }}>
               Library
             </span>
@@ -313,7 +314,7 @@ const Library = ({ records, getCoverDataUrl, onAddBooks, onOpenBook, onRemoveBoo
 
           {/* Right actions */}
           <div className="flex items-center gap-2">
-            <button className="no-drag p-2 rounded-full transition" style={{ color: ink3Col }} onClick={onToggleDark} title={darkMode ? '淺色' : '深色'}>
+            <button className="no-drag p-2 rounded-full transition" style={{ color: ink3Col }} onClick={onToggleDark} aria-label={darkMode ? '切換淺色模式' : '切換深色模式'} title={darkMode ? '切換淺色模式' : '切換深色模式'}>
               {darkMode ? <IconSun /> : <IconMoon />}
             </button>
             <button
@@ -326,7 +327,7 @@ const Library = ({ records, getCoverDataUrl, onAddBooks, onOpenBook, onRemoveBoo
               onClick={() => fileInputRef.current?.click()}
               disabled={loading}
             >
-              <IconPlus /> {loading ? '載入中…' : '匯入 ePub'}
+              <IconPlus /> {loading ? '載入中…' : '匯入 ePub 書籍'}
             </button>
             <input ref={fileInputRef} type="file" accept=".epub" multiple className="hidden" onChange={handleFileChange} />
           </div>
