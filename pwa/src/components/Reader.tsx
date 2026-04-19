@@ -1582,12 +1582,11 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
       {/* 手機版底部進度列 */}
       {ready && pageInfo && (
         <div
-          className="md:hidden"
+          className="flex md:hidden items-center"
           style={{
-            height: 32, flexShrink: 0,
+            height: 32, flexShrink: 0, gap: 10, padding: '0 16px',
             borderTop: `1px solid ${darkMode ? '#3a3430' : '#e4ddd0'}`,
             background: darkMode ? '#1a1816' : '#f9f7f2',
-            display: 'flex', alignItems: 'center', gap: 10, padding: '0 16px',
           }}
         >
           <span style={{ fontFamily: MONO, fontSize: 10, color: darkMode ? '#7a706a' : '#9a8f80', whiteSpace: 'nowrap', letterSpacing: '0.04em', flexShrink: 0 }}>
