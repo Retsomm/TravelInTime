@@ -14,7 +14,7 @@ interface RowProps {
   item: TocItem
   depth: number
   index: number
-  currentHref: string
+  activeHref: string | null
   onNavigate: (href: string) => void
   inkCol: string
   ink2Col: string
@@ -23,10 +23,21 @@ interface RowProps {
   accentCol: string
 }
 
-const TocRow = ({ item, depth, index, currentHref, onNavigate, inkCol, ink2Col, ink3Col, paperBg2, accentCol }: RowProps) => {
+const findBestMatch = (items: TocItem[], file: string): string | null => {
+  for (const item of items) {
+    if (item.href.split('#')[0] === file) return item.href
+    if (item.subitems?.length) {
+      const sub = findBestMatch(item.subitems, file)
+      if (sub) return sub
+    }
+  }
+  return null
+}
+
+const TocRow = ({ item, depth, index, activeHref, onNavigate, inkCol, ink2Col, ink3Col, paperBg2, accentCol }: RowProps) => {
   const [open, setOpen] = useState(true)
   const hasChildren = (item.subitems?.length ?? 0) > 0
-  const isActive = item.href.split('#')[0] === currentHref
+  const isActive = item.href === activeHref
 
   return (
     <>
@@ -75,7 +86,7 @@ const TocRow = ({ item, depth, index, currentHref, onNavigate, inkCol, ink2Col, 
           <TocRow
             key={sub.id || sub.href}
             item={sub} depth={depth + 1} index={si}
-            currentHref={currentHref} onNavigate={onNavigate}
+            activeHref={activeHref} onNavigate={onNavigate}
             inkCol={inkCol} ink2Col={ink2Col} ink3Col={ink3Col}
             paperBg2={paperBg2} accentCol={accentCol}
           />
@@ -94,6 +105,7 @@ interface Props {
 }
 
 const ChapterPanel = ({ toc, currentHref, onNavigate, darkMode, embedded }: Props) => {
+  const activeHref = findBestMatch(toc, currentHref)
   const paperBg   = darkMode ? '#1a1816' : '#f9f7f2'
   const paperBg2  = darkMode ? '#231f1c' : '#f1ede4'
   const borderCol = darkMode ? '#3a3430' : '#e4ddd0'
@@ -112,7 +124,7 @@ const ChapterPanel = ({ toc, currentHref, onNavigate, darkMode, embedded }: Prop
             <TocRow
               key={item.id || item.href}
               item={item} depth={0} index={i}
-              currentHref={currentHref} onNavigate={onNavigate}
+              activeHref={activeHref} onNavigate={onNavigate}
               inkCol={inkCol} ink2Col={ink2Col} ink3Col={ink3Col}
               paperBg2={paperBg2} accentCol={accentCol}
             />
