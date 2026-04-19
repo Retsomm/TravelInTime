@@ -1579,27 +1579,29 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
         )}
       </div>
 
-      {/* 手機版底部進度列 */}
-      {ready && pageInfo && (
-        <div
-          className="flex md:hidden items-center"
-          style={{
-            height: 32, flexShrink: 0, gap: 10, padding: '0 16px',
-            borderTop: `1px solid ${darkMode ? '#3a3430' : '#e4ddd0'}`,
-            background: darkMode ? '#1a1816' : '#f9f7f2',
-          }}
-        >
-          <span style={{ fontFamily: MONO, fontSize: 10, color: darkMode ? '#7a706a' : '#9a8f80', whiteSpace: 'nowrap', letterSpacing: '0.04em', flexShrink: 0 }}>
-            第 {pageInfo.page} 頁
-          </span>
-          <div style={{ flex: 1, height: 2, background: darkMode ? '#3a3430' : '#e4ddd0', borderRadius: 2 }}>
-            <div style={{ width: `${Math.min(pageInfo.page / pageInfo.total * 100, 100)}%`, height: '100%', background: 'oklch(0.62 0.14 40)', borderRadius: 2, transition: 'width .3s' }} />
-          </div>
-          <span style={{ fontFamily: MONO, fontSize: 10, color: darkMode ? '#7a706a' : '#9a8f80', whiteSpace: 'nowrap', letterSpacing: '0.04em', flexShrink: 0 }}>
-            / {pageInfo.total} · {Math.round(pageInfo.page / pageInfo.total * 100)}%
-          </span>
-        </div>
-      )}
+      {/* 手機版底部進度列 — 永遠佔位避免 epub 初始化尺寸錯誤 */}
+      <div
+        className="flex md:hidden items-center"
+        style={{
+          height: 32, flexShrink: 0, gap: 10, padding: '0 16px',
+          borderTop: `1px solid ${darkMode ? '#3a3430' : '#e4ddd0'}`,
+          background: darkMode ? '#1a1816' : '#f9f7f2',
+        }}
+      >
+        {ready && pageInfo && (
+          <>
+            <span style={{ fontFamily: MONO, fontSize: 10, color: darkMode ? '#7a706a' : '#9a8f80', whiteSpace: 'nowrap', letterSpacing: '0.04em', flexShrink: 0 }}>
+              第 {pageInfo.page} 頁
+            </span>
+            <div style={{ flex: 1, height: 2, background: darkMode ? '#3a3430' : '#e4ddd0', borderRadius: 2 }}>
+              <div style={{ width: `${Math.min(pageInfo.page / pageInfo.total * 100, 100)}%`, height: '100%', background: 'oklch(0.62 0.14 40)', borderRadius: 2, transition: 'width .3s' }} />
+            </div>
+            <span style={{ fontFamily: MONO, fontSize: 10, color: darkMode ? '#7a706a' : '#9a8f80', whiteSpace: 'nowrap', letterSpacing: '0.04em', flexShrink: 0 }}>
+              / {pageInfo.total} · {Math.round(pageInfo.page / pageInfo.total * 100)}%
+            </span>
+          </>
+        )}
+      </div>
     </div>
   )
 }
