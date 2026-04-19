@@ -73,6 +73,8 @@ export type ActivePanel = 'notes' | 'chapters' | 'settings' | 'bookinfo' | 'mobi
 interface Props {
   onBack: () => void
   bookTitle?: string
+  bookAuthor?: string
+  pageInfo?: { page: number; total: number } | null
   darkMode: boolean
   onToggleDark: () => void
   onToggleNotes: () => void
@@ -83,9 +85,14 @@ interface Props {
   activePanel: ActivePanel
 }
 
+const SERIF = '"Source Serif 4", "Noto Serif TC", Georgia, serif'
+const MONO  = '"JetBrains Mono", ui-monospace, monospace'
+
 const Toolbar = ({
   onBack,
   bookTitle,
+  bookAuthor,
+  pageInfo,
   darkMode,
   onToggleDark,
   onToggleNotes,
@@ -95,95 +102,101 @@ const Toolbar = ({
   onToggleMobilePanel,
   activePanel,
 }: Props) => {
-  return (
-    <div className="flex items-center gap-2 px-4 py-2 border-b border-stone-200 dark:border-stone-700 bg-white dark:bg-gray-800">
-      <button
-        className="p-2 rounded hover:bg-stone-100 dark:hover:bg-stone-700 transition text-stone-600 dark:text-stone-300 shrink-0"
-        onClick={onBack}
-        aria-label="返回書庫"
-        title="返回書庫"
-      >
-        <IconBack />
-      </button>
+  const paperBg   = darkMode ? '#1a1816' : '#f9f7f2'
+  const borderCol = darkMode ? '#3a3430' : '#e4ddd0'
+  const inkCol    = darkMode ? '#e8e0d4' : '#2a2420'
+  const ink3Col   = darkMode ? '#7a706a' : '#9a8f80'
+  const hoverBg   = darkMode ? '#231f1c' : '#f1ede4'
+  const accentBg  = darkMode ? 'rgba(180,100,60,0.18)' : 'rgba(180,100,60,0.10)'
+  const accentCol = 'oklch(0.62 0.14 40)'
 
-      <div className="flex-1 flex justify-center overflow-hidden">
+  const pct = pageInfo && pageInfo.total > 0
+    ? Math.round(pageInfo.page / pageInfo.total * 100)
+    : null
+
+  const btn = (
+    isActive: boolean,
+    onClick: () => void,
+    children: React.ReactNode,
+    ariaLabel: string,
+    extraStyle?: React.CSSProperties,
+  ) => (
+    <button
+      style={{
+        width: 34, height: 34, borderRadius: 8, cursor: 'pointer', transition: 'background .12s',
+        color: isActive ? accentCol : ink3Col,
+        background: isActive ? accentBg : 'transparent',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+        ...extraStyle,
+      }}
+      onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = hoverBg }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = isActive ? accentBg : 'transparent' }}
+      onClick={onClick}
+      aria-label={ariaLabel}
+      title={ariaLabel}
+    >
+      {children}
+    </button>
+  )
+
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 2, padding: '0 10px',
+      height: 44, borderBottom: `1px solid ${borderCol}`,
+      background: paperBg, flexShrink: 0,
+    }}>
+      {/* 左：返回 + 書名作者（固定寬度區塊） */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+        {btn(false, onBack, <IconBack />, '返回書庫', { color: inkCol })}
         {bookTitle && (
-          <span className="text-xs text-stone-400 dark:text-stone-500 truncate select-none pointer-events-none">
-            {bookTitle}
-          </span>
+          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', width: 150 }}>
+            <div style={{ fontFamily: SERIF, fontSize: 13, color: inkCol, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: 1.3 }}>
+              {bookTitle}
+            </div>
+            {bookAuthor && (
+              <div style={{ fontFamily: MONO, fontSize: 10, color: ink3Col, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '0.04em', lineHeight: 1.3 }}>
+                {bookAuthor}
+              </div>
+            )}
+          </div>
         )}
       </div>
 
-      {/* 手機：合併面板按鈕（md 以上隱藏） */}
-      <button
-        className={`md:hidden p-2 rounded transition text-stone-500 dark:text-stone-400 ${
-          activePanel === 'mobilepanel'
-            ? 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400'
-            : 'hover:bg-stone-100 dark:hover:bg-stone-700'
-        }`}
-        onClick={onToggleMobilePanel}
-        aria-label="書籍資訊／目錄／註記"
-        title="書籍資訊／目錄／註記"
-      >
-        <IconPanels />
-      </button>
+      {/* 中：進度條（桌面版才顯示） */}
+      <div className="hidden md:flex" style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8, padding: '0 8px', minWidth: 0, overflow: 'hidden' }}>
+        {pageInfo && pct !== null && (
+          <>
+            <span style={{ fontFamily: MONO, fontSize: 10, color: ink3Col, whiteSpace: 'nowrap', letterSpacing: '0.04em', flexShrink: 0 }}>
+              第 {pageInfo.page} 頁
+            </span>
+            <div style={{ width: 100, height: 3, background: borderCol, borderRadius: 2, flexShrink: 0 }}>
+              <div style={{ width: `${pct}%`, height: '100%', background: accentCol, borderRadius: 2, transition: 'width .3s' }} />
+            </div>
+            <span style={{ fontFamily: MONO, fontSize: 10, color: ink3Col, whiteSpace: 'nowrap', letterSpacing: '0.04em', flexShrink: 0 }}>
+              / {pageInfo.total} · {pct}%
+            </span>
+          </>
+        )}
+      </div>
+      {/* 手機版：佔位讓圖示靠右 */}
+      <div className="md:hidden" style={{ flex: 1 }} />
 
-      {/* 桌面：個別按鈕（手機隱藏） */}
-      <button
-        className={`hidden md:block p-2 rounded transition text-stone-500 dark:text-stone-400 ${
-          activePanel === 'bookinfo'
-            ? 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400'
-            : 'hover:bg-stone-100 dark:hover:bg-stone-700'
-        }`}
-        onClick={onToggleBookInfo}
-        aria-label="書籍資訊"
-        title="書籍資訊"
-      >
-        <IconBook />
-      </button>
-      <button
-        className={`p-2 rounded transition text-stone-500 dark:text-stone-400 ${
-          activePanel === 'settings'
-            ? 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400'
-            : 'hover:bg-stone-100 dark:hover:bg-stone-700'
-        }`}
-        onClick={onToggleSettings}
-        aria-label="排版與語音設定"
-        title="排版與語音設定"
-      >
-        <IconSettings />
-      </button>
-      <button
-        className={`hidden md:block p-2 rounded transition text-stone-500 dark:text-stone-400 ${
-          activePanel === 'chapters'
-            ? 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400'
-            : 'hover:bg-stone-100 dark:hover:bg-stone-700'
-        }`}
-        onClick={onToggleChapters}
-        aria-label="切換章節目錄"
-        title="章節目錄"
-      >
-        <IconChapters />
-      </button>
-      <button
-        className={`hidden md:block p-2 rounded transition text-stone-500 dark:text-stone-400 ${
-          activePanel === 'notes'
-            ? 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400'
-            : 'hover:bg-stone-100 dark:hover:bg-stone-700'
-        }`}
-        onClick={onToggleNotes}
-        aria-label="切換註記面板"
-        title="我的註記"
-      >
-        <IconNotes />
-      </button>
-      <button
-        className="p-2 rounded hover:bg-stone-100 dark:hover:bg-stone-700 transition text-stone-500 dark:text-stone-400"
-        onClick={onToggleDark}
-        aria-label={darkMode ? '切換淺色模式' : '切換深色模式'}
-      >
-        {darkMode ? <IconSun /> : <IconMoon />}
-      </button>
+      {/* 右：圖示按鈕 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+        {/* 手機版：panels + settings（wrapper 只用 className，不加 inline display） */}
+        <div className="flex md:hidden items-center">
+          {btn(activePanel === 'mobilepanel', onToggleMobilePanel, <IconPanels />, '書籍資訊／目錄／註記')}
+          {btn(activePanel === 'settings', onToggleSettings, <IconSettings />, '排版與語音設定')}
+        </div>
+        {/* 桌面版：個別按鈕 */}
+        <div className="hidden md:flex items-center">
+          {btn(activePanel === 'bookinfo', onToggleBookInfo, <IconBook />, '書籍資訊')}
+          {btn(activePanel === 'settings', onToggleSettings, <IconSettings />, '排版與語音設定')}
+          {btn(activePanel === 'chapters', onToggleChapters, <IconChapters />, '章節目錄')}
+          {btn(activePanel === 'notes', onToggleNotes, <IconNotes />, '我的註記')}
+        </div>
+        {btn(false, onToggleDark, darkMode ? <IconSun /> : <IconMoon />, darkMode ? '切換淺色模式' : '切換深色模式')}
+      </div>
     </div>
   )
 }

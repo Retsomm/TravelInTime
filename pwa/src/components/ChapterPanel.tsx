@@ -7,56 +7,77 @@ export interface TocItem {
   subitems?: TocItem[]
 }
 
+const SERIF = '"Source Serif 4", "Noto Serif TC", Georgia, serif'
+const MONO  = '"JetBrains Mono", ui-monospace, monospace'
+
 interface RowProps {
   item: TocItem
   depth: number
+  index: number
   currentHref: string
   onNavigate: (href: string) => void
+  inkCol: string
+  ink2Col: string
+  ink3Col: string
+  paperBg2: string
+  accentCol: string
 }
 
-const DEPTH_PL = ['pl-4', 'pl-8', 'pl-12', 'pl-16', 'pl-20']
-
-const TocRow = ({ item, depth, currentHref, onNavigate }: RowProps) => {
+const TocRow = ({ item, depth, index, currentHref, onNavigate, inkCol, ink2Col, ink3Col, paperBg2, accentCol }: RowProps) => {
   const [open, setOpen] = useState(true)
   const hasChildren = (item.subitems?.length ?? 0) > 0
   const isActive = item.href.split('#')[0] === currentHref
-  const pl = DEPTH_PL[Math.min(depth, DEPTH_PL.length - 1)]
 
   return (
     <>
       <li>
-        <div
-          className={`flex items-center gap-1 pr-4 py-1.5 cursor-pointer text-sm transition-colors
-            hover:bg-stone-50 dark:hover:bg-gray-700/50
-            ${pl}
-            ${isActive
-              ? 'text-indigo-600 dark:text-indigo-400 font-medium bg-indigo-50 dark:bg-indigo-900/20'
-              : 'text-stone-700 dark:text-stone-300'
-            }`}
+        <button
+          style={{
+            display: 'flex', alignItems: 'center', width: '100%',
+            padding: `10px ${16 + depth * 12}px 10px 20px`,
+            textAlign: 'left',
+            background: isActive ? paperBg2 : 'transparent',
+            color: isActive ? inkCol : depth > 0 ? ink3Col : ink2Col,
+            transition: 'background .12s',
+          }}
           onClick={() => onNavigate(item.href)}
+          onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = paperBg2 }}
+          onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = 'transparent' }}
         >
-          {hasChildren ? (
+          {isActive ? (
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: accentCol, flexShrink: 0, marginRight: 12 }} />
+          ) : (
+            <span style={{ fontFamily: MONO, fontSize: 10, color: ink3Col, width: 18, textAlign: 'right', marginRight: 10, flexShrink: 0, letterSpacing: '0.04em' }}>
+              {String(index + 1).padStart(2, '0')}
+            </span>
+          )}
+          {hasChildren && (
             <button
-              className="shrink-0 w-4 text-stone-400 dark:text-stone-600 hover:text-stone-600 dark:hover:text-stone-400 text-xs"
+              style={{ marginRight: 4, color: ink3Col, fontSize: 10, lineHeight: 1, flexShrink: 0 }}
               onClick={(e) => { e.stopPropagation(); setOpen(!open) }}
               aria-label={open ? '收合' : '展開'}
             >
               {open ? '▾' : '▸'}
             </button>
-          ) : (
-            <span className="shrink-0 w-4" />
           )}
-          <span className="flex-1 truncate">{item.label}</span>
-        </div>
+          <span style={{ flex: 1, fontFamily: SERIF, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {item.label}
+          </span>
+          {isActive && (
+            <span style={{ fontFamily: MONO, fontSize: 10, color: ink3Col, letterSpacing: '0.06em', flexShrink: 0, marginLeft: 8 }}>
+              正在閱讀
+            </span>
+          )}
+        </button>
       </li>
       {hasChildren && open &&
-        item.subitems!.map((sub) => (
+        item.subitems!.map((sub, si) => (
           <TocRow
             key={sub.id || sub.href}
-            item={sub}
-            depth={depth + 1}
-            currentHref={currentHref}
-            onNavigate={onNavigate}
+            item={sub} depth={depth + 1} index={si}
+            currentHref={currentHref} onNavigate={onNavigate}
+            inkCol={inkCol} ink2Col={ink2Col} ink3Col={ink3Col}
+            paperBg2={paperBg2} accentCol={accentCol}
           />
         ))
       }
@@ -68,25 +89,32 @@ interface Props {
   toc: TocItem[]
   currentHref: string
   onNavigate: (href: string) => void
+  darkMode?: boolean
   embedded?: boolean
 }
 
-const ChapterPanel = ({ toc, currentHref, onNavigate, embedded }: Props) => {
-  const totalChapters = toc.length
+const ChapterPanel = ({ toc, currentHref, onNavigate, darkMode, embedded }: Props) => {
+  const paperBg   = darkMode ? '#1a1816' : '#f9f7f2'
+  const paperBg2  = darkMode ? '#231f1c' : '#f1ede4'
+  const borderCol = darkMode ? '#3a3430' : '#e4ddd0'
+  const inkCol    = darkMode ? '#e8e0d4' : '#2a2420'
+  const ink2Col   = darkMode ? '#b8afa4' : '#5a4e44'
+  const ink3Col   = darkMode ? '#7a706a' : '#9a8f80'
+  const accentCol = 'oklch(0.62 0.14 40)'
 
-  const content = (
-    <div className="flex-1 overflow-y-auto">
+  const listContent = (
+    <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
       {toc.length === 0 ? (
-        <p className="text-sm text-stone-400 dark:text-stone-500 p-4">此書籍無目錄資料</p>
+        <p style={{ padding: 20, fontSize: 13, color: ink3Col, fontFamily: SERIF }}>此書籍無目錄資料</p>
       ) : (
-        <ul>
-          {toc.map((item) => (
+        <ul style={{ listStyle: 'none', margin: 0, padding: '6px 0' }}>
+          {toc.map((item, i) => (
             <TocRow
               key={item.id || item.href}
-              item={item}
-              depth={0}
-              currentHref={currentHref}
-              onNavigate={onNavigate}
+              item={item} depth={0} index={i}
+              currentHref={currentHref} onNavigate={onNavigate}
+              inkCol={inkCol} ink2Col={ink2Col} ink3Col={ink3Col}
+              paperBg2={paperBg2} accentCol={accentCol}
             />
           ))}
         </ul>
@@ -94,15 +122,22 @@ const ChapterPanel = ({ toc, currentHref, onNavigate, embedded }: Props) => {
     </div>
   )
 
-  if (embedded) return content
+  if (embedded) return listContent
 
   return (
-    <div className="w-80 border-l border-stone-200 dark:border-stone-700 bg-white dark:bg-gray-800 flex flex-col overflow-hidden">
-      <div className="px-4 py-3 border-b border-stone-100 dark:border-stone-700 shrink-0">
-        <h2 className="font-semibold text-stone-700 dark:text-stone-200">章節目錄</h2>
-        <p className="text-xs text-stone-400 dark:text-stone-500 mt-0.5">共 {totalChapters} 章</p>
+    <div style={{
+      width: 320, flexShrink: 0, height: '100%',
+      borderLeft: `1px solid ${borderCol}`,
+      background: paperBg,
+      display: 'flex', flexDirection: 'column', overflow: 'hidden',
+    }}>
+      <div style={{ padding: '16px 20px', borderBottom: `1px solid ${borderCol}`, flexShrink: 0 }}>
+        <div style={{ fontFamily: SERIF, fontSize: 17, fontWeight: 500, letterSpacing: '0.01em', color: inkCol }}>目錄</div>
+        <div style={{ fontFamily: MONO, fontSize: 10, color: ink3Col, letterSpacing: '0.12em', textTransform: 'uppercase', marginTop: 4 }}>
+          {toc.length} 章節
+        </div>
       </div>
-      {content}
+      {listContent}
     </div>
   )
 }

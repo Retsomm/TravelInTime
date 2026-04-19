@@ -2,6 +2,9 @@ import { useRef, useState, useEffect } from 'react'
 import { useAnnotationStore } from '../store/useAnnotationStore'
 import type { Annotation } from '../store/useAnnotationStore'
 
+const SERIF = '"Source Serif 4", "Noto Serif TC", Georgia, serif'
+const MONO  = '"JetBrains Mono", ui-monospace, monospace'
+
 const COLORS = [
   { label: '黃', value: '#eab308' },
   { label: '綠', value: '#22c55e' },
@@ -19,12 +22,7 @@ interface Props {
 }
 
 const formatDate = (ts: number) =>
-  new Date(ts).toLocaleString('zh-TW', {
-    month: 'numeric',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+  new Date(ts).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 
 const exportAnnotations = (selected: Annotation[], bookTitle: string) => {
   const sorted = [...selected].sort((a, b) => a.createdAt - b.createdAt)
@@ -34,22 +32,11 @@ const exportAnnotations = (selected: Annotation[], bookTitle: string) => {
     if (!grouped.has(ch)) grouped.set(ch, [])
     grouped.get(ch)!.push(a)
   })
-
-  const lines: string[] = [
-    '我的閱讀註記',
-    `匯出時間：${new Date().toLocaleString('zh-TW')}`,
-    `共 ${selected.length} 筆`,
-    '',
-  ]
-
+  const lines: string[] = ['我的閱讀註記', `匯出時間：${new Date().toLocaleString('zh-TW')}`, `共 ${selected.length} 筆`, '']
   grouped.forEach((anns, chapter) => {
     lines.push(chapter)
-    anns.forEach((a) => {
-      lines.push(`• ${a.text}`)
-      lines.push('')
-    })
+    anns.forEach((a) => { lines.push(`• ${a.text}`); lines.push('') })
   })
-
   const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
@@ -57,13 +44,12 @@ const exportAnnotations = (selected: Annotation[], bookTitle: string) => {
   const now = new Date()
   const dateStr = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`
   const timeStr = `${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`
-  const safeName = bookTitle.replace(/[\\/:*?"<>|]/g, '_') || '閱讀註記'
-  link.download = `${safeName}_${dateStr}_${timeStr}.txt`
+  link.download = `${(bookTitle || '閱讀註記').replace(/[\\/:*?"<>|]/g, '_')}_${dateStr}_${timeStr}.txt`
   link.click()
   URL.revokeObjectURL(url)
 }
 
-const NotePanel = ({ onNavigate, onChangeColor, onRemoveAnnotation, bookTitle }: Props) => {
+const NotePanel = ({ onNavigate, onChangeColor, onRemoveAnnotation, darkMode, bookTitle }: Props) => {
   const { annotations } = useAnnotationStore()
   const [pickerOpenId, setPickerOpenId] = useState<string | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -73,57 +59,55 @@ const NotePanel = ({ onNavigate, onChangeColor, onRemoveAnnotation, bookTitle }:
   const someSelected = selectedIds.size > 0 && !allSelected
 
   useEffect(() => {
-    if (selectAllRef.current) {
-      selectAllRef.current.indeterminate = someSelected
-    }
+    if (selectAllRef.current) selectAllRef.current.indeterminate = someSelected
   }, [someSelected])
 
-  const toggleSelectAll = () => {
-    setSelectedIds(allSelected ? new Set() : new Set(annotations.map((a) => a.id)))
-  }
+  const toggleSelectAll = () => setSelectedIds(allSelected ? new Set() : new Set(annotations.map((a) => a.id)))
+  const toggleSelect = (id: string) => setSelectedIds((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const handleExport = () => { const s = annotations.filter((a) => selectedIds.has(a.id)); if (s.length > 0) exportAnnotations(s, bookTitle) }
 
-  const toggleSelect = (id: string) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
-      return next
-    })
-  }
-
-  const handleExport = () => {
-    const selected = annotations.filter((a) => selectedIds.has(a.id))
-    if (selected.length === 0) return
-    exportAnnotations(selected, bookTitle)
-  }
+  const paperBg   = darkMode ? '#1a1816' : '#f9f7f2'
+  const paperBg2  = darkMode ? '#231f1c' : '#f1ede4'
+  const borderCol = darkMode ? '#3a3430' : '#e4ddd0'
+  const inkCol    = darkMode ? '#e8e0d4' : '#2a2420'
+  const ink2Col   = darkMode ? '#b8afa4' : '#5a4e44'
+  const ink3Col   = darkMode ? '#7a706a' : '#9a8f80'
+  const accentCol = 'oklch(0.62 0.14 40)'
 
   return (
-    <div className="w-80 border-l border-stone-200 dark:border-stone-700 bg-white dark:bg-gray-800 flex flex-col overflow-hidden">
-      <div className="px-4 py-3 border-b border-stone-100 dark:border-stone-700 shrink-0">
-        <div className="flex items-center justify-between gap-2">
-          <div className="min-w-0">
-            <h2 className="font-semibold text-stone-700 dark:text-stone-200">我的註記</h2>
-            <p className="text-xs text-stone-400 dark:text-stone-500 mt-0.5">共 {annotations.length} 筆</p>
+    <div style={{
+      width: 320, flexShrink: 0, height: '100%',
+      borderLeft: `1px solid ${borderCol}`,
+      background: paperBg,
+      display: 'flex', flexDirection: 'column', overflow: 'hidden',
+    }}>
+      {/* Header */}
+      <div style={{ padding: '16px 20px', borderBottom: `1px solid ${borderCol}`, flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+          <div>
+            <div style={{ fontFamily: SERIF, fontSize: 17, fontWeight: 500, letterSpacing: '0.01em', color: inkCol }}>我的註記</div>
+            <div style={{ fontFamily: MONO, fontSize: 10, color: ink3Col, letterSpacing: '0.12em', textTransform: 'uppercase', marginTop: 4 }}>
+              {annotations.length} 筆
+            </div>
           </div>
           {annotations.length > 0 && (
-            <div className="flex items-center gap-1.5 shrink-0">
-              <label className="flex items-center gap-1 text-xs text-stone-500 dark:text-stone-400 cursor-pointer select-none">
-                <input
-                  ref={selectAllRef}
-                  type="checkbox"
-                  checked={allSelected}
-                  onChange={toggleSelectAll}
-                  className="accent-indigo-500 cursor-pointer"
-                />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, color: ink3Col, cursor: 'pointer' }}>
+                <input ref={selectAllRef} type="checkbox" checked={allSelected} onChange={toggleSelectAll}
+                  style={{ accentColor: accentCol, cursor: 'pointer' }} />
                 全選
               </label>
               <button
-                className={`px-2 py-1 rounded text-xs transition ${
-                  selectedIds.size > 0
-                    ? 'bg-indigo-500 text-white hover:bg-indigo-600'
-                    : 'bg-stone-100 dark:bg-stone-700 text-stone-400 dark:text-stone-500 cursor-not-allowed'
-                }`}
-                onClick={handleExport}
                 disabled={selectedIds.size === 0}
+                onClick={handleExport}
+                style={{
+                  height: 26, padding: '0 10px', borderRadius: 6, fontSize: 12,
+                  background: selectedIds.size > 0 ? accentCol : 'transparent',
+                  color: selectedIds.size > 0 ? '#fff' : ink3Col,
+                  opacity: selectedIds.size > 0 ? 1 : 0.5,
+                  cursor: selectedIds.size > 0 ? 'pointer' : 'default',
+                  fontFamily: 'inherit',
+                }}
               >
                 匯出{selectedIds.size > 0 ? ` (${selectedIds.size})` : ''}
               </button>
@@ -132,91 +116,88 @@ const NotePanel = ({ onNavigate, onChangeColor, onRemoveAnnotation, bookTitle }:
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto">
+      {/* List */}
+      <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
         {annotations.length === 0 ? (
-          <p className="text-sm text-stone-400 dark:text-stone-500 p-4">
-            選取文字後點擊顏色即可新增註記。
-          </p>
+          <div style={{ padding: '28px 20px' }}>
+            <div style={{ fontFamily: SERIF, fontSize: 15, color: ink2Col, marginBottom: 8 }}>尚無註記</div>
+            <div style={{ fontSize: 13, color: ink3Col, lineHeight: 1.65 }}>選取文字後，便可劃線、加註，讓片段留下痕跡。</div>
+          </div>
         ) : (
-          <ul className="divide-y divide-stone-100 dark:divide-stone-700">
+          <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
             {annotations.map((a) => (
-              <li key={a.id} className="group">
+              <li key={a.id} style={{ borderBottom: `1px solid ${borderCol}` }}>
                 <div
-                  className="flex items-start gap-2 px-4 pt-3 pb-1 cursor-pointer hover:bg-stone-50 dark:hover:bg-gray-700/50 transition"
-                  onClick={() => {
-                    setPickerOpenId(null)
-                    onNavigate(a.cfi)
-                  }}
+                  style={{ padding: '14px 20px', cursor: 'pointer', transition: 'background .12s' }}
+                  onClick={() => { setPickerOpenId(null); onNavigate(a.cfi) }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = paperBg2)}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                 >
-                  <input
-                    type="checkbox"
-                    checked={selectedIds.has(a.id)}
-                    onChange={() => toggleSelect(a.id)}
-                    onClick={(e) => e.stopPropagation()}
-                    className="mt-1 shrink-0 accent-indigo-500 cursor-pointer"
-                  />
-                  <button
-                    className="mt-1 shrink-0 w-3.5 h-3.5 rounded-full border border-black/10 hover:scale-125 transition-transform"
-                    style={{ backgroundColor: a.color }}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setPickerOpenId(pickerOpenId === a.id ? null : a.id)
-                    }}
-                    aria-label="更換顏色"
-                    title="點擊更換顏色"
-                  />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-stone-700 dark:text-stone-200 leading-relaxed break-words line-clamp-3">
-                      {a.text}
-                    </p>
-                    {a.chapter ? (
-                      <p className="text-xs text-stone-400 dark:text-stone-500 mt-0.5 truncate">
-                        {a.chapter}
-                      </p>
-                    ) : null}
-                  </div>
-                  <button
-                    className="shrink-0 inline-flex items-center justify-center w-6 h-6 rounded-full border border-stone-200 dark:border-stone-600 bg-stone-100 text-stone-500 hover:text-red-500 hover:bg-red-50 dark:bg-stone-700 dark:text-stone-300 dark:hover:text-red-400 dark:hover:bg-red-500/10 transition text-xs ml-1 mt-0.5"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      onRemoveAnnotation(a.id)
-                      setSelectedIds((prev) => {
-                        const next = new Set(prev)
-                        next.delete(a.id)
-                        return next
-                      })
-                      if (pickerOpenId === a.id) setPickerOpenId(null)
-                    }}
-                    aria-label="刪除此註記"
-                  >
-                    ✕
-                  </button>
-                </div>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                    <input type="checkbox" checked={selectedIds.has(a.id)} onChange={() => toggleSelect(a.id)}
+                      onClick={(e) => e.stopPropagation()}
+                      style={{ marginTop: 3, flexShrink: 0, accentColor: accentCol, cursor: 'pointer' }} />
 
-                {pickerOpenId === a.id && (
-                  <div className="flex gap-1.5 px-4 pb-2" onClick={(e) => e.stopPropagation()}>
-                    {COLORS.map((c) => (
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      {/* Highlighted quote */}
+                      <div style={{
+                        fontFamily: SERIF, fontSize: 14, lineHeight: 1.65, color: inkCol,
+                        borderLeft: `3px solid ${a.color}`, paddingLeft: 10, marginBottom: 8,
+                      }}>
+                        {a.text}
+                      </div>
+
+                      {/* Meta */}
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontFamily: MONO, fontSize: 10, color: ink3Col, letterSpacing: '0.04em' }}>
+                        <span>{a.chapter || ''}</span>
+                        <span>{formatDate(a.createdAt)}</span>
+                      </div>
+                    </div>
+
+                    {/* Color swatch + delete */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0, marginTop: 2 }}>
                       <button
-                        key={c.label}
-                        className="w-6 h-6 rounded-full border-2 hover:scale-110 transition-transform"
-                        style={{
-                          backgroundColor: c.value,
-                          borderColor: a.color === c.value ? '#6366f1' : 'transparent',
-                        }}
-                        onClick={() => {
-                          onChangeColor(a.id, c.value)
-                          setPickerOpenId(null)
-                        }}
-                        aria-label={`${c.label}色`}
-                        title={c.label}
+                        style={{ width: 14, height: 14, borderRadius: '50%', background: a.color, border: '1.5px solid rgba(0,0,0,0.12)', flexShrink: 0, cursor: 'pointer' }}
+                        onClick={(e) => { e.stopPropagation(); setPickerOpenId(pickerOpenId === a.id ? null : a.id) }}
+                        aria-label="更換顏色"
                       />
-                    ))}
+                      <button
+                        style={{
+                          width: 22, height: 22, borderRadius: 6, fontSize: 11,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          color: ink3Col, cursor: 'pointer', transition: 'all .12s',
+                        }}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          onRemoveAnnotation(a.id)
+                          setSelectedIds((prev) => { const n = new Set(prev); n.delete(a.id); return n })
+                          if (pickerOpenId === a.id) setPickerOpenId(null)
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.color = '#ef4444'; e.currentTarget.style.background = 'rgba(239,68,68,0.08)' }}
+                        onMouseLeave={(e) => { e.currentTarget.style.color = ink3Col; e.currentTarget.style.background = 'transparent' }}
+                        aria-label="刪除此註記"
+                      >✕</button>
+                    </div>
                   </div>
-                )}
 
-                <p className="px-4 pb-2 text-xs text-stone-300 dark:text-stone-600">
-                  {formatDate(a.createdAt)}
-                </p>
+                  {/* Color picker */}
+                  {pickerOpenId === a.id && (
+                    <div style={{ display: 'flex', gap: 8, marginTop: 10, paddingLeft: 24 }} onClick={(e) => e.stopPropagation()}>
+                      {COLORS.map((c) => (
+                        <button
+                          key={c.label}
+                          style={{
+                            width: 22, height: 22, borderRadius: '50%', background: c.value,
+                            border: `2px solid ${a.color === c.value ? inkCol : 'transparent'}`,
+                            cursor: 'pointer', transition: 'transform .1s',
+                          }}
+                          onClick={() => { onChangeColor(a.id, c.value); setPickerOpenId(null) }}
+                          aria-label={`${c.label}色`}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
               </li>
             ))}
           </ul>

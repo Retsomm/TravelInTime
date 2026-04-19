@@ -2,41 +2,102 @@ import { useEffect, useRef, useState } from 'react'
 import { FONT_OPTIONS } from '../store/useReaderStore'
 import type { Script } from '../store/useReaderStore'
 
+const SERIF = '"Source Serif 4", "Noto Serif TC", Georgia, serif'
+const MONO  = '"JetBrains Mono", ui-monospace, monospace'
+
+const IconPlay = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+    <polygon points="6 4 20 12 6 20 6 4" />
+  </svg>
+)
+const IconStop = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+    <rect x="6" y="6" width="12" height="12" rx="1" />
+  </svg>
+)
+
+// ── NumStepper ──────────────────────────────────────────────────────────
+
+const NumStepper = ({
+  value, onDec, onInc, borderCol, inkCol, ink3Col, paperBg, paperBg2,
+}: {
+  value: string; onDec: () => void; onInc: () => void
+  borderCol: string; inkCol: string; ink3Col: string; paperBg: string; paperBg2: string
+}) => (
+  <div style={{
+    display: 'inline-flex', alignItems: 'center',
+    border: `1px solid ${borderCol}`, borderRadius: 8, overflow: 'hidden', height: 30,
+    background: paperBg,
+  }}>
+    <button
+      onClick={onDec}
+      style={{ width: 30, height: 30, color: ink3Col, fontSize: 14, fontFamily: 'inherit', cursor: 'pointer', transition: 'background .12s' }}
+      onMouseEnter={(e) => (e.currentTarget.style.background = paperBg2)}
+      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+    >−</button>
+    <span style={{
+      width: 58, textAlign: 'center', fontSize: 13, color: inkCol,
+      fontFamily: MONO, borderLeft: `1px solid ${borderCol}`, borderRight: `1px solid ${borderCol}`,
+      height: 30, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      letterSpacing: '0.02em',
+    }}>{value}</span>
+    <button
+      onClick={onInc}
+      style={{ width: 30, height: 30, color: ink3Col, fontSize: 14, fontFamily: 'inherit', cursor: 'pointer', transition: 'background .12s' }}
+      onMouseEnter={(e) => (e.currentTarget.style.background = paperBg2)}
+      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+    >＋</button>
+  </div>
+)
+
+// ── SegBtn ──────────────────────────────────────────────────────────────
+
+const SegBtn = ({
+  active, onClick, children, paperBg, inkCol, ink3Col,
+}: {
+  active: boolean; onClick: () => void; children: React.ReactNode
+  paperBg: string; inkCol: string; ink3Col: string
+}) => (
+  <button
+    onClick={onClick}
+    style={{
+      flex: 1, height: 26, borderRadius: 6, fontSize: 12, fontFamily: 'inherit',
+      background: active ? paperBg : 'transparent',
+      color: active ? inkCol : ink3Col,
+      boxShadow: active ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
+      cursor: 'pointer', transition: 'all .12s',
+    }}
+  >
+    {children}
+  </button>
+)
+
+// ── CustomSelect ────────────────────────────────────────────────────────
+
 interface SelectOption { label: string; value: string }
 
 const CustomSelect = ({
-  value,
-  options,
-  onChange,
-  ariaLabel,
-  className = '',
+  value, options, onChange, ariaLabel,
+  borderCol, inkCol, ink3Col, paperBg, paperBg2,
 }: {
-  value: string
-  options: SelectOption[]
-  onChange: (v: string) => void
-  ariaLabel?: string
-  className?: string
+  value: string; options: SelectOption[]; onChange: (v: string) => void; ariaLabel?: string
+  borderCol: string; inkCol: string; ink3Col: string; paperBg: string; paperBg2: string
 }) => {
   const [open, setOpen] = useState(false)
   const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({})
   const triggerRef = useRef<HTMLButtonElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
-
   const selected = options.find((o) => o.value === value)
 
   const openDropdown = () => {
     if (!triggerRef.current) return
     const rect = triggerRef.current.getBoundingClientRect()
     const spaceBelow = window.innerHeight - rect.bottom
-    const estimatedHeight = Math.min(options.length * 32 + 8, 240)
-    const showAbove = spaceBelow < estimatedHeight && rect.top > estimatedHeight
+    const estimatedH = Math.min(options.length * 32 + 8, 240)
+    const showAbove = spaceBelow < estimatedH && rect.top > estimatedH
     setDropdownStyle({
-      position: 'fixed',
-      left: rect.left,
-      width: rect.width,
-      ...(showAbove
-        ? { bottom: window.innerHeight - rect.top, top: 'auto' }
-        : { top: rect.bottom, bottom: 'auto' }),
+      position: 'fixed', left: rect.left, width: rect.width,
+      ...(showAbove ? { bottom: window.innerHeight - rect.top, top: 'auto' } : { top: rect.bottom, bottom: 'auto' }),
       zIndex: 9999,
     })
     setOpen(true)
@@ -45,36 +106,37 @@ const CustomSelect = ({
   useEffect(() => {
     if (!open) return
     const handler = (e: MouseEvent) => {
-      if (
-        !triggerRef.current?.contains(e.target as Node) &&
-        !listRef.current?.contains(e.target as Node)
-      ) setOpen(false)
+      if (!triggerRef.current?.contains(e.target as Node) && !listRef.current?.contains(e.target as Node)) setOpen(false)
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [open])
 
   return (
-    <div className={`relative ${className}`}>
+    <div style={{ position: 'relative', width: '100%' }}>
       <button
         ref={triggerRef}
         type="button"
-        className="w-full flex items-center justify-between text-sm rounded-lg pl-2 pr-2 py-1.5 bg-stone-100 dark:bg-stone-700 text-stone-700 dark:text-stone-200 cursor-pointer text-left"
+        style={{
+          width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          fontSize: 13, padding: '6px 10px', borderRadius: 8, textAlign: 'left',
+          background: paperBg2, border: `1px solid ${borderCol}`, color: inkCol,
+          fontFamily: 'inherit', cursor: 'pointer',
+        }}
         onClick={() => open ? setOpen(false) : openDropdown()}
         aria-label={ariaLabel}
         aria-haspopup="listbox"
         aria-expanded={open}
       >
-        <span className="truncate">{selected?.label ?? ''}</span>
-        <svg className="shrink-0 ml-1 text-stone-400 dark:text-stone-500" width="12" height="12" viewBox="0 0 12 12" fill="none">
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{selected?.label ?? ''}</span>
+        <svg style={{ flexShrink: 0, marginLeft: 4, color: ink3Col }} width="12" height="12" viewBox="0 0 12 12" fill="none">
           <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
         </svg>
       </button>
       {open && (
         <div
           ref={listRef}
-          style={dropdownStyle}
-          className="bg-white dark:bg-stone-800 rounded-lg shadow-lg border border-stone-200 dark:border-stone-600 overflow-y-auto max-h-60 py-1"
+          style={{ ...dropdownStyle, background: paperBg, border: `1px solid ${borderCol}`, borderRadius: 8, boxShadow: '0 8px 24px -8px rgba(0,0,0,0.2)', overflowY: 'auto', maxHeight: 240, padding: '4px 0' }}
           role="listbox"
         >
           {options.map((o) => (
@@ -82,11 +144,14 @@ const CustomSelect = ({
               key={o.value}
               role="option"
               aria-selected={o.value === value}
-              className={`px-3 py-1.5 text-sm cursor-pointer ${
-                o.value === value
-                  ? 'bg-stone-100 dark:bg-stone-700 text-stone-900 dark:text-stone-100 font-medium'
-                  : 'text-stone-700 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-700'
-              }`}
+              style={{
+                padding: '7px 12px', fontSize: 13, cursor: 'pointer',
+                background: o.value === value ? paperBg2 : 'transparent',
+                color: o.value === value ? inkCol : ink3Col,
+                fontFamily: 'inherit',
+              }}
+              onMouseEnter={(e) => { if (o.value !== value) e.currentTarget.style.background = paperBg2 }}
+              onMouseLeave={(e) => { if (o.value !== value) e.currentTarget.style.background = 'transparent' }}
               onMouseDown={() => { onChange(o.value); setOpen(false) }}
             >
               {o.label}
@@ -97,6 +162,8 @@ const CustomSelect = ({
     </div>
   )
 }
+
+// ── SettingsPanel ───────────────────────────────────────────────────────
 
 interface Props {
   fontSize: number
@@ -122,212 +189,186 @@ interface Props {
   onLineHeightChange: (v: number) => void
   letterSpacing: number
   onLetterSpacingChange: (v: number) => void
+  darkMode?: boolean
 }
 
+const SectTitle = ({ children, ink3Col }: { children: React.ReactNode; ink3Col: string }) => (
+  <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', color: ink3Col, marginBottom: 10 }}>
+    {children}
+  </div>
+)
+
 const SettingsPanel = ({
-  fontSize,
-  onFontSizeChange,
-  fontFamily,
-  onFontChange,
-  script,
-  onScriptToggle,
-  readingDirection,
-  onReadingDirectionChange,
-  ttsPlaying,
-  onTTSPlay,
-  onTTSStop,
-  ttsVoices,
-  ttsSelectedVoice,
-  onTTSVoiceChange,
-  ttsRate,
-  onTTSRateChange,
-  ttsSleepMinutes,
-  onTTSSleepChange,
-  ttsSleepRemaining,
-  lineHeight,
-  onLineHeightChange,
-  letterSpacing,
-  onLetterSpacingChange,
+  fontSize, onFontSizeChange, fontFamily, onFontChange,
+  script, onScriptToggle, readingDirection, onReadingDirectionChange,
+  ttsPlaying, onTTSPlay, onTTSStop, ttsVoices, ttsSelectedVoice, onTTSVoiceChange,
+  ttsRate, onTTSRateChange, ttsSleepMinutes, onTTSSleepChange, ttsSleepRemaining,
+  lineHeight, onLineHeightChange, letterSpacing, onLetterSpacingChange, darkMode,
 }: Props) => {
+  const paperBg   = darkMode ? '#1a1816' : '#f9f7f2'
+  const paperBg2  = darkMode ? '#231f1c' : '#f1ede4'
+  const borderCol = darkMode ? '#3a3430' : '#e4ddd0'
+  const inkCol    = darkMode ? '#e8e0d4' : '#2a2420'
+  const ink2Col   = darkMode ? '#b8afa4' : '#5a4e44'
+  const ink3Col   = darkMode ? '#7a706a' : '#9a8f80'
+  const accentCol = 'oklch(0.62 0.14 40)'
+
+  const stepperProps = { borderCol, inkCol, ink3Col, paperBg, paperBg2 }
+  const segBg = { background: paperBg2, border: `1px solid ${borderCol}`, borderRadius: 8, padding: 2, display: 'flex', gap: 2 }
+
   return (
-    <div className="w-80 border-l border-stone-200 dark:border-stone-700 bg-white dark:bg-gray-800 flex flex-col overflow-hidden">
-      <div className="px-4 py-3 border-b border-stone-100 dark:border-stone-700 shrink-0">
-        <h2 className="font-semibold text-stone-700 dark:text-stone-200">排版與語音</h2>
+    <div style={{
+      width: 320, flexShrink: 0, height: '100%',
+      borderLeft: `1px solid ${borderCol}`,
+      background: paperBg,
+      display: 'flex', flexDirection: 'column', overflow: 'hidden',
+    }}>
+      {/* Header */}
+      <div style={{ padding: '16px 20px', borderBottom: `1px solid ${borderCol}`, flexShrink: 0 }}>
+        <div style={{ fontFamily: SERIF, fontSize: 17, fontWeight: 500, letterSpacing: '0.01em', color: inkCol }}>排版與語音</div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-5">
+      <div style={{ flex: 1, overflowY: 'auto', padding: 20, display: 'flex', flexDirection: 'column', gap: 24 }}>
 
-        {/* 字體設定 */}
+        {/* ── 字體 ── */}
         <section>
-          <p className="text-xs font-semibold text-stone-400 dark:text-stone-500 uppercase tracking-wider mb-2">字體</p>
-          <div className="flex items-center gap-2 mb-3">
-            <CustomSelect
-              className="flex-1"
-              value={fontFamily}
-              options={FONT_OPTIONS}
-              onChange={onFontChange}
-              ariaLabel="選擇字體"
-            />
-            <button
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition shrink-0 ${
-                script === 'tc'
-                  ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300'
-                  : 'bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300'
-              }`}
-              onClick={onScriptToggle}
-              title={script === 'tc' ? '切換至簡體' : '切換至繁體'}
-            >
-              {script === 'tc' ? '繁體' : '簡體'}
-            </button>
-            <button
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition shrink-0 ${
-                readingDirection === 'ltr'
-                  ? 'bg-teal-100 text-teal-700 dark:bg-teal-900 dark:text-teal-300'
-                  : 'bg-violet-100 text-violet-700 dark:bg-violet-900 dark:text-violet-300'
-              }`}
-              onClick={() => onReadingDirectionChange(readingDirection === 'ltr' ? 'rtl' : 'ltr')}
-              title={readingDirection === 'ltr' ? '切換至右翻（RTL）' : '切換至左翻（LTR）'}
-            >
-              {readingDirection === 'ltr' ? '左→右' : '右→左'}
-            </button>
+          <SectTitle ink3Col={ink3Col}>字體</SectTitle>
+
+          {/* Font list */}
+          <div style={{ border: `1px solid ${borderCol}`, borderRadius: 10, background: paperBg, padding: 4, display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 12 }}>
+            {FONT_OPTIONS.map((f) => (
+              <button
+                key={f.value}
+                onClick={() => onFontChange(f.value)}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  padding: '9px 12px', borderRadius: 8, textAlign: 'left',
+                  background: fontFamily === f.value ? paperBg2 : 'transparent',
+                  color: fontFamily === f.value ? inkCol : ink2Col,
+                  fontFamily: f.value, fontSize: 14, cursor: 'pointer', transition: 'background .12s',
+                }}
+                onMouseEnter={(e) => { if (fontFamily !== f.value) e.currentTarget.style.background = paperBg2 }}
+                onMouseLeave={(e) => { if (fontFamily !== f.value) e.currentTarget.style.background = 'transparent' }}
+              >
+                <span>{f.label}</span>
+                {fontFamily === f.value && (
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: accentCol, flexShrink: 0 }} />
+                )}
+              </button>
+            ))}
           </div>
 
-          {[
-            {
-              label: '字體大小',
-              value: `${fontSize}px`,
-              onDec: () => onFontSizeChange(Math.max(12, fontSize - 1)),
-              onInc: () => onFontSizeChange(Math.min(32, fontSize + 1)),
-              decLabel: '縮小字體', incLabel: '放大字體',
-            },
-            {
-              label: '行距',
-              value: lineHeight.toFixed(1),
-              onDec: () => onLineHeightChange(parseFloat(Math.max(1.0, lineHeight - 0.1).toFixed(1))),
-              onInc: () => onLineHeightChange(parseFloat(Math.min(3.0, lineHeight + 0.1).toFixed(1))),
-              decLabel: '縮小行距', incLabel: '增加行距',
-            },
-            {
-              label: '字距',
-              value: `${letterSpacing.toFixed(2)}em`,
-              onDec: () => onLetterSpacingChange(parseFloat(Math.max(0, letterSpacing - 0.05).toFixed(2))),
-              onInc: () => onLetterSpacingChange(parseFloat(Math.min(0.5, letterSpacing + 0.05).toFixed(2))),
-              decLabel: '縮小字距', incLabel: '增加字距',
-            },
-          ].map(({ label, value, onDec, onInc, decLabel, incLabel }) => (
-            <div key={label} className="flex items-center gap-2 mb-2">
-              <span className="text-xs text-stone-500 dark:text-stone-400 w-14 shrink-0">{label}</span>
-              <div className="flex items-center gap-1.5 ml-auto">
-                <button
-                  className="w-7 h-7 rounded-lg bg-stone-100 dark:bg-stone-700 hover:bg-stone-200 dark:hover:bg-stone-600 transition text-stone-600 dark:text-stone-300 text-sm"
-                  onClick={onDec}
-                  aria-label={decLabel}
-                >−</button>
-                <span className="text-sm text-stone-600 dark:text-stone-300 w-14 text-center">{value}</span>
-                <button
-                  className="w-7 h-7 rounded-lg bg-stone-100 dark:bg-stone-700 hover:bg-stone-200 dark:hover:bg-stone-600 transition text-stone-600 dark:text-stone-300 text-sm"
-                  onClick={onInc}
-                  aria-label={incLabel}
-                >＋</button>
-              </div>
+          {/* TC/SC + LTR/RTL */}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+            <div style={{ ...segBg, flex: 1 }}>
+              <SegBtn active={script === 'tc'} onClick={onScriptToggle} paperBg={paperBg} inkCol={inkCol} ink3Col={ink3Col}>繁體</SegBtn>
+              <SegBtn active={script === 'sc'} onClick={onScriptToggle} paperBg={paperBg} inkCol={inkCol} ink3Col={ink3Col}>簡體</SegBtn>
             </div>
-          ))}
+            <div style={{ ...segBg, flex: 1 }}>
+              <SegBtn active={readingDirection === 'ltr'} onClick={() => onReadingDirectionChange('ltr')} paperBg={paperBg} inkCol={inkCol} ink3Col={ink3Col}>左→右</SegBtn>
+              <SegBtn active={readingDirection === 'rtl'} onClick={() => onReadingDirectionChange('rtl')} paperBg={paperBg} inkCol={inkCol} ink3Col={ink3Col}>右→左</SegBtn>
+            </div>
+          </div>
+
+          {/* Steppers */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', rowGap: 12, columnGap: 12, alignItems: 'center', marginBottom: 12 }}>
+            {[
+              { label: '字體大小', value: `${fontSize}px`, onDec: () => onFontSizeChange(Math.max(12, fontSize - 1)), onInc: () => onFontSizeChange(Math.min(32, fontSize + 1)) },
+              { label: '行距', value: lineHeight.toFixed(1), onDec: () => onLineHeightChange(parseFloat(Math.max(1.0, lineHeight - 0.1).toFixed(1))), onInc: () => onLineHeightChange(parseFloat(Math.min(3.0, lineHeight + 0.1).toFixed(1))) },
+              { label: '字距', value: `${letterSpacing.toFixed(2)}em`, onDec: () => onLetterSpacingChange(parseFloat(Math.max(0, letterSpacing - 0.05).toFixed(2))), onInc: () => onLetterSpacingChange(parseFloat(Math.min(0.5, letterSpacing + 0.05).toFixed(2))) },
+            ].map(({ label, value, onDec, onInc }) => (
+              <>
+                <span key={`${label}-l`} style={{ fontSize: 13, color: ink2Col }}>{label}</span>
+                <NumStepper key={`${label}-s`} value={value} onDec={onDec} onInc={onInc} {...stepperProps} />
+              </>
+            ))}
+          </div>
 
           <button
-            className="mt-1 w-full py-1 rounded-lg text-xs text-stone-400 dark:text-stone-500 hover:bg-stone-100 dark:hover:bg-stone-700 hover:text-stone-600 dark:hover:text-stone-300 transition"
-            onClick={() => {
-              onFontSizeChange(16)
-              onLineHeightChange(1.8)
-              onLetterSpacingChange(0)
+            onClick={() => { onFontSizeChange(16); onLineHeightChange(1.8); onLetterSpacingChange(0) }}
+            style={{
+              width: '100%', height: 30, borderRadius: 8, fontSize: 12,
+              color: ink3Col, fontFamily: 'inherit', cursor: 'pointer', transition: 'background .12s',
             }}
-            aria-label="重設排版設定"
+            onMouseEnter={(e) => (e.currentTarget.style.background = paperBg2)}
+            onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
           >
             重設預設值
           </button>
         </section>
 
-        <div className="border-t border-stone-100 dark:border-stone-700" />
+        <div style={{ borderTop: `1px solid ${borderCol}` }} />
 
-        {/* 語音朗讀 */}
+        {/* ── 語音朗讀 ── */}
         <section>
-          <p className="text-xs font-semibold text-stone-400 dark:text-stone-500 uppercase tracking-wider mb-2">語音朗讀</p>
+          <SectTitle ink3Col={ink3Col}>語音朗讀</SectTitle>
 
           {ttsVoices.length > 0 && (
-            <CustomSelect
-              className="mb-3"
-              value={ttsSelectedVoice?.name ?? ''}
-              options={ttsVoices.map((v) => ({
-                value: v.name,
-                label: v.name.replace(/^(Google|Microsoft|Apple)\s*/i, ''),
-              }))}
-              onChange={(name) => {
-                const v = ttsVoices.find((v) => v.name === name)
-                if (v) onTTSVoiceChange(v)
-              }}
-              ariaLabel="選擇語音"
-            />
+            <div style={{ marginBottom: 14 }}>
+              <CustomSelect
+                value={ttsSelectedVoice?.name ?? ''}
+                options={ttsVoices.map((v) => ({ value: v.name, label: v.name.replace(/^(Google|Microsoft|Apple)\s*/i, '') }))}
+                onChange={(name) => { const v = ttsVoices.find((v) => v.name === name); if (v) onTTSVoiceChange(v) }}
+                ariaLabel="選擇語音"
+                {...{ borderCol, inkCol, ink3Col, paperBg, paperBg2 }}
+              />
+            </div>
           )}
 
-          <div className="flex items-center gap-2 mb-3">
-            <span className="text-xs text-stone-500 dark:text-stone-400 shrink-0">語速</span>
-            <div className="flex items-center gap-1.5 ml-auto">
+          {/* TTS play card */}
+          <div style={{ border: `1px solid ${borderCol}`, borderRadius: 10, padding: 14, background: paperBg, marginBottom: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div>
+                <div style={{ fontFamily: SERIF, fontSize: 15, color: inkCol }}>{ttsPlaying ? '正在朗讀' : '準備朗讀'}</div>
+                <div style={{ fontSize: 11, color: ink3Col, marginTop: 2 }}>
+                  {ttsSelectedVoice?.name.replace(/^(Google|Microsoft|Apple)\s*/i, '') || '系統語音'} · {ttsRate.toFixed(1)}×
+                </div>
+              </div>
               <button
-                className="w-7 h-7 rounded-lg bg-stone-100 dark:bg-stone-700 hover:bg-stone-200 dark:hover:bg-stone-600 transition text-stone-600 dark:text-stone-300 text-sm"
-                onClick={() => onTTSRateChange(Math.max(0.5, parseFloat((ttsRate - 0.1).toFixed(1))))}
-                aria-label="減慢語速"
+                onClick={ttsPlaying ? onTTSStop : onTTSPlay}
+                style={{
+                  width: 44, height: 44, borderRadius: '50%',
+                  background: ttsPlaying ? accentCol : inkCol,
+                  color: paperBg,
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  cursor: 'pointer', transition: 'background .15s',
+                }}
               >
-                −
+                {ttsPlaying ? <IconStop /> : <IconPlay />}
               </button>
-              <span className="text-sm text-stone-600 dark:text-stone-300 w-10 text-center">{ttsRate.toFixed(1)}×</span>
-              <button
-                className="w-7 h-7 rounded-lg bg-stone-100 dark:bg-stone-700 hover:bg-stone-200 dark:hover:bg-stone-600 transition text-stone-600 dark:text-stone-300 text-sm"
-                onClick={() => onTTSRateChange(Math.min(2.0, parseFloat((ttsRate + 0.1).toFixed(1))))}
-                aria-label="加快語速"
-              >
-                ＋
-              </button>
+            </div>
+
+            <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontSize: 12, color: ink3Col, width: 28, flexShrink: 0 }}>語速</span>
+              <input
+                type="range" min="0.5" max="2" step="0.1" value={ttsRate}
+                onChange={(e) => onTTSRateChange(+e.target.value)}
+                style={{ flex: 1, accentColor: accentCol }}
+              />
+              <span style={{ fontFamily: MONO, fontSize: 11, color: ink2Col, width: 32, textAlign: 'right' }}>
+                {ttsRate.toFixed(1)}×
+              </span>
             </div>
           </div>
 
-          {/* 睡眠計時器 */}
-          <div className="mb-3">
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="text-xs text-stone-500 dark:text-stone-400">睡眠計時</span>
+          {/* Sleep timer */}
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <span style={{ fontSize: 12, color: ink3Col }}>睡眠計時</span>
               {ttsSleepRemaining !== null && (
-                <span className="text-xs font-mono text-indigo-600 dark:text-indigo-400">
+                <span style={{ fontFamily: MONO, fontSize: 11, color: accentCol }}>
                   {String(Math.floor(ttsSleepRemaining / 60)).padStart(2, '0')}:{String(ttsSleepRemaining % 60).padStart(2, '0')}
                 </span>
               )}
             </div>
-            <div className="flex gap-1">
+            <div style={{ ...segBg, display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)' }}>
               {([0, 15, 30, 45, 60] as const).map((m) => (
-                <button
-                  key={m}
-                  className={`flex-1 py-1 rounded-lg text-xs transition ${
-                    ttsSleepMinutes === m
-                      ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/60 dark:text-indigo-300 font-medium'
-                      : 'bg-stone-100 dark:bg-stone-700 text-stone-500 dark:text-stone-400 hover:bg-stone-200 dark:hover:bg-stone-600'
-                  }`}
-                  onClick={() => onTTSSleepChange(m)}
-                  aria-label={m === 0 ? '關閉睡眠計時' : `${m}分鐘後停止`}
-                >
-                  {m === 0 ? '關' : `${m}`}
-                </button>
+                <SegBtn key={m} active={ttsSleepMinutes === m} onClick={() => onTTSSleepChange(m)} paperBg={paperBg} inkCol={inkCol} ink3Col={ink3Col}>
+                  {m === 0 ? '關' : String(m)}
+                </SegBtn>
               ))}
             </div>
           </div>
-
-          <button
-            className={`w-full py-2 rounded-lg text-sm font-medium transition ${
-              ttsPlaying
-                ? 'bg-red-100 text-red-600 hover:bg-red-200 dark:bg-red-900/60 dark:text-red-300'
-                : 'bg-stone-100 dark:bg-stone-700 text-stone-600 dark:text-stone-300 hover:bg-stone-200 dark:hover:bg-stone-600'
-            }`}
-            onClick={ttsPlaying ? onTTSStop : onTTSPlay}
-            aria-label={ttsPlaying ? '停止朗讀' : '開始朗讀'}
-          >
-            {ttsPlaying ? '⏹ 停止朗讀' : '開始朗讀'}
-          </button>
         </section>
       </div>
     </div>

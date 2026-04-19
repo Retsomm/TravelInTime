@@ -9,6 +9,7 @@ export interface BookRecord {
   addedAt: number
   lastOpenedAt: number
   hasCover: boolean
+  progress?: number
 }
 
 const META_KEY = 'tit-library'
@@ -234,5 +235,15 @@ export const useLibrary = () => {
     })
   }
 
-  return { records, addBook, getBookUrl, getCoverDataUrl, removeBook, touchBook }
+  const updateProgress = (id: string, pct: number) => {
+    setRecords((prev) => {
+      const next = prev.map((r) =>
+        r.id === id ? { ...r, progress: Math.max(0, Math.min(1, pct)) } : r,
+      )
+      saveMeta(next)
+      return next
+    })
+  }
+
+  return { records, addBook, getBookUrl, getCoverDataUrl, removeBook, touchBook, updateProgress }
 }

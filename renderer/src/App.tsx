@@ -6,7 +6,7 @@ import { useLibrary } from './hooks/useLibrary'
 type View = 'library' | 'reader'
 
 const App = () => {
-  const { records, addBook, getBookUrl, getCoverDataUrl, removeBook, touchBook } = useLibrary()
+  const { records, addBook, getBookUrl, getCoverDataUrl, removeBook, touchBook, updateProgress } = useLibrary()
   const [view, setView] = useState<View>('library')
   const [activeBookUrl, setActiveBookUrl] = useState<string | null>(null)
   const [activeBookId, setActiveBookId] = useState<string>('')
@@ -50,9 +50,12 @@ const App = () => {
           <Reader
             bookPath={activeBookUrl}
             bookId={activeBookId}
+            bookRecord={records.find(r => r.id === activeBookId) ?? null}
+            getCoverDataUrl={getCoverDataUrl}
             onBack={backToLibrary}
             darkMode={darkMode}
             onToggleDark={() => setDarkMode(!darkMode)}
+            onUpdateProgress={(pct) => updateProgress(activeBookId, pct)}
           />
         )}
       </div>

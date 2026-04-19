@@ -31,7 +31,7 @@ const injectStyle = (doc: Document, id: string, css: string) => {
 }
 
 const applyDarkOverride = (doc: Document, isDark: boolean) => {
-  const bg = isDark ? '#111827' : '#fafaf9'
+  const bg = isDark ? '#1a1816' : '#f9f7f2'
   const color = isDark ? '#e5e7eb' : '#1c1917'
   const colorRule = isDark ? `* { color: ${color} !important; }` : ''
   injectStyle(doc, 'tit-dark', `html, body { background-color: ${bg} !important; } ${colorRule}`)
@@ -114,21 +114,35 @@ interface Props {
   onBack: () => void
   darkMode: boolean
   onToggleDark: () => void
+  onUpdateProgress?: (pct: number) => void
 }
 
-const GRADIENTS = [
-  'from-indigo-400 to-purple-500',
-  'from-amber-400 to-orange-500',
-  'from-emerald-400 to-teal-500',
-  'from-rose-400 to-pink-500',
-  'from-sky-400 to-blue-500',
-  'from-violet-400 to-fuchsia-500',
-]
-const gradientFor = (id: string) => GRADIENTS[id.charCodeAt(0) % GRADIENTS.length]
-const formatDate = (ts: number) =>
-  ts ? new Date(ts).toLocaleDateString('zh-TW', { year: 'numeric', month: 'long', day: 'numeric' }) : '—'
+const SERIF = '"Source Serif 4", "Noto Serif TC", Georgia, serif'
+const MONO  = '"JetBrains Mono", ui-monospace, monospace'
 
-const BookInfoPanel = ({ record, getCoverDataUrl, embedded }: { record: BookRecord; getCoverDataUrl: (id: string) => Promise<string | null>; embedded?: boolean }) => {
+const COVER_STYLES = [
+  { bg: 'oklch(0.92 0.04 80)',  ink: 'oklch(0.35 0.06 60)',  rule: 'oklch(0.68 0.08 55)' },
+  { bg: 'oklch(0.86 0.04 65)',  ink: 'oklch(0.30 0.04 50)',  rule: 'oklch(0.55 0.06 40)' },
+  { bg: 'oklch(0.30 0.06 260)', ink: 'oklch(0.92 0.02 260)', rule: 'oklch(0.72 0.10 260)' },
+  { bg: 'oklch(0.42 0.05 150)', ink: 'oklch(0.95 0.02 140)', rule: 'oklch(0.78 0.08 145)' },
+  { bg: 'oklch(0.88 0.04 20)',  ink: 'oklch(0.35 0.06 15)',  rule: 'oklch(0.62 0.12 20)' },
+  { bg: 'oklch(0.45 0.02 250)', ink: 'oklch(0.95 0.01 250)', rule: 'oklch(0.80 0.04 250)' },
+]
+const coverStyleFor = (id: string) => COVER_STYLES[id.split('').reduce((a, c) => a + c.charCodeAt(0), 0) % COVER_STYLES.length]
+
+const formatDate = (ts: number) =>
+  ts ? new Date(ts).toLocaleDateString('zh-TW', { year: 'numeric', month: 'numeric', day: 'numeric' }) : '—'
+
+const BookInfoPanel = ({
+  record, getCoverDataUrl, darkMode, onClose, progress, embedded,
+}: {
+  record: BookRecord
+  getCoverDataUrl: (id: string) => Promise<string | null>
+  darkMode: boolean
+  onClose?: () => void
+  progress?: number | null
+  embedded?: boolean
+}) => {
   const [coverUrl, setCoverUrl] = useState<string | null>(null)
   useEffect(() => {
     setCoverUrl(null)
@@ -136,40 +150,100 @@ const BookInfoPanel = ({ record, getCoverDataUrl, embedded }: { record: BookReco
     getCoverDataUrl(record.id).then((url) => { if (url) setCoverUrl(url) })
   }, [record.id, record.hasCover, getCoverDataUrl])
 
+  const paperBg   = darkMode ? '#1a1816' : '#f9f7f2'
+  const paperBg2  = darkMode ? '#231f1c' : '#f1ede4'
+  const borderCol = darkMode ? '#3a3430' : '#e4ddd0'
+  const inkCol    = darkMode ? '#e8e0d4' : '#2a2420'
+  const ink2Col   = darkMode ? '#b8afa4' : '#5a4e44'
+  const ink3Col   = darkMode ? '#7a706a' : '#9a8f80'
+  const accentCol = 'oklch(0.62 0.14 40)'
+
+  const cs = coverStyleFor(record.id)
+  const pct = progress != null ? Math.round(progress * 100) : null
+
+  const coverEl = coverUrl ? (
+    <img src={coverUrl} alt={record.title} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+  ) : (
+    <div style={{ width: '100%', height: '100%', background: cs.bg, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', padding: 14, position: 'relative', overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'linear-gradient(135deg, rgba(255,255,255,0.06) 0%, transparent 60%)' }} />
+      <div style={{ borderBottom: `1px solid ${cs.rule}`, marginBottom: 8, paddingBottom: 6 }}>
+        <div style={{ fontFamily: SERIF, fontSize: 16, fontWeight: 600, color: cs.ink, lineHeight: 1.4, wordBreak: 'break-all' }}>{record.title}</div>
+      </div>
+      {record.author && (
+        <div style={{ fontFamily: MONO, fontSize: 10, color: cs.rule, letterSpacing: '0.06em' }}>{record.author}</div>
+      )}
+    </div>
+  )
+
+  const metaRows = [
+    { label: '匯入時間', value: formatDate(record.addedAt) },
+    { label: '最後閱讀', value: record.lastOpenedAt ? formatDate(record.lastOpenedAt) : '尚未記錄' },
+    { label: '進度', value: pct !== null ? `${pct}%` : '—' },
+  ]
+
   const body = (
-    <div className="overflow-y-auto flex flex-col">
-      <div className="px-5 pt-5 pb-3">
-        <div className="aspect-[2/3] overflow-hidden shadow-md">
-          {coverUrl ? (
-            <img src={coverUrl} alt={record.title} className="w-full h-full object-cover" />
-          ) : (
-            <div className={`w-full h-full bg-gradient-to-br ${gradientFor(record.id)} flex items-end p-3`}>
-              <span className="text-white text-4xl font-bold leading-none opacity-60 select-none">
-                {record.title.charAt(0)}
-              </span>
-            </div>
-          )}
+    <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
+      {/* 封面 */}
+      <div style={{ padding: '16px 20px 12px' }}>
+        <div style={{ aspectRatio: '2/3', overflow: 'hidden', boxShadow: '0 4px 16px -4px rgba(0,0,0,0.25)', borderRadius: 4 }}>
+          {coverEl}
         </div>
       </div>
-      <div className="px-4 flex flex-col gap-3 pb-5">
-        <div>
-          <p className="text-sm font-semibold text-stone-800 dark:text-stone-100 leading-snug">{record.title}</p>
-          {record.author && (
-            <p className="text-xs text-stone-500 dark:text-stone-400 mt-1">{record.author}</p>
-          )}
-        </div>
-        <div className="flex flex-col gap-1.5 text-xs text-stone-400 dark:text-stone-500">
-          <div className="flex flex-col gap-0.5">
-            <span>新增日期</span>
-            <span className="text-stone-600 dark:text-stone-300">{formatDate(record.addedAt)}</span>
+
+      {/* 書名作者 */}
+      <div style={{ padding: '0 20px 16px' }}>
+        <div style={{ fontFamily: SERIF, fontSize: 16, fontWeight: 500, color: inkCol, lineHeight: 1.4, marginBottom: 4 }}>{record.title}</div>
+        {record.author && (
+          <div style={{ fontFamily: MONO, fontSize: 11, color: ink3Col, letterSpacing: '0.04em' }}>{record.author}</div>
+        )}
+      </div>
+
+      <div style={{ borderTop: `1px solid ${borderCol}` }} />
+
+      {/* 進度條 */}
+      {pct !== null && (
+        <div style={{ padding: '14px 20px 0' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+            <span style={{ fontFamily: MONO, fontSize: 10, color: ink3Col, letterSpacing: '0.08em', textTransform: 'uppercase' }}>閱讀進度</span>
+            <span style={{ fontFamily: MONO, fontSize: 10, color: accentCol }}>{pct}%</span>
           </div>
-          <div className="flex flex-col gap-0.5">
-            <span>上次開啟</span>
-            <span className="text-stone-600 dark:text-stone-300">
-              {record.lastOpenedAt ? formatDate(record.lastOpenedAt) : '尚未記錄'}
-            </span>
+          <div style={{ height: 3, background: borderCol, borderRadius: 2 }}>
+            <div style={{ width: `${pct}%`, height: '100%', background: accentCol, borderRadius: 2 }} />
           </div>
         </div>
+      )}
+
+      {/* Metadata */}
+      <div style={{ padding: '14px 20px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {metaRows.filter(r => r.label !== '進度').map(({ label, value }) => (
+          <div key={label} style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
+            <span style={{ fontFamily: MONO, fontSize: 10, color: ink3Col, letterSpacing: '0.06em', flexShrink: 0 }}>{label}</span>
+            <span style={{ fontFamily: MONO, fontSize: 11, color: ink2Col, letterSpacing: '0.02em', textAlign: 'right' }}>{value}</span>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ borderTop: `1px solid ${borderCol}` }} />
+
+      {/* 操作按鈕 */}
+      <div style={{ padding: '12px 20px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <button
+          onClick={() => navigator.clipboard?.writeText(record.title)}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+            padding: '9px 14px', borderRadius: 8, background: paperBg2,
+            border: `1px solid ${borderCol}`, color: ink2Col,
+            fontFamily: SERIF, fontSize: 13, cursor: 'pointer', transition: 'background .12s',
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.background = borderCol)}
+          onMouseLeave={(e) => (e.currentTarget.style.background = paperBg2)}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="9" y="9" width="13" height="13" rx="2" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+          </svg>
+          複製書名
+        </button>
       </div>
     </div>
   )
@@ -177,9 +251,25 @@ const BookInfoPanel = ({ record, getCoverDataUrl, embedded }: { record: BookReco
   if (embedded) return body
 
   return (
-    <div className="w-56 shrink-0 flex flex-col border-l border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-gray-900 overflow-hidden">
-      <div className="px-4 py-3 border-b border-stone-200 dark:border-stone-700 shrink-0">
-        <span className="text-sm font-medium text-stone-600 dark:text-stone-300">書籍資訊</span>
+    <div style={{
+      width: 260, flexShrink: 0, height: '100%',
+      borderLeft: `1px solid ${borderCol}`,
+      background: paperBg,
+      display: 'flex', flexDirection: 'column', overflow: 'hidden',
+    }}>
+      <div style={{ padding: '14px 20px', borderBottom: `1px solid ${borderCol}`, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ fontFamily: SERIF, fontSize: 15, fontWeight: 500, color: inkCol }}>書籍資訊</div>
+        {onClose && (
+          <button
+            onClick={onClose}
+            style={{ width: 26, height: 26, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', color: ink3Col, cursor: 'pointer', transition: 'all .12s' }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = inkCol; e.currentTarget.style.background = paperBg2 }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = ink3Col; e.currentTarget.style.background = 'transparent' }}
+            aria-label="關閉"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        )}
       </div>
       {body}
     </div>
@@ -235,7 +325,7 @@ const patchIframeViewPrototype = (proto: Record<string, unknown>) => {
   }
 }
 
-const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMode, onToggleDark }: Props) => {
+const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMode, onToggleDark, onUpdateProgress }: Props) => {
   const viewerRef = useRef<HTMLDivElement>(null)
   const bookRef = useRef<Book | null>(null)
   const renditionRef = useRef<Rendition | null>(null)
@@ -277,6 +367,14 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
   const letterSpacingRef = useRef(letterSpacing)
   const { addAnnotation, updateColor, removeAnnotation, clearAll: clearAnnotations, loadForBook } = useAnnotationStore()
   const { playing, speak, stop, voices, selectedVoice, setSelectedVoice, rate, setRate } = useTTS()
+
+  useEffect(() => {
+    if (pageInfo && pageInfo.total > 0) {
+      onUpdateProgress?.(pageInfo.page / pageInfo.total)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pageInfo])
+
   // 睡眠計時器
   const [sleepMinutes, setSleepMinutes] = useState(0)
   const [sleepRemaining, setSleepRemaining] = useState<number | null>(null)
@@ -891,11 +989,11 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     darkModeRef.current = darkMode
     try {
       if (darkMode) {
-        renditionRef.current?.themes.override('color', '#e5e7eb')
-        renditionRef.current?.themes.override('background', '#111827')
+        renditionRef.current?.themes.override('color', '#e8e0d4')
+        renditionRef.current?.themes.override('background', '#1a1816')
       } else {
-        renditionRef.current?.themes.override('color', '#1c1917')
-        renditionRef.current?.themes.override('background', '#fafaf9')
+        renditionRef.current?.themes.override('color', '#2a2420')
+        renditionRef.current?.themes.override('background', '#f9f7f2')
       }
     } catch { /* epubjs 時序問題，忽略 */ }
     const doc = viewerRef.current?.querySelector('iframe')?.contentDocument
@@ -1257,12 +1355,15 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
 
   return (
     <div
-      className="flex flex-col h-screen bg-stone-50 dark:bg-gray-900"
+      className="flex flex-col h-screen"
+      style={{ background: darkMode ? '#1a1816' : '#f9f7f2' }}
       onClick={() => { setPopup(null); setEditPopup(null) }}
     >
       <Toolbar
         onBack={onBack}
         bookTitle={bookTitle}
+        bookAuthor={bookRecord?.author}
+        pageInfo={pageInfo}
         darkMode={darkMode}
         onToggleDark={onToggleDark}
         onToggleMobilePanel={() => togglePanel('mobilepanel')}
@@ -1304,14 +1405,11 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
           </button>
           <div ref={viewerRef} className="absolute top-2 bottom-7 left-0 right-0 overflow-hidden" />
 
-          {/* 頁面資訊：底部 */}
-          {ready && (
-            <div className="absolute bottom-2 left-14 right-14 flex justify-between z-10 pointer-events-none">
-              <span className="text-xs text-stone-400 dark:text-stone-500 select-none">
-                {chapterRemaining !== null ? `這一章還有 ${chapterRemaining} 頁` : ''}
-              </span>
-              <span className="text-xs text-stone-400 dark:text-stone-500 select-none">
-                {pageInfo ? `第 ${pageInfo.page} 頁（共 ${pageInfo.total} 頁）` : ''}
+          {/* 章節剩餘頁（底部左側小字，桌面版） */}
+          {ready && chapterRemaining !== null && (
+            <div className="absolute bottom-8 md:bottom-2 left-14 z-10 pointer-events-none">
+              <span style={{ fontFamily: '"JetBrains Mono", ui-monospace, monospace', fontSize: 10, color: darkMode ? '#7a706a' : '#9a8f80', letterSpacing: '0.04em', userSelect: 'none' }}>
+                還有 {chapterRemaining} 頁
               </span>
             </div>
           )}
@@ -1377,6 +1475,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
 
         {activePanel === 'settings' && (
           <SettingsPanel
+            darkMode={darkMode}
             fontSize={fontSize}
             onFontSizeChange={setFontSize}
             fontFamily={fontFamily}
@@ -1416,15 +1515,22 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
             toc={toc}
             currentHref={currentHref}
             onNavigate={handleNavigateToChapter}
+            darkMode={darkMode}
           />
         )}
         {activePanel === 'bookinfo' && bookRecord && (
-          <BookInfoPanel record={bookRecord} getCoverDataUrl={getCoverDataUrl} />
+          <BookInfoPanel
+            record={bookRecord}
+            getCoverDataUrl={getCoverDataUrl}
+            darkMode={darkMode}
+            onClose={() => setActivePanel(null)}
+            progress={bookRecord.progress ?? (pageInfo && pageInfo.total > 0 ? pageInfo.page / pageInfo.total : null)}
+          />
         )}
         {activePanel === 'mobilepanel' && (
-          <div className="w-64 shrink-0 flex flex-col border-l border-stone-200 dark:border-stone-700 bg-white dark:bg-gray-800 overflow-hidden">
+          <div style={{ width: 260, flexShrink: 0, display: 'flex', flexDirection: 'column', borderLeft: `1px solid ${darkMode ? '#3a3430' : '#e4ddd0'}`, background: darkMode ? '#1a1816' : '#f9f7f2', overflow: 'hidden' }}>
             {/* Tab 切換列 */}
-            <div className="flex shrink-0 border-b border-stone-200 dark:border-stone-700">
+            <div style={{ display: 'flex', flexShrink: 0, borderBottom: `1px solid ${darkMode ? '#3a3430' : '#e4ddd0'}` }}>
               {([
                 { key: 'bookinfo', label: '書籍' },
                 { key: 'chapters', label: '目錄' },
@@ -1432,11 +1538,12 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
               ] as const).map(({ key, label }) => (
                 <button
                   key={key}
-                  className={`flex-1 py-2.5 text-xs font-medium transition border-b-2 ${
-                    mobilePanelTab === key
-                      ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400'
-                      : 'border-transparent text-stone-500 dark:text-stone-400 hover:text-stone-700 dark:hover:text-stone-200'
-                  }`}
+                  style={{
+                    flex: 1, padding: '10px 0', fontSize: 12, cursor: 'pointer', transition: 'all .12s',
+                    fontFamily: '"JetBrains Mono", ui-monospace, monospace', letterSpacing: '0.06em',
+                    borderBottom: `2px solid ${mobilePanelTab === key ? 'oklch(0.62 0.14 40)' : 'transparent'}`,
+                    color: mobilePanelTab === key ? 'oklch(0.62 0.14 40)' : (darkMode ? '#7a706a' : '#9a8f80'),
+                  }}
                   onClick={() => setMobilePanelTab(key)}
                 >
                   {label}
@@ -1444,12 +1551,18 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
               ))}
             </div>
             {/* 內容區 */}
-            <div className="flex-1 overflow-hidden flex flex-col">
+            <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
               {mobilePanelTab === 'bookinfo' && bookRecord && (
-                <BookInfoPanel record={bookRecord} getCoverDataUrl={getCoverDataUrl} embedded />
+                <BookInfoPanel
+                  record={bookRecord}
+                  getCoverDataUrl={getCoverDataUrl}
+                  darkMode={darkMode}
+                  progress={bookRecord.progress ?? (pageInfo && pageInfo.total > 0 ? pageInfo.page / pageInfo.total : null)}
+                  embedded
+                />
               )}
               {mobilePanelTab === 'chapters' && (
-                <ChapterPanel toc={toc} currentHref={currentHref} onNavigate={handleNavigateToChapter} embedded />
+                <ChapterPanel toc={toc} currentHref={currentHref} onNavigate={handleNavigateToChapter} darkMode={darkMode} embedded />
               )}
               {mobilePanelTab === 'notes' && (
                 <NotePanel
@@ -1465,6 +1578,29 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
           </div>
         )}
       </div>
+
+      {/* 手機版底部進度列 */}
+      {ready && pageInfo && (
+        <div
+          className="md:hidden"
+          style={{
+            height: 32, flexShrink: 0,
+            borderTop: `1px solid ${darkMode ? '#3a3430' : '#e4ddd0'}`,
+            background: darkMode ? '#1a1816' : '#f9f7f2',
+            display: 'flex', alignItems: 'center', gap: 10, padding: '0 16px',
+          }}
+        >
+          <span style={{ fontFamily: MONO, fontSize: 10, color: darkMode ? '#7a706a' : '#9a8f80', whiteSpace: 'nowrap', letterSpacing: '0.04em', flexShrink: 0 }}>
+            第 {pageInfo.page} 頁
+          </span>
+          <div style={{ flex: 1, height: 2, background: darkMode ? '#3a3430' : '#e4ddd0', borderRadius: 2 }}>
+            <div style={{ width: `${Math.min(pageInfo.page / pageInfo.total * 100, 100)}%`, height: '100%', background: 'oklch(0.62 0.14 40)', borderRadius: 2, transition: 'width .3s' }} />
+          </div>
+          <span style={{ fontFamily: MONO, fontSize: 10, color: darkMode ? '#7a706a' : '#9a8f80', whiteSpace: 'nowrap', letterSpacing: '0.04em', flexShrink: 0 }}>
+            / {pageInfo.total} · {Math.round(pageInfo.page / pageInfo.total * 100)}%
+          </span>
+        </div>
+      )}
     </div>
   )
 }

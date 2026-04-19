@@ -30,8 +30,8 @@ const injectStyle = (doc: Document, id: string, css: string) => {
 }
 
 const applyDarkOverride = (doc: Document, isDark: boolean) => {
-  const bg = isDark ? '#111827' : '#fafaf9'
-  const color = isDark ? '#e5e7eb' : '#1c1917'
+  const bg = isDark ? '#1a1816' : '#f9f7f2'
+  const color = isDark ? '#e8e0d4' : '#2a2420'
   const colorRule = isDark ? `* { color: ${color} !important; }` : ''
   injectStyle(doc, 'tit-dark', `html, body { background-color: ${bg} !important; } ${colorRule}`)
 }
@@ -105,12 +105,130 @@ const restoreDoc = (doc: Document) => {
 }
 
 
+import type { BookRecord } from '../hooks/useLibrary'
+
+const SERIF = '"Source Serif 4", "Noto Serif TC", Georgia, serif'
+const MONO  = '"JetBrains Mono", ui-monospace, monospace'
+
+const COVER_STYLES = [
+  { bg: 'oklch(0.92 0.04 80)',  ink: 'oklch(0.35 0.06 60)',  rule: 'oklch(0.68 0.08 55)' },
+  { bg: 'oklch(0.86 0.04 65)',  ink: 'oklch(0.30 0.04 50)',  rule: 'oklch(0.55 0.06 40)' },
+  { bg: 'oklch(0.30 0.06 260)', ink: 'oklch(0.92 0.02 260)', rule: 'oklch(0.72 0.10 260)' },
+  { bg: 'oklch(0.42 0.05 150)', ink: 'oklch(0.95 0.02 140)', rule: 'oklch(0.78 0.08 145)' },
+  { bg: 'oklch(0.88 0.04 20)',  ink: 'oklch(0.35 0.06 15)',  rule: 'oklch(0.62 0.12 20)' },
+  { bg: 'oklch(0.45 0.02 250)', ink: 'oklch(0.95 0.01 250)', rule: 'oklch(0.80 0.04 250)' },
+]
+const coverStyleFor = (id: string) => COVER_STYLES[id.split('').reduce((a, c) => a + c.charCodeAt(0), 0) % COVER_STYLES.length]
+const formatDate = (ts: number) =>
+  ts ? new Date(ts).toLocaleDateString('zh-TW', { year: 'numeric', month: 'numeric', day: 'numeric' }) : '—'
+
+const BookInfoPanel = ({
+  record, getCoverDataUrl, darkMode, onClose, progress,
+}: {
+  record: BookRecord
+  getCoverDataUrl: (id: string) => Promise<string | null>
+  darkMode: boolean
+  onClose?: () => void
+  progress?: number | null
+}) => {
+  const [coverUrl, setCoverUrl] = useState<string | null>(null)
+  useEffect(() => {
+    setCoverUrl(null)
+    if (!record.hasCover) return
+    getCoverDataUrl(record.id).then((url) => { if (url) setCoverUrl(url) })
+  }, [record.id, record.hasCover, getCoverDataUrl])
+
+  const paperBg   = darkMode ? '#1a1816' : '#f9f7f2'
+  const paperBg2  = darkMode ? '#231f1c' : '#f1ede4'
+  const borderCol = darkMode ? '#3a3430' : '#e4ddd0'
+  const inkCol    = darkMode ? '#e8e0d4' : '#2a2420'
+  const ink2Col   = darkMode ? '#b8afa4' : '#5a4e44'
+  const ink3Col   = darkMode ? '#7a706a' : '#9a8f80'
+  const accentCol = 'oklch(0.62 0.14 40)'
+  const cs = coverStyleFor(record.id)
+  const pct = progress != null ? Math.round(progress * 100) : null
+
+  const coverEl = coverUrl ? (
+    <img src={coverUrl} alt={record.title} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+  ) : (
+    <div style={{ width: '100%', height: '100%', background: cs.bg, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', padding: 14, position: 'relative', overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(135deg, rgba(255,255,255,0.06) 0%, transparent 60%)' }} />
+      <div style={{ borderBottom: `1px solid ${cs.rule}`, marginBottom: 8, paddingBottom: 6 }}>
+        <div style={{ fontFamily: SERIF, fontSize: 16, fontWeight: 600, color: cs.ink, lineHeight: 1.4, wordBreak: 'break-all' }}>{record.title}</div>
+      </div>
+      {record.author && <div style={{ fontFamily: MONO, fontSize: 10, color: cs.rule, letterSpacing: '0.06em' }}>{record.author}</div>}
+    </div>
+  )
+
+  return (
+    <div style={{ width: 260, flexShrink: 0, height: '100%', borderLeft: `1px solid ${borderCol}`, background: paperBg, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{ padding: '14px 20px', borderBottom: `1px solid ${borderCol}`, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ fontFamily: SERIF, fontSize: 15, fontWeight: 500, color: inkCol }}>書籍資訊</div>
+        {onClose && (
+          <button
+            onClick={onClose}
+            style={{ width: 26, height: 26, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', color: ink3Col, cursor: 'pointer', transition: 'all .12s' }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = inkCol; e.currentTarget.style.background = paperBg2 }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = ink3Col; e.currentTarget.style.background = 'transparent' }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        )}
+      </div>
+      <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
+        <div style={{ padding: '16px 20px 12px' }}>
+          <div style={{ aspectRatio: '2/3', overflow: 'hidden', boxShadow: '0 4px 16px -4px rgba(0,0,0,0.25)', borderRadius: 4 }}>{coverEl}</div>
+        </div>
+        <div style={{ padding: '0 20px 16px' }}>
+          <div style={{ fontFamily: SERIF, fontSize: 16, fontWeight: 500, color: inkCol, lineHeight: 1.4, marginBottom: 4 }}>{record.title}</div>
+          {record.author && <div style={{ fontFamily: MONO, fontSize: 11, color: ink3Col, letterSpacing: '0.04em' }}>{record.author}</div>}
+        </div>
+        <div style={{ borderTop: `1px solid ${borderCol}` }} />
+        {pct !== null && (
+          <div style={{ padding: '14px 20px 0' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+              <span style={{ fontFamily: MONO, fontSize: 10, color: ink3Col, letterSpacing: '0.08em', textTransform: 'uppercase' }}>閱讀進度</span>
+              <span style={{ fontFamily: MONO, fontSize: 10, color: accentCol }}>{pct}%</span>
+            </div>
+            <div style={{ height: 3, background: borderCol, borderRadius: 2 }}>
+              <div style={{ width: `${pct}%`, height: '100%', background: accentCol, borderRadius: 2 }} />
+            </div>
+          </div>
+        )}
+        <div style={{ padding: '14px 20px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {[{ label: '匯入時間', value: formatDate(record.addedAt) }, { label: '最後閱讀', value: record.lastOpenedAt ? formatDate(record.lastOpenedAt) : '尚未記錄' }].map(({ label, value }) => (
+            <div key={label} style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
+              <span style={{ fontFamily: MONO, fontSize: 10, color: ink3Col, letterSpacing: '0.06em', flexShrink: 0 }}>{label}</span>
+              <span style={{ fontFamily: MONO, fontSize: 11, color: ink2Col, textAlign: 'right' }}>{value}</span>
+            </div>
+          ))}
+        </div>
+        <div style={{ borderTop: `1px solid ${borderCol}` }} />
+        <div style={{ padding: '12px 20px' }}>
+          <button
+            onClick={() => navigator.clipboard?.writeText(record.title)}
+            style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '9px 14px', borderRadius: 8, background: paperBg2, border: `1px solid ${borderCol}`, color: ink2Col, fontFamily: SERIF, fontSize: 13, cursor: 'pointer', transition: 'background .12s' }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = borderCol)}
+            onMouseLeave={(e) => (e.currentTarget.style.background = paperBg2)}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+            複製書名
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 interface Props {
   bookPath: string
   bookId: string
+  bookRecord: BookRecord | null
+  getCoverDataUrl: (id: string) => Promise<string | null>
   onBack: () => void
   darkMode: boolean
   onToggleDark: () => void
+  onUpdateProgress?: (pct: number) => void
 }
 
 // epub.js prototype patch helpers（移到元件外；使用 Proxy.apply trap 完全避免 this 關鍵字）
@@ -160,7 +278,7 @@ const patchIframeViewPrototype = (proto: Record<string, unknown>) => {
   }
 }
 
-const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => {
+const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMode, onToggleDark, onUpdateProgress }: Props) => {
   const viewerRef = useRef<HTMLDivElement>(null)
   const bookRef = useRef<Book | null>(null)
   const renditionRef = useRef<Rendition | null>(null)
@@ -170,7 +288,7 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
   const darkModeRef = useRef(darkMode)
   const currentDocRef = useRef<Document | null>(null)
   const lastIframeClickRef = useRef({ x: 0, y: 0 }) // iframe 內最後一次點擊的主視窗座標
-  const [activePanel, setActivePanel] = useState<'notes' | 'chapters' | 'settings' | null>(null)
+  const [activePanel, setActivePanel] = useState<'notes' | 'chapters' | 'settings' | 'bookinfo' | null>(null)
   const [toc, setToc] = useState<TocItem[]>([])
   const [currentHref, setCurrentHref] = useState('')
   const [ready, setReady] = useState(false)
@@ -195,6 +313,14 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
   const scanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const { addAnnotation, updateColor, removeAnnotation, clearAll: clearAnnotations, loadForBook } = useAnnotationStore()
   const { playing, speak, stop, voices, selectedVoice, setSelectedVoice, rate, setRate } = useTTS()
+
+  useEffect(() => {
+    if (pageInfo && pageInfo.total > 0) {
+      onUpdateProgress?.(pageInfo.page / pageInfo.total)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pageInfo])
+
   // 睡眠計時器
   const [sleepMinutes, setSleepMinutes] = useState(0)
   const [sleepRemaining, setSleepRemaining] = useState<number | null>(null)
@@ -692,11 +818,11 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
     darkModeRef.current = darkMode
     try {
       if (darkMode) {
-        renditionRef.current?.themes.override('color', '#e5e7eb')
-        renditionRef.current?.themes.override('background', '#111827')
+        renditionRef.current?.themes.override('color', '#e8e0d4')
+        renditionRef.current?.themes.override('background', '#1a1816')
       } else {
-        renditionRef.current?.themes.override('color', '#1c1917')
-        renditionRef.current?.themes.override('background', '#fafaf9')
+        renditionRef.current?.themes.override('color', '#2a2420')
+        renditionRef.current?.themes.override('background', '#f9f7f2')
       }
     } catch { /* epubjs 時序問題，忽略 */ }
     applyToCurrentDoc(doc => applyDarkOverride(doc, darkMode))
@@ -829,7 +955,7 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
     })
   }
 
-  const togglePanel = (panel: 'notes' | 'chapters' | 'settings') =>
+  const togglePanel = (panel: 'notes' | 'chapters' | 'settings' | 'bookinfo') =>
     setActivePanel((cur) => (cur === panel ? null : panel))
 
   const speakCurrentPage = () => {
@@ -940,14 +1066,18 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
 
   return (
     <div
-      className="flex flex-col h-screen bg-stone-50 dark:bg-gray-900"
+      className="flex flex-col h-screen"
+      style={{ background: darkMode ? '#1a1816' : '#f9f7f2' }}
       onClick={() => { setPopup(null); setEditPopup(null) }}
     >
       <Toolbar
         onBack={onBack}
         bookTitle={bookTitle}
+        bookAuthor={bookRecord?.author}
+        pageInfo={pageInfo}
         darkMode={darkMode}
         onToggleDark={onToggleDark}
+        onToggleBookInfo={() => togglePanel('bookinfo')}
         onToggleNotes={() => togglePanel('notes')}
         onToggleChapters={() => togglePanel('chapters')}
         onToggleSettings={() => togglePanel('settings')}
@@ -961,7 +1091,7 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
             </div>
           )}
           <button
-            className="absolute left-2 top-1/2 -translate-y-1/2 z-10 w-10 h-10 flex items-center justify-center rounded-full bg-stone-200 dark:bg-stone-700 hover:bg-stone-300 dark:hover:bg-stone-600 transition text-xl disabled:opacity-30"
+            className="absolute left-2 top-1/2 -translate-y-1/2 z-10 w-10 h-10 flex items-center justify-center rounded-full transition text-xl disabled:opacity-30" style={{ background: 'transparent', color: darkMode ? '#7a706a' : '#9a8f80' }}
             onClick={readingDirection === 'rtl' ? nextPage : prevPage}
             disabled={!ready || (readingDirection === 'rtl' ? atEnd : atStart)}
             aria-label={readingDirection === 'rtl' ? '下一頁' : '上一頁'}
@@ -982,7 +1112,7 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
             </div>
           )}
           <button
-            className="absolute right-2 top-1/2 -translate-y-1/2 z-10 w-10 h-10 flex items-center justify-center rounded-full bg-stone-200 dark:bg-stone-700 hover:bg-stone-300 dark:hover:bg-stone-600 transition text-xl disabled:opacity-30"
+            className="absolute right-2 top-1/2 -translate-y-1/2 z-10 w-10 h-10 flex items-center justify-center rounded-full transition text-xl disabled:opacity-30" style={{ background: 'transparent', color: darkMode ? '#7a706a' : '#9a8f80' }}
             onClick={readingDirection === 'rtl' ? prevPage : nextPage}
             disabled={!ready || (readingDirection === 'rtl' ? atStart : atEnd)}
             aria-label={readingDirection === 'rtl' ? '上一頁' : '下一頁'}
@@ -993,8 +1123,8 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
           {/* 編輯現有註記 popup */}
           {editPopup && (
             <div
-              className="fixed z-50 flex items-center gap-1.5 p-2 bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-stone-200 dark:border-stone-700"
-              style={{ left: editPopup.x, top: editPopup.y - 52, transform: 'translateX(-50%)' }}
+              className="fixed z-50 flex items-center gap-1.5 p-2 rounded-xl shadow-xl"
+              style={{ left: editPopup.x, top: editPopup.y - 52, transform: 'translateX(-50%)', background: darkMode ? '#231f1c' : '#f9f7f2', border: `1px solid ${darkMode ? '#3a3430' : '#e4ddd0'}` }}
               onClick={(e) => e.stopPropagation()}
             >
               {HIGHLIGHT_COLORS.map((c) => (
@@ -1021,8 +1151,8 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
           {/* 顏色選擇器 popup */}
           {popup && (
             <div
-              className="fixed z-50 flex gap-1.5 p-2 bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-stone-200 dark:border-stone-700"
-              style={{ left: popup.x, top: popup.y - 52, transform: 'translateX(-50%)' }}
+              className="fixed z-50 flex gap-1.5 p-2 rounded-xl shadow-xl"
+              style={{ left: popup.x, top: popup.y - 52, transform: 'translateX(-50%)', background: darkMode ? '#231f1c' : '#f9f7f2', border: `1px solid ${darkMode ? '#3a3430' : '#e4ddd0'}` }}
               onClick={(e) => e.stopPropagation()}
             >
               {HIGHLIGHT_COLORS.map((c) => (
@@ -1041,6 +1171,7 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
 
         {activePanel === 'settings' && (
           <SettingsPanel
+            darkMode={darkMode}
             fontSize={fontSize}
             onFontSizeChange={setFontSize}
             fontFamily={fontFamily}
@@ -1080,6 +1211,16 @@ const Reader = ({ bookPath, bookId, onBack, darkMode, onToggleDark }: Props) => 
             toc={toc}
             currentHref={currentHref}
             onNavigate={handleNavigateToChapter}
+            darkMode={darkMode}
+          />
+        )}
+        {activePanel === 'bookinfo' && bookRecord && (
+          <BookInfoPanel
+            record={bookRecord}
+            getCoverDataUrl={getCoverDataUrl}
+            darkMode={darkMode}
+            onClose={() => setActivePanel(null)}
+            progress={pageInfo && pageInfo.total > 0 ? pageInfo.page / pageInfo.total : null}
           />
         )}
       </div>
