@@ -1403,11 +1403,11 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
           >
             ‹
           </button>
-          <div ref={viewerRef} className="absolute top-2 bottom-7 left-0 right-0 overflow-hidden" />
+          <div ref={viewerRef} className="absolute top-2 bottom-2 md:bottom-8 left-0 right-0 overflow-hidden" />
 
-          {/* 章節剩餘頁（底部左側小字，桌面版） */}
+          {/* 章節剩餘頁（底部左側小字，僅桌面版） */}
           {ready && chapterRemaining !== null && (
-            <div className="absolute bottom-8 md:bottom-2 left-14 z-10 pointer-events-none">
+            <div className="hidden md:block absolute md:bottom-2 left-14 z-10 pointer-events-none">
               <span style={{ fontFamily: '"JetBrains Mono", ui-monospace, monospace', fontSize: 10, color: darkMode ? '#7a706a' : '#9a8f80', letterSpacing: '0.04em', userSelect: 'none' }}>
                 還有 {chapterRemaining} 頁
               </span>
