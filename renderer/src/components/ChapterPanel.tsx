@@ -65,13 +65,15 @@ const TocRow = ({ item, depth, index, activeHref, onNavigate, inkCol, ink2Col, i
           )}
 
           {hasChildren && (
-            <button
-              style={{ marginRight: 4, color: ink3Col, fontSize: 10, lineHeight: 1, flexShrink: 0 }}
+            <span
+              role="button"
+              tabIndex={-1}
+              style={{ marginRight: 4, color: ink3Col, fontSize: 10, lineHeight: 1, flexShrink: 0, cursor: 'pointer' }}
               onClick={(e) => { e.stopPropagation(); setOpen(!open) }}
               aria-label={open ? '收合' : '展開'}
             >
               {open ? '▾' : '▸'}
-            </button>
+            </span>
           )}
 
           <span style={{ flex: 1, fontFamily: SERIF, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

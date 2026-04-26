@@ -309,15 +309,23 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
   const fontFamilyRef = useRef(fontFamily)
   const letterSpacingRef = useRef(letterSpacing)
   const chapterPagesRef = useRef<Map<number, number>>(new Map()) // spineIndex → 已渲染的章節總頁數
+  const currentSpineIdxRef = useRef<number | null>(null)   // 當前 spine index，供掃描完成後重算 page
+  const currentChapterPageRef = useRef<number>(1)           // 當前章節內頁碼，供掃描完成後重算 page
   const scanAbortRef = useRef<{ aborted: boolean }>({ aborted: false })
   const scanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const { addAnnotation, updateColor, removeAnnotation, clearAll: clearAnnotations, loadForBook } = useAnnotationStore()
   const { playing, speak, stop, voices, selectedVoice, setSelectedVoice, rate, setRate } = useTTS()
 
   useEffect(() => {
-    if (pageInfo && pageInfo.total > 0) {
-      onUpdateProgress?.(pageInfo.page / pageInfo.total)
+    if (!pageInfo || pageInfo.total <= 0) return
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const spineTotal: number = (bookRef.current as any)?.spine?.items?.length ?? 1
+    const knownChapters = chapterPagesRef.current.size
+    if (knownChapters < spineTotal) {
+      // 掃描尚未完成，估算不可靠，跳過存入避免覆蓋 Library 正確進度
+      return
     }
+    onUpdateProgress?.(pageInfo.page / pageInfo.total)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pageInfo])
 
@@ -398,7 +406,21 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
               const avg = knownValues.reduce((a, b) => a + b, 0) / knownValues.length
               let totalPages = 0
               for (let i = 0; i < spineTotal; i++) totalPages += known.get(i) ?? avg
-              setPageInfo(prev => prev ? { page: prev.page, total: Math.round(totalPages) } : prev)
+              const accurateTotal = Math.round(totalPages)
+              // 直接從主渲染器讀取即時位置，避免 ref 快取和 scanner/主渲染器章節數差異問題
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const mainLoc = (renditionRef.current as any)?.currentLocation?.()
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const mainD = mainLoc?.start?.displayed as { page: number; total: number } | undefined
+              const mainSpineIdx = mainLoc?.start?.index as number | undefined
+              setPageInfo(prev => {
+                if (!prev) return prev
+                if (mainD === undefined || mainSpineIdx === undefined) return { page: prev.page, total: accurateTotal }
+                let prevPages = 0
+                for (let i = 0; i < mainSpineIdx; i++) prevPages += known.get(i) ?? avg
+                const accuratePage = Math.max(Math.round(prevPages + mainD.page), 1)
+                return { page: accuratePage, total: Math.max(accurateTotal, accuratePage) }
+              })
             }
           }
         } catch { /* 略過無法渲染的章節 */ }
@@ -621,6 +643,8 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
           // total 由背景掃描器負責更新，這裡只更新 page，避免 avg 隨掃描進度改變造成 total 跳動
           const spineIdx = l?.start?.index as number | undefined
           if (d && spineIdx !== undefined) {
+            currentSpineIdxRef.current = spineIdx
+            currentChapterPageRef.current = d.page
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const spineTotal: number = (bookRef.current as any)?.spine?.items?.length ?? 1
             chapterPagesRef.current = new Map(chapterPagesRef.current).set(spineIdx, d.total)
@@ -728,6 +752,8 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
       setBookTitle('')
       setPageInfo(null)
       chapterPagesRef.current = new Map()
+      currentSpineIdxRef.current = null
+      currentChapterPageRef.current = 1
       setChapterRemaining(null)
       setAtStart(false)
       setAtEnd(false)

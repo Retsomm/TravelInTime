@@ -330,6 +330,9 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
   const bookRef = useRef<Book | null>(null)
   const renditionRef = useRef<Rendition | null>(null)
   const chapterPagesRef = useRef<Map<number, number>>(new Map()) // spineIndex → 已渲染的章節總頁數
+  const currentChapterPageRef = useRef<number>(1) // 當前章節內頁碼，供掃描完成後重算 page
+  const bookRecordRef = useRef(bookRecord)
+  useEffect(() => { bookRecordRef.current = bookRecord }, [bookRecord])
   const scanAbortRef = useRef<{ aborted: boolean }>({ aborted: false })
   const scanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingAnnotationCfiRef = useRef<string | null>(null)
@@ -369,9 +372,22 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
   const { playing, speak, stop, voices, selectedVoice, setSelectedVoice, rate, setRate } = useTTS()
 
   useEffect(() => {
-    if (pageInfo && pageInfo.total > 0) {
-      onUpdateProgress?.(pageInfo.page / pageInfo.total)
+    if (!pageInfo || pageInfo.total <= 0) return
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const spineTotal: number = (bookRef.current as any)?.spine?.items?.length ?? 1
+    const knownChapters = chapterPagesRef.current.size
+    if (knownChapters < spineTotal) {
+      // 掃描尚未完成，估算不可靠，跳過存入避免覆蓋 Library 正確進度
+      console.log('[Progress] 跳過存入（掃描中）', { knownChapters, spineTotal, estimatedPct: `${Math.round(pageInfo.page / pageInfo.total * 100)}%` })
+      return
     }
+    const ratio = pageInfo.page / pageInfo.total
+    console.log('[Progress] 存入 Library', {
+      page: pageInfo.page,
+      total: pageInfo.total,
+      pct: `${Math.round(ratio * 100)}%`,
+    })
+    onUpdateProgress?.(ratio)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pageInfo])
 
@@ -456,7 +472,38 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
               const avg = knownValues.reduce((a, b) => a + b, 0) / knownValues.length
               let totalPages = 0
               for (let i = 0; i < spineTotal; i++) totalPages += known.get(i) ?? avg
-              setPageInfo(prev => prev ? { page: prev.page, total: Math.round(totalPages) } : prev)
+              const accurateTotal = Math.round(totalPages)
+              console.log('[Progress] 掃描完成，更新 total', {
+                spineTotal,
+                chapterPageCounts: Object.fromEntries(known),
+                accurateTotal,
+              })
+              // 直接從主渲染器讀取即時位置，避免 ref 快取和 scanner/主渲染器章節數差異問題
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const mainLoc = (renditionRef.current as any)?.currentLocation?.()
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const mainD = mainLoc?.start?.displayed as { page: number; total: number } | undefined
+              const mainSpineIdx = mainLoc?.start?.index as number | undefined
+              setPageInfo(prev => {
+                if (!prev) return prev
+                let accuratePage = prev.page
+                if (mainD && mainSpineIdx !== undefined) {
+                  let prevPages = 0
+                  for (let i = 0; i < mainSpineIdx; i++) prevPages += known.get(i) ?? avg
+                  accuratePage = Math.max(Math.round(prevPages + mainD.page), 1)
+                }
+                console.log('[Progress] setPageInfo（掃描後）', {
+                  prevPage: prev.page,
+                  prevTotal: prev.total,
+                  mainSpineIdx,
+                  mainChapterPage: mainD?.page,
+                  accuratePage,
+                  accurateTotal,
+                  prevPct: `${Math.round(prev.page / prev.total * 100)}%`,
+                  newPct: `${Math.round(accuratePage / accurateTotal * 100)}%`,
+                })
+                return { page: accuratePage, total: Math.max(accurateTotal, accuratePage) }
+              })
             }
           }
         } catch { /* 略過無法渲染的章節 */ }
@@ -804,6 +851,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
           const spineIdx = l?.start?.index as number | undefined
           if (d && spineIdx !== undefined) {
             currentSpineIndexRef.current = spineIdx // 同步追蹤當前合法的 spine 索引
+            currentChapterPageRef.current = d.page
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const spineTotal: number = (bookRef.current as any)?.spine?.items?.length ?? 1
             chapterPagesRef.current = new Map(chapterPagesRef.current).set(spineIdx, d.total) // 主渲染的真實章節頁數
@@ -814,11 +862,30 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
             for (let i = 0; i < spineIdx; i++) prevPages += known.get(i) ?? avg
             const globalPage = prevPages + d.page
             const page = Math.max(Math.round(globalPage), 1)
+            console.log('[Progress] relocated 頁碼計算', {
+              spineIdx,
+              spineTotal,
+              chapterPage: d.page,
+              chapterTotal: d.total,
+              knownChapters: known.size,
+              avg: Math.round(avg),
+              prevPages: Math.round(prevPages),
+              globalPage: Math.round(globalPage),
+              page,
+              isEstimated: known.size < spineTotal,
+            })
             setPageInfo(prev => {
               if (prev) return { page, total: Math.max(prev.total, page) }
               let totalPages = 0
               for (let i = 0; i < spineTotal; i++) totalPages += known.get(i) ?? avg
-              return { page, total: Math.max(Math.round(totalPages), page) }
+              const estimatedTotal = Math.max(Math.round(totalPages), page)
+              // 掃描未完成時，以 stored progress 換算初始頁碼，確保顯示正確 %
+              const storedProgress = bookRecordRef.current?.progress
+              if (storedProgress != null && storedProgress > 0 && known.size < spineTotal) {
+                const storedPage = Math.max(Math.round(storedProgress * estimatedTotal), 1)
+                return { page: storedPage, total: estimatedTotal }
+              }
+              return { page, total: estimatedTotal }
             })
           }
         })
@@ -913,6 +980,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
       setBookTitle('')
       setPageInfo(null)
       chapterPagesRef.current = new Map()
+      currentChapterPageRef.current = 1
       setChapterRemaining(null)
       setAtStart(false)
       setAtEnd(false)
