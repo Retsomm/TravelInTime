@@ -127,10 +127,12 @@ const Toolbar = ({
         color: isActive ? accentCol : ink3Col,
         background: isActive ? accentBg : 'transparent',
         display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+        touchAction: 'manipulation',
         ...extraStyle,
       }}
       onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = hoverBg }}
       onMouseLeave={(e) => { e.currentTarget.style.background = isActive ? accentBg : 'transparent' }}
+      onTouchEnd={(e) => { e.preventDefault(); onClick() }}
       onClick={onClick}
       aria-label={ariaLabel}
       title={ariaLabel}

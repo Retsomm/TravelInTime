@@ -1611,7 +1611,9 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
                     fontFamily: '"JetBrains Mono", ui-monospace, monospace', letterSpacing: '0.06em',
                     borderBottom: `2px solid ${mobilePanelTab === key ? 'oklch(0.62 0.14 40)' : 'transparent'}`,
                     color: mobilePanelTab === key ? 'oklch(0.62 0.14 40)' : (darkMode ? '#7a706a' : '#9a8f80'),
+                    touchAction: 'manipulation',
                   }}
+                  onTouchEnd={(e) => { e.preventDefault(); setMobilePanelTab(key) }}
                   onClick={() => setMobilePanelTab(key)}
                 >
                   {label}
