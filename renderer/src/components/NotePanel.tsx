@@ -52,6 +52,7 @@ const exportAnnotations = (selected: Annotation[], bookTitle: string) => {
 const NotePanel = ({ onNavigate, onChangeColor, onRemoveAnnotation, darkMode, bookTitle }: Props) => {
   const { annotations } = useAnnotationStore()
   const [pickerOpenId, setPickerOpenId] = useState<string | null>(null)
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const selectAllRef = useRef<HTMLInputElement>(null)
 
@@ -165,16 +166,17 @@ const NotePanel = ({ onNavigate, onChangeColor, onRemoveAnnotation, darkMode, bo
                         style={{
                           width: 22, height: 22, borderRadius: 6, fontSize: 11,
                           display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          color: ink3Col, cursor: 'pointer', transition: 'all .12s',
+                          color: pendingDeleteId === a.id ? '#ef4444' : ink3Col,
+                          background: pendingDeleteId === a.id ? 'rgba(239,68,68,0.08)' : 'transparent',
+                          cursor: 'pointer', transition: 'all .12s',
                         }}
                         onClick={(e) => {
                           e.stopPropagation()
-                          onRemoveAnnotation(a.id)
-                          setSelectedIds((prev) => { const n = new Set(prev); n.delete(a.id); return n })
-                          if (pickerOpenId === a.id) setPickerOpenId(null)
+                          setPickerOpenId(null)
+                          setPendingDeleteId(pendingDeleteId === a.id ? null : a.id)
                         }}
                         onMouseEnter={(e) => { e.currentTarget.style.color = '#ef4444'; e.currentTarget.style.background = 'rgba(239,68,68,0.08)' }}
-                        onMouseLeave={(e) => { e.currentTarget.style.color = ink3Col; e.currentTarget.style.background = 'transparent' }}
+                        onMouseLeave={(e) => { e.currentTarget.style.color = pendingDeleteId === a.id ? '#ef4444' : ink3Col; e.currentTarget.style.background = pendingDeleteId === a.id ? 'rgba(239,68,68,0.08)' : 'transparent' }}
                         aria-label="刪除此註記"
                       >✕</button>
                     </div>
@@ -195,6 +197,25 @@ const NotePanel = ({ onNavigate, onChangeColor, onRemoveAnnotation, darkMode, bo
                           aria-label={`${c.label}色`}
                         />
                       ))}
+                    </div>
+                  )}
+                  {/* Delete confirmation */}
+                  {pendingDeleteId === a.id && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, paddingLeft: 24 }} onClick={(e) => e.stopPropagation()}>
+                      <span style={{ fontFamily: MONO, fontSize: 11, color: '#ef4444', letterSpacing: '0.02em', flexShrink: 0 }}>確定刪除？</span>
+                      <button
+                        style={{ height: 22, padding: '0 8px', borderRadius: 5, fontFamily: MONO, fontSize: 11, color: ink3Col, background: darkMode ? '#2a2520' : '#ede8e0', cursor: 'pointer' }}
+                        onClick={() => setPendingDeleteId(null)}
+                      >取消</button>
+                      <button
+                        style={{ height: 22, padding: '0 8px', borderRadius: 5, fontFamily: MONO, fontSize: 11, color: '#fff', background: '#ef4444', cursor: 'pointer' }}
+                        onClick={() => {
+                          onRemoveAnnotation(a.id)
+                          setSelectedIds((prev) => { const n = new Set(prev); n.delete(a.id); return n })
+                          setPendingDeleteId(null)
+                          setPickerOpenId(null)
+                        }}
+                      >刪除</button>
                     </div>
                   )}
                 </div>

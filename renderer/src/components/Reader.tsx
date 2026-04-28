@@ -248,17 +248,16 @@ const patchRenditionPrototype = (renditionProto: any) => {
 
 const patchIframeViewPrototype = (proto: Record<string, unknown>) => {
   if (!proto._nullRangeGuard) {
-    const origUnderline = proto.underline as (...a: unknown[]) => unknown
-    proto.underline = new Proxy(origUnderline, {
+    const origUnderline = proto.underline
+    if (typeof origUnderline === 'function') proto.underline = new Proxy(origUnderline as (...a: unknown[]) => unknown, {
       apply(target, thisArg: Record<string, unknown>, args: unknown[]) {
-        const cfiRange = args[0] as string
-        const c = thisArg.contents as { range: (cfi: string) => Range | null } | undefined
-        if (!c) return null
-        const range = c.range(cfiRange)
-        if (!range) {
-          console.warn('[Annotation] CFI 解析失敗，略過建立 underline（可能為舊版無效資料）:', cfiRange)
-          return null
-        }
+        if (!thisArg.contents) return null
+        // 必須先確認 range 非 null 才可建立 Underline；
+        // 若讓 null range 進入 Underline constructor，pane.render() 時
+        // getClientRects() 會 crash，導致整個 pane 的 SVG 全部消失
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const range = (thisArg.contents as any).range?.(args[0])
+        if (!range) return null
         return target.apply(thisArg, args)
       },
     })
@@ -283,15 +282,18 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
   const viewerRef = useRef<HTMLDivElement>(null)
   const bookRef = useRef<Book | null>(null)
   const renditionRef = useRef<Rendition | null>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const addEpubAnnotationRef = useRef<((r: any, ann: { cfi: string; color: string; id: string }) => void) | null>(null)
   const scriptRef = useRef<Script>('tc')
   const baseScriptRef = useRef<Script>('tc') // 書本原始語言，切換時用來判斷方向
   const readingDirectionRef = useRef<'ltr' | 'rtl'>('ltr')
   const darkModeRef = useRef(darkMode)
   const currentDocRef = useRef<Document | null>(null)
   const lastIframeClickRef = useRef({ x: 0, y: 0 }) // iframe 內最後一次點擊的主視窗座標
-  const [activePanel, setActivePanel] = useState<'notes' | 'chapters' | 'settings' | 'bookinfo' | null>(null)
+  const [activePanel, setActivePanel] = useState<'notes' | 'chapters' | 'settings' | 'bookinfo' | 'bookmarks' | null>(null)
   const [bookmarks, setBookmarks] = useState<Bookmark[]>(() => loadBookmarks(bookId))
   const [currentCfi, setCurrentCfi] = useState<string>('')
+  const [bookmarkPendingDeleteId, setBookmarkPendingDeleteId] = useState<string | null>(null)
   const isBookmarked = bookmarks.some((b) => b.cfi === currentCfi)
   const [toc, setToc] = useState<TocItem[]>([])
   const [currentHref, setCurrentHref] = useState('')
@@ -319,6 +321,8 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
   const scanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const { addAnnotation, updateColor, removeAnnotation, clearAll: clearAnnotations, loadForBook } = useAnnotationStore()
   const { playing, speak, stop, voices, selectedVoice, setSelectedVoice, rate, setRate } = useTTS()
+  const stopRef = useRef(stop)
+  useEffect(() => { stopRef.current = stop }, [stop])
 
   useEffect(() => {
     if (!pageInfo || pageInfo.total <= 0) return
@@ -433,7 +437,17 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     } finally {
       hiddenEl.remove()
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const annCountBefore = Object.keys((renditionRef.current?.annotations as any)?._annotations ?? {}).length
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       try { (hiddenRendition as any).destroy() } catch { /* ignore */ }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const annCountAfter = Object.keys((renditionRef.current?.annotations as any)?._annotations ?? {}).length
+      // 若 hiddenRendition.destroy() 清除了主渲染器的 annotation registry，從 store 重新注入
+      if (!token.aborted && renditionRef.current && annCountAfter < annCountBefore && addEpubAnnotationRef.current) {
+        const rend = renditionRef.current
+        const storeAnns = useAnnotationStore.getState().annotations
+        storeAnns.forEach(ann => addEpubAnnotationRef.current!(rend, ann))
+      }
     }
   }, [])
 
@@ -466,32 +480,37 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     ann: { cfi: string; color: string; id: string }
   ) => {
     const annotationId = ann.id // closure 確保 id 可用，不依賴 callback 參數
-    rendition.annotations.add(
-      'underline',
-      ann.cfi,
-      { id: ann.id },
-      // 不依賴 epubjs callback 傳入的 event（版本差異大，可能為 undefined）
-      // 改為直接從 iframe DOM 找到該 annotation 的 SVG 元素，計算其位置
-      () => {
-        // marks-pane 的 SVG 在 outer document，直接用 document.querySelector
-        const annEl = document.querySelector(`.ann-${annotationId}`)
-        let x: number
-        let y: number
-        if (annEl) {
-          const r = annEl.getBoundingClientRect()
-          x = r.left + r.width / 2
-          y = r.top
-        } else {
-          x = lastIframeClickRef.current.x
-          y = lastIframeClickRef.current.y
-        }
+    console.log('[Ann:add] annotations.add 呼叫 id=', ann.id, 'cfi=', ann.cfi.substring(0, 60))
+    try {
+      rendition.annotations.add(
+        'underline',
+        ann.cfi,
+        { id: ann.id },
+        // 不依賴 epubjs callback 傳入的 event（版本差異大，可能為 undefined）
+        // 改為直接從 iframe DOM 找到該 annotation 的 SVG 元素，計算其位置
+        () => {
+          // marks-pane 的 SVG 在 outer document，直接用 document.querySelector
+          const annEl = document.querySelector(`.ann-${annotationId}`)
+          let x: number
+          let y: number
+          if (annEl) {
+            const r = annEl.getBoundingClientRect()
+            x = r.left + r.width / 2
+            y = r.top
+          } else {
+            x = lastIframeClickRef.current.x
+            y = lastIframeClickRef.current.y
+          }
 
-        setPopup(null)
-        setEditPopup({ x, y, annotationId })
-      },
-      `ann-${ann.id}`,
-      { stroke: ann.color, 'stroke-opacity': '1', 'stroke-width': '1.5', fill: 'none' }
-    )
+          setPopup(null)
+          setEditPopup({ x, y, annotationId })
+        },
+        `ann-${ann.id}`,
+        { stroke: ann.color, 'stroke-opacity': '1', 'stroke-width': '1.5', fill: 'none' }
+      )
+    } catch (e) {
+      console.error('[Ann:add] annotations.add 拋出例外:', e)
+    }
     // hooks.render 比 contents 就緒早，可能 inject 失敗；延遲以 clear+inject 補渲染
     setTimeout(() => {
       if (!document.querySelector(`g.ann-${ann.id} line`)) {
@@ -504,6 +523,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
       }
     }, 300)
   }
+  addEpubAnnotationRef.current = addEpubAnnotation
 
   // 初始化書本
   useEffect(() => {
@@ -754,6 +774,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
       if (scanTimerRef.current) clearTimeout(scanTimerRef.current)
       setCurrentCfi('')
       setBookmarks([])
+      setBookmarkPendingDeleteId(null)
       setReady(false)
       setPopup(null)
       setToc([])
@@ -766,14 +787,14 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
       setChapterRemaining(null)
       setAtStart(false)
       setAtEnd(false)
-      stop()
+      stopRef.current()
       unsubAnnotations() // 先 unsub，再 clearAll，避免儲存空陣列覆蓋 localStorage
       clearAnnotations()
       renditionRef.current = null
       bookRef.current?.destroy()
       bookRef.current = null
     }
-  }, [bookPath, bookId, stop, resetScript, setScript, clearAnnotations, loadForBook])
+  }, [bookPath, bookId, resetScript, setScript, clearAnnotations, loadForBook])
 
   // 字體大小（獨立，不影響其他設定）
   useEffect(() => {
@@ -990,8 +1011,60 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     })
   }
 
-  const togglePanel = (panel: 'notes' | 'chapters' | 'settings' | 'bookinfo') =>
+  const togglePanel = (panel: 'notes' | 'chapters' | 'settings' | 'bookinfo' | 'bookmarks') =>
     setActivePanel((cur) => (cur === panel ? null : panel))
+
+  const handleDeleteBookmark = (id: string) => {
+    setBookmarks((prev) => {
+      const next = prev.filter((b) => b.id !== id)
+      saveBookmarks(bookId, next)
+      return next
+    })
+  }
+
+  const getBookmarkLabel = (): string => {
+    const exact = getChapterTitle()
+    if (exact) return exact
+
+    if (!bookRef.current) return '書籤'
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const loc = (renditionRef.current as any)?.currentLocation?.()
+      const curSpineIdx = loc?.start?.index as number | undefined
+      if (curSpineIdx === undefined) return '書籤'
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const spineItems: any[] = (bookRef.current as any)?.spine?.items ?? []
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const tocItems: any[] = (bookRef.current.navigation as any).toc ?? []
+
+      const hrefToSpineIdx = (href: string): number => {
+        const file = href.split('#')[0]
+        return spineItems.findIndex((s: any) =>
+          s.href === file || s.href === href ||
+          (file && (s.href?.endsWith('/' + file) || file?.endsWith('/' + s.href)))
+        )
+      }
+
+      let bestLabel = ''
+      let bestIdx = -1
+
+      const search = (items: any[]) => {
+        for (const item of items) {
+          const si = hrefToSpineIdx(item.href ?? '')
+          if (si !== -1 && si <= curSpineIdx && si > bestIdx) {
+            bestLabel = (item.label as string)?.trim() ?? ''
+            bestIdx = si
+          }
+          if (item.subitems?.length) search(item.subitems)
+        }
+      }
+      search(tocItems)
+      return bestLabel || '書籤'
+    } catch {
+      return '書籤'
+    }
+  }
 
   const handleToggleBookmark = () => {
     const cfi = currentCfi
@@ -1001,13 +1074,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
       if (prev.some((b) => b.cfi === cfi)) {
         next = prev.filter((b) => b.cfi !== cfi)
       } else {
-        const chapterTitle = getChapterTitle()
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const loc = (renditionRef.current as any)?.currentLocation?.()
-        const pageNum = loc?.start?.displayed?.page as number | undefined
-        const label = chapterTitle
-          ? `${chapterTitle}${pageNum ? ` · 第${pageNum}頁` : ''}`
-          : pageNum ? `第${pageNum}頁` : '書籤'
+        const label = getBookmarkLabel()
         next = [...prev, { id: crypto.randomUUID(), cfi, label, addedAt: Date.now() }]
       }
       saveBookmarks(bookId, next)
@@ -1141,6 +1208,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
         activePanel={activePanel}
         isBookmarked={isBookmarked}
         onToggleBookmark={handleToggleBookmark}
+        onToggleBookmarkList={() => togglePanel('bookmarks')}
       />
       <div className="flex flex-1 overflow-hidden">
         <div className="flex-1 relative overflow-hidden">
@@ -1282,6 +1350,82 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
             progress={pageInfo && pageInfo.total > 0 ? pageInfo.page / pageInfo.total : null}
           />
         )}
+        {activePanel === 'bookmarks' && (() => {
+          const borderCol = darkMode ? '#3a3430' : '#e4ddd0'
+          const paperBg   = darkMode ? '#1a1816' : '#f9f7f2'
+          const paperBg2  = darkMode ? '#231f1c' : '#f1ede4'
+          const inkCol    = darkMode ? '#e8e0d4' : '#2a2420'
+          const ink3Col   = darkMode ? '#7a706a' : '#9a8f80'
+          return (
+            <div style={{ width: 260, flexShrink: 0, height: '100%', borderLeft: `1px solid ${borderCol}`, background: paperBg, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              <div style={{ padding: '14px 20px', borderBottom: `1px solid ${borderCol}`, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ fontFamily: SERIF, fontSize: 15, fontWeight: 500, color: inkCol }}>書籤清單</div>
+                <button
+                  className="no-drag"
+                  onClick={() => setActivePanel(null)}
+                  style={{ width: 26, height: 26, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', color: ink3Col, cursor: 'pointer', transition: 'all .12s' }}
+                  onMouseEnter={(e) => { e.currentTarget.style.color = inkCol; e.currentTarget.style.background = paperBg2 }}
+                  onMouseLeave={(e) => { e.currentTarget.style.color = ink3Col; e.currentTarget.style.background = 'transparent' }}
+                  aria-label="關閉"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+              </div>
+              <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
+                {bookmarks.length === 0 ? (
+                  <div style={{ padding: '32px 20px', textAlign: 'center', fontFamily: MONO, fontSize: 12, color: ink3Col, letterSpacing: '0.04em' }}>尚無書籤</div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                    {[...bookmarks].sort((a, b) => a.addedAt - b.addedAt).map((bm) => (
+                      <div
+                        key={bm.id}
+                        className="no-drag"
+                        style={{ borderBottom: `1px solid ${borderCol}`, padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 6, cursor: 'pointer', transition: 'background .12s' }}
+                        onClick={() => { renditionRef.current?.display(bm.cfi).catch(() => {}); setActivePanel(null) }}
+                        onMouseEnter={(e) => (e.currentTarget.style.background = darkMode ? '#231f1c' : '#f1ede4')}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                      >
+                        <div style={{ fontFamily: SERIF, fontSize: 13, color: inkCol, lineHeight: 1.5, wordBreak: 'break-all' }}>
+                          {bm.label}
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <span style={{ fontFamily: MONO, fontSize: 10, color: ink3Col, letterSpacing: '0.04em' }}>
+                            {new Date(bm.addedAt).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' })}
+                          </span>
+                          <button
+                            className="no-drag"
+                            onClick={(e) => { e.stopPropagation(); setBookmarkPendingDeleteId(bookmarkPendingDeleteId === bm.id ? null : bm.id) }}
+                            style={{ fontFamily: MONO, fontSize: 10, color: bookmarkPendingDeleteId === bm.id ? '#ef4444' : ink3Col, cursor: 'pointer', padding: '2px 6px', borderRadius: 4, transition: 'all .12s', background: bookmarkPendingDeleteId === bm.id ? (darkMode ? '#3a1a1a' : '#fff0f0') : 'transparent' }}
+                            onMouseEnter={(e) => { e.currentTarget.style.color = '#ef4444'; e.currentTarget.style.background = darkMode ? '#3a1a1a' : '#fff0f0' }}
+                            onMouseLeave={(e) => { e.currentTarget.style.color = bookmarkPendingDeleteId === bm.id ? '#ef4444' : ink3Col; e.currentTarget.style.background = bookmarkPendingDeleteId === bm.id ? (darkMode ? '#3a1a1a' : '#fff0f0') : 'transparent' }}
+                            aria-label="移除書籤"
+                          >
+                            移除
+                          </button>
+                        </div>
+                        {bookmarkPendingDeleteId === bm.id && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }} onClick={(e) => e.stopPropagation()}>
+                            <span style={{ fontFamily: MONO, fontSize: 11, color: '#ef4444', letterSpacing: '0.02em', flexShrink: 0 }}>確定移除？</span>
+                            <button
+                              className="no-drag"
+                              style={{ height: 22, padding: '0 8px', borderRadius: 5, fontFamily: MONO, fontSize: 11, color: ink3Col, background: darkMode ? '#2a2520' : '#ede8e0', cursor: 'pointer' }}
+                              onClick={(e) => { e.stopPropagation(); setBookmarkPendingDeleteId(null) }}
+                            >取消</button>
+                            <button
+                              className="no-drag"
+                              style={{ height: 22, padding: '0 8px', borderRadius: 5, fontFamily: MONO, fontSize: 11, color: '#fff', background: '#ef4444', cursor: 'pointer' }}
+                              onClick={(e) => { e.stopPropagation(); handleDeleteBookmark(bm.id); setBookmarkPendingDeleteId(null) }}
+                            >移除</button>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )
+        })()}
       </div>
     </div>
   )

@@ -80,7 +80,16 @@ const IconBookmarkFill = () => (
   </svg>
 )
 
-export type ActivePanel = 'notes' | 'chapters' | 'settings' | 'bookinfo' | 'mobilepanel' | null
+const IconBookmarkList = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M13 21l-5-4-5 4V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16z" />
+    <line x1="17" y1="7" x2="21" y2="7" />
+    <line x1="17" y1="11" x2="21" y2="11" />
+    <line x1="17" y1="15" x2="21" y2="15" />
+  </svg>
+)
+
+export type ActivePanel = 'notes' | 'chapters' | 'settings' | 'bookinfo' | 'mobilepanel' | 'bookmarks' | null
 
 interface Props {
   onBack: () => void
@@ -97,6 +106,7 @@ interface Props {
   activePanel: ActivePanel
   isBookmarked: boolean
   onToggleBookmark: () => void
+  onToggleBookmarkList: () => void
 }
 
 const SERIF = '"Source Serif 4", "Noto Serif TC", Georgia, serif'
@@ -117,6 +127,7 @@ const Toolbar = ({
   activePanel,
   isBookmarked,
   onToggleBookmark,
+  onToggleBookmarkList,
 }: Props) => {
   const paperBg   = darkMode ? '#1a1816' : '#f9f7f2'
   const borderCol = darkMode ? '#3a3430' : '#e4ddd0'
@@ -214,6 +225,7 @@ const Toolbar = ({
           {btn(activePanel === 'settings', onToggleSettings, <IconSettings />, '排版與語音設定')}
           {btn(activePanel === 'chapters', onToggleChapters, <IconChapters />, '章節目錄')}
           {btn(activePanel === 'notes', onToggleNotes, <IconNotes />, '我的註記')}
+          {btn(activePanel === 'bookmarks', onToggleBookmarkList, <IconBookmarkList />, '書籤清單')}
         </div>
         {btn(false, onToggleDark, darkMode ? <IconSun /> : <IconMoon />, darkMode ? '切換淺色模式' : '切換深色模式')}
       </div>
