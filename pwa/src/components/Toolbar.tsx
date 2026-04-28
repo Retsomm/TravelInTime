@@ -68,6 +68,18 @@ const IconPanels = () => (
   </svg>
 )
 
+const IconBookmarkOutline = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+  </svg>
+)
+
+const IconBookmarkFill = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+  </svg>
+)
+
 export type ActivePanel = 'notes' | 'chapters' | 'settings' | 'bookinfo' | 'mobilepanel' | null
 
 interface Props {
@@ -83,6 +95,8 @@ interface Props {
   onToggleBookInfo: () => void
   onToggleMobilePanel: () => void
   activePanel: ActivePanel
+  isBookmarked: boolean
+  onToggleBookmark: () => void
 }
 
 const SERIF = '"Source Serif 4", "Noto Serif TC", Georgia, serif'
@@ -101,6 +115,8 @@ const Toolbar = ({
   onToggleBookInfo,
   onToggleMobilePanel,
   activePanel,
+  isBookmarked,
+  onToggleBookmark,
 }: Props) => {
   const paperBg   = darkMode ? '#1a1816' : '#f9f7f2'
   const borderCol = darkMode ? '#3a3430' : '#e4ddd0'
@@ -185,6 +201,8 @@ const Toolbar = ({
 
       {/* 右：圖示按鈕 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+        {/* 收藏按鈕（手機 + 桌面共用） */}
+        {btn(isBookmarked, onToggleBookmark, isBookmarked ? <IconBookmarkFill /> : <IconBookmarkOutline />, isBookmarked ? '移除書籤' : '加入書籤')}
         {/* 手機版：panels + settings（wrapper 只用 className，不加 inline display） */}
         <div className="flex md:hidden items-center">
           {btn(activePanel === 'mobilepanel', onToggleMobilePanel, <IconPanels />, '書籍資訊／目錄／註記')}

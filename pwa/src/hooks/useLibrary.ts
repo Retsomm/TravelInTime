@@ -126,6 +126,24 @@ const extractMeta = (
   return Promise.race([work().catch(() => fallback), timeout])
 }
 
+// ── Bookmarks ──────────────────────────────────────────────────────────
+
+export interface Bookmark {
+  id: string
+  cfi: string
+  label: string
+  addedAt: number
+}
+
+const bookmarksKey = (bookId: string) => `tit-bookmarks-${bookId}`
+
+export const loadBookmarks = (bookId: string): Bookmark[] => {
+  try { return JSON.parse(localStorage.getItem(bookmarksKey(bookId)) ?? '[]') } catch { return [] }
+}
+
+export const saveBookmarks = (bookId: string, bookmarks: Bookmark[]) =>
+  localStorage.setItem(bookmarksKey(bookId), JSON.stringify(bookmarks))
+
 // ── Reading progress ───────────────────────────────────────────────────
 
 const progressKey = (bookId: string) => `tit-progress-${bookId}`
@@ -218,6 +236,7 @@ export const useLibrary = () => {
     await idbDelete('covers', id)
     localStorage.removeItem(progressKey(id))
     localStorage.removeItem(settingsKey(id))
+    localStorage.removeItem(bookmarksKey(id))
     setRecords((prev) => {
       const next = prev.filter((r) => r.id !== id)
       saveMeta(next)

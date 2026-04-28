@@ -43,6 +43,18 @@ const IconBook = () => (
   </svg>
 )
 
+const IconBookmarkOutline = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+  </svg>
+)
+
+const IconBookmarkFill = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+  </svg>
+)
+
 export type ActivePanel = 'notes' | 'chapters' | 'settings' | 'bookinfo' | null
 
 interface Props {
@@ -57,6 +69,8 @@ interface Props {
   onToggleSettings: () => void
   onToggleBookInfo: () => void
   activePanel: ActivePanel
+  isBookmarked: boolean
+  onToggleBookmark: () => void
 }
 
 const SERIF = '"Source Serif 4", "Noto Serif TC", Georgia, serif'
@@ -66,7 +80,7 @@ const Toolbar = ({
   onBack, bookTitle, bookAuthor, pageInfo,
   darkMode, onToggleDark,
   onToggleNotes, onToggleChapters, onToggleSettings, onToggleBookInfo,
-  activePanel,
+  activePanel, isBookmarked, onToggleBookmark,
 }: Props) => {
   const paperBg   = darkMode ? '#1a1816' : '#f9f7f2'
   const borderCol = darkMode ? '#3a3430' : '#e4ddd0'
@@ -151,6 +165,7 @@ const Toolbar = ({
 
       {/* 右：圖示按鈕 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+        {btn(isBookmarked, onToggleBookmark, isBookmarked ? <IconBookmarkFill /> : <IconBookmarkOutline />, isBookmarked ? '移除書籤' : '加入書籤')}
         {btn(activePanel === 'bookinfo', onToggleBookInfo, <IconBook />, '書籍資訊')}
         {btn(activePanel === 'settings', onToggleSettings, <IconSettings />, '排版與語音設定')}
         {btn(activePanel === 'chapters', onToggleChapters, <IconChapters />, '章節目錄')}

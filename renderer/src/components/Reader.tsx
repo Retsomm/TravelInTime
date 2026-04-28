@@ -11,7 +11,8 @@ import useTTS from '../hooks/useTTS'
 import { useReaderStore } from '../store/useReaderStore'
 import type { Script } from '../store/useReaderStore'
 import { useAnnotationStore, loadAnnotationsForBook, saveAnnotationsForBook } from '../store/useAnnotationStore'
-import { saveProgress, loadProgress, saveBookSettings, loadBookSettings } from '../hooks/useLibrary'
+import { saveProgress, loadProgress, saveBookSettings, loadBookSettings, loadBookmarks, saveBookmarks } from '../hooks/useLibrary'
+import type { Bookmark } from '../hooks/useLibrary'
 
 let _toSC: ((s: string) => string) | null = null
 let _toTC: ((s: string) => string) | null = null
@@ -289,6 +290,9 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
   const currentDocRef = useRef<Document | null>(null)
   const lastIframeClickRef = useRef({ x: 0, y: 0 }) // iframe 內最後一次點擊的主視窗座標
   const [activePanel, setActivePanel] = useState<'notes' | 'chapters' | 'settings' | 'bookinfo' | null>(null)
+  const [bookmarks, setBookmarks] = useState<Bookmark[]>(() => loadBookmarks(bookId))
+  const [currentCfi, setCurrentCfi] = useState<string>('')
+  const isBookmarked = bookmarks.some((b) => b.cfi === currentCfi)
   const [toc, setToc] = useState<TocItem[]>([])
   const [currentHref, setCurrentHref] = useState('')
   const [ready, setReady] = useState(false)
@@ -631,7 +635,10 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const l = loc as any
           setCurrentHref((l?.start?.href ?? '').split('#')[0])
-          if (l?.start?.cfi) saveProgress(bookId, l.start.cfi)
+          if (l?.start?.cfi) {
+            saveProgress(bookId, l.start.cfi)
+            setCurrentCfi(l.start.cfi)
+          }
           setAtStart(l?.atStart ?? false)
           setAtEnd(l?.atEnd ?? false)
 
@@ -745,6 +752,8 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
       saveBookSettings(bookId, { fontSize: fs, fontFamily: ff, script: sc, lineHeight: lh, letterSpacing: ls, readingDirection: rd })
       scanAbortRef.current.aborted = true
       if (scanTimerRef.current) clearTimeout(scanTimerRef.current)
+      setCurrentCfi('')
+      setBookmarks([])
       setReady(false)
       setPopup(null)
       setToc([])
@@ -984,6 +993,28 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
   const togglePanel = (panel: 'notes' | 'chapters' | 'settings' | 'bookinfo') =>
     setActivePanel((cur) => (cur === panel ? null : panel))
 
+  const handleToggleBookmark = () => {
+    const cfi = currentCfi
+    if (!cfi) return
+    setBookmarks((prev) => {
+      let next: Bookmark[]
+      if (prev.some((b) => b.cfi === cfi)) {
+        next = prev.filter((b) => b.cfi !== cfi)
+      } else {
+        const chapterTitle = getChapterTitle()
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const loc = (renditionRef.current as any)?.currentLocation?.()
+        const pageNum = loc?.start?.displayed?.page as number | undefined
+        const label = chapterTitle
+          ? `${chapterTitle}${pageNum ? ` · 第${pageNum}頁` : ''}`
+          : pageNum ? `第${pageNum}頁` : '書籤'
+        next = [...prev, { id: crypto.randomUUID(), cfi, label, addedAt: Date.now() }]
+      }
+      saveBookmarks(bookId, next)
+      return next
+    })
+  }
+
   const speakCurrentPage = () => {
     if (!viewerRef.current) return
     const iframe = viewerRef.current.querySelector('iframe')
@@ -1108,6 +1139,8 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
         onToggleChapters={() => togglePanel('chapters')}
         onToggleSettings={() => togglePanel('settings')}
         activePanel={activePanel}
+        isBookmarked={isBookmarked}
+        onToggleBookmark={handleToggleBookmark}
       />
       <div className="flex flex-1 overflow-hidden">
         <div className="flex-1 relative overflow-hidden">
