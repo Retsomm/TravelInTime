@@ -8,7 +8,7 @@ import ChapterPanel from './ChapterPanel'
 import type { TocItem } from './ChapterPanel'
 import SettingsPanel from './SettingsPanel'
 import useTTS from '../hooks/useTTS'
-import { useReaderStore } from '../store/useReaderStore'
+import { FONT_OPTIONS, useReaderStore } from '../store/useReaderStore'
 import type { Script } from '../store/useReaderStore'
 import { useAnnotationStore, loadAnnotationsForBook, saveAnnotationsForBook } from '../store/useAnnotationStore'
 import { saveProgress, loadProgress, saveBookSettings, loadBookSettings, loadBookmarks, saveBookmarks } from '../hooks/useLibrary'
@@ -44,6 +44,11 @@ const WEB_FONT_URLS: Record<string, string> = {
   'LXGW WenKai TC': 'https://fonts.googleapis.com/css2?family=LXGW+WenKai+TC&display=swap',
 }
 
+const DEFAULT_FONT_FAMILY = FONT_OPTIONS[0].value
+
+const normalizeFontFamily = (family: string | null | undefined): string =>
+  family && FONT_OPTIONS.some(option => option.value === family) ? family : DEFAULT_FONT_FAMILY
+
 const injectWebFontLink = (doc: Document, href: string | null) => {
   const id = 'tit-webfont-link'
   let el = doc.getElementById(id) as HTMLLinkElement | null
@@ -58,8 +63,9 @@ const injectWebFontLink = (doc: Document, href: string | null) => {
 }
 
 const applyFontFamilyOverride = (doc: Document, family: string) => {
-  injectStyle(doc, 'tit-font', `:root * { font-family: ${family} !important; }`)
-  const fontKey = Object.keys(WEB_FONT_URLS).find(k => family.includes(k))
+  const normalizedFamily = normalizeFontFamily(family)
+  injectStyle(doc, 'tit-font', `:root * { font-family: ${normalizedFamily} !important; }`)
+  const fontKey = Object.keys(WEB_FONT_URLS).find(k => normalizedFamily.includes(k))
   injectWebFontLink(doc, fontKey ? WEB_FONT_URLS[fontKey] : null)
 }
 
@@ -535,13 +541,15 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     // 載入此書上次儲存的閱讀設定，套用到 store
     const savedSettings = loadBookSettings(bookId)
     if (savedSettings) {
+      const normalizedFamily = normalizeFontFamily(savedSettings.fontFamily)
       const store = useReaderStore.getState()
       store.setFontSize(savedSettings.fontSize)
-      store.setFontFamily(savedSettings.fontFamily)
+      store.setFontFamily(normalizedFamily)
       store.setLineHeight(savedSettings.lineHeight)
       store.setLetterSpacing(savedSettings.letterSpacing)
       store.setReadingDirection(savedSettings.readingDirection)
       store.setScript(savedSettings.script)
+      fontFamilyRef.current = normalizedFamily
       scriptRef.current = savedSettings.script
     } else {
       resetScript()
@@ -841,12 +849,17 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
   // 字體家族（獨立，不影響其他設定）
   useEffect(() => {
     if (!ready) return
-    fontFamilyRef.current = fontFamily
-    try { renditionRef.current?.themes.override('font-family', fontFamily) } catch { /* epubjs 時序問題，忽略 */ }
-    applyToCurrentDoc(doc => applyFontFamilyOverride(doc, fontFamily))
+    const normalizedFamily = normalizeFontFamily(fontFamily)
+    if (normalizedFamily !== fontFamily) {
+      setFontFamily(normalizedFamily)
+      return
+    }
+    fontFamilyRef.current = normalizedFamily
+    try { renditionRef.current?.themes.override('font-family', normalizedFamily) } catch { /* epubjs 時序問題，忽略 */ }
+    applyToCurrentDoc(doc => applyFontFamilyOverride(doc, normalizedFamily))
     rerenderAnnotationPane()
     triggerScan()
-  }, [fontFamily, ready])
+  }, [fontFamily, ready, setFontFamily])
 
   // 行距（獨立，不影響其他設定）
   useEffect(() => {
