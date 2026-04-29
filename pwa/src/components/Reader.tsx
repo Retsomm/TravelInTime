@@ -88,6 +88,22 @@ const HIGHLIGHT_COLORS = [
   { label: '橘', value: '#f97316' },
 ]
 
+const copyTextToClipboard = async (text: string) => {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text)
+    return
+  }
+
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.style.position = 'fixed'
+  textarea.style.left = '-9999px'
+  document.body.appendChild(textarea)
+  textarea.select()
+  document.execCommand('copy')
+  textarea.remove()
+}
+
 const convertDoc = (doc: Document, convert: (s: string) => string) => {
   const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT)
   let node: Node | null
@@ -1194,6 +1210,30 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     setPopup(null)
   }
 
+  const handleSearchSelectedText = () => {
+    if (!popup) return
+    const text = popup.text.trim()
+    if (!text) return
+
+    const iframe = viewerRef.current?.querySelector('iframe')
+    iframe?.contentWindow?.getSelection()?.removeAllRanges()
+    if (renditionRef.current) removePendingAnnotation(renditionRef.current)
+    window.open(`https://www.google.com/search?q=${encodeURIComponent(text)}`, '_blank', 'noopener,noreferrer')
+    setPopup(null)
+  }
+
+  const handleCopySelectedText = async () => {
+    if (!popup) return
+    const text = popup.text.trim()
+    if (!text) return
+
+    const iframe = viewerRef.current?.querySelector('iframe')
+    iframe?.contentWindow?.getSelection()?.removeAllRanges()
+    if (renditionRef.current) removePendingAnnotation(renditionRef.current)
+    await copyTextToClipboard(text)
+    setPopup(null)
+  }
+
   const handleChangeColor = (id: string, color: string) => {
     const ann = useAnnotationStore.getState().annotations.find((a) => a.id === id)
     if (ann && renditionRef.current) {
@@ -1653,6 +1693,25 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
                   title={`${c.label}色標記`}
                 />
               ))}
+              <button
+                className="w-7 h-7 flex items-center justify-center rounded-full bg-stone-100 dark:bg-stone-700 hover:bg-stone-200 dark:hover:bg-stone-600 text-stone-500 dark:text-stone-300 text-xs font-semibold transition"
+                onClick={handleSearchSelectedText}
+                aria-label="使用 Google 搜尋選取文字"
+                title="Google 搜尋"
+              >
+                G
+              </button>
+              <button
+                className="w-7 h-7 flex items-center justify-center rounded-full bg-stone-100 dark:bg-stone-700 hover:bg-stone-200 dark:hover:bg-stone-600 text-stone-500 dark:text-stone-300 transition"
+                onClick={handleCopySelectedText}
+                aria-label="複製選取文字"
+                title="複製"
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <rect x="9" y="9" width="13" height="13" rx="2" />
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                </svg>
+              </button>
             </div>
           )}
         </div>
