@@ -13,6 +13,7 @@ const MAX_UTTERANCE_LENGTH = 3000
 
 const useTTS = () => {
   const [playing, setPlaying] = useState(false)
+  const [paused, setPaused] = useState(false)
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([])
   const [selectedVoice, setSelectedVoice] = useState<SpeechSynthesisVoice | null>(null)
   const [rate, setRate] = useState(1.0)
@@ -21,6 +22,7 @@ const useTTS = () => {
   const rateRef = useRef(1.0)
   const selectedVoiceRef = useRef<SpeechSynthesisVoice | null>(null)
   const playingRef = useRef(false)
+  const pausedRef = useRef(false)
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null)
   const generationRef = useRef(0) // 每次建立新 utterance 遞增，防止舊 callback 干擾
 
@@ -121,6 +123,8 @@ const useTTS = () => {
 
     utterance.onstart = () => {
       if (generationRef.current !== generation) return
+      pausedRef.current = false
+      setPaused(false)
       console.log('[TTS] onstart', { generation, textLength: text.length, offset: textOffsetRef.current })
     }
     utterance.onpause = () => {
@@ -149,6 +153,8 @@ const useTTS = () => {
       stopKeepalive()
       playingRef.current = false
       setPlaying(false)
+      pausedRef.current = false
+      setPaused(false)
       onEndRef.current?.()
     }
     utterance.onerror = (e) => {
@@ -178,6 +184,8 @@ const useTTS = () => {
       stopKeepalive()
       playingRef.current = false
       setPlaying(false)
+      pausedRef.current = false
+      setPaused(false)
       // 確保所有錯誤路徑都呼叫 onEnd 回調，使鏈式朗讀不中斷
       console.log('[TTS] onerror: 調用 onEnd 回調', { generation, error: err })
       onEndRef.current?.()
@@ -197,6 +205,62 @@ const useTTS = () => {
     utteranceRef.current = null
     playingRef.current = false
     setPlaying(false)
+    pausedRef.current = false
+    setPaused(false)
+  }
+
+  const reset = () => {
+    console.log('[TTS] reset() 被呼叫', { generation: generationRef.current })
+    stop()
+    currentTextRef.current = ''
+    textOffsetRef.current = 0
+    charIndexRef.current = 0
+    onEndRef.current = undefined
+    onBoundaryRef.current = undefined
+  }
+
+  const pause = () => {
+    if (!playingRef.current) return
+    console.log('[TTS] pause() 被呼叫', { generation: generationRef.current, offset: textOffsetRef.current, charIndex: charIndexRef.current })
+    stopKeepalive()
+    window.speechSynthesis.pause()
+    playingRef.current = false
+    pausedRef.current = true
+    setPlaying(false)
+    setPaused(true)
+  }
+
+  const resume = () => {
+    if (!pausedRef.current || !currentTextRef.current) return
+    console.log('[TTS] resume() 被呼叫', {
+      generation: generationRef.current,
+      paused: window.speechSynthesis.paused,
+      speaking: window.speechSynthesis.speaking,
+      offset: textOffsetRef.current,
+      charIndex: charIndexRef.current,
+    })
+
+    playingRef.current = true
+    pausedRef.current = false
+    setPlaying(true)
+    setPaused(false)
+
+    if (window.speechSynthesis.paused && window.speechSynthesis.speaking) {
+      window.speechSynthesis.resume()
+      startKeepalive()
+      return
+    }
+
+    const absolutePos = textOffsetRef.current + charIndexRef.current
+    const remaining = currentTextRef.current.slice(absolutePos)
+    if (!remaining.trim()) {
+      stop()
+      return
+    }
+
+    textOffsetRef.current = absolutePos
+    charIndexRef.current = 0
+    createAndPlay(remaining)
   }
 
   // 將文本分割為適合 utterance 的區塊（某些行動浏覽器對文字長度有限制）
@@ -242,7 +306,9 @@ const useTTS = () => {
     onEndRef.current = onEnd
     onBoundaryRef.current = onBoundary
     playingRef.current = true
+    pausedRef.current = false
     setPlaying(true)
+    setPaused(false)
 
     // 檢查文本長度，必要時分割
     const chunks = splitTextByLength(text)
@@ -272,7 +338,9 @@ const useTTS = () => {
     createAndPlay(remaining)
   }
 
-  return { playing, speak, stop, voices, selectedVoice, setSelectedVoice, rate, setRate: handleSetRate }
+  const getProgress = () => textOffsetRef.current + charIndexRef.current
+
+  return { playing, paused, speak, pause, resume, stop, reset, getProgress, voices, selectedVoice, setSelectedVoice, rate, setRate: handleSetRate }
 }
 
 export default useTTS

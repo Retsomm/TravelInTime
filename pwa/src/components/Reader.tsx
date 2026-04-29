@@ -104,6 +104,71 @@ const copyTextToClipboard = async (text: string) => {
   textarea.remove()
 }
 
+const TTS_HIGHLIGHT_ID = 'tit-tts-progress'
+const TTS_HIGHLIGHT_STYLE_ID = 'tit-tts-progress-style'
+
+const ensureTTSHighlightStyle = (doc: Document) => {
+  injectStyle(doc, TTS_HIGHLIGHT_STYLE_ID, `
+    ::highlight(${TTS_HIGHLIGHT_ID}) {
+      background-color: rgba(245, 158, 11, 0.32);
+      color: inherit;
+    }
+  `)
+}
+
+const clearTTSHighlight = (doc: Document | null | undefined) => {
+  const highlights = (doc?.defaultView as any)?.CSS?.highlights
+  highlights?.delete?.(TTS_HIGHLIGHT_ID)
+}
+
+const createRangeFromTextOffset = (doc: Document, start: number, length = 14): Range | null => {
+  const body = doc.body
+  if (!body) return null
+
+  const walker = doc.createTreeWalker(body, NodeFilter.SHOW_TEXT)
+  let node: Node | null
+  let consumed = 0
+  let startNode: Text | null = null
+  let endNode: Text | null = null
+  let startOffset = 0
+  let endOffset = 0
+  const safeStart = Math.max(start, 0)
+  const safeEnd = safeStart + length
+
+  while ((node = walker.nextNode())) {
+    const textNode = node as Text
+    const text = textNode.nodeValue ?? ''
+    const next = consumed + text.length
+
+    if (!startNode && safeStart <= next) {
+      startNode = textNode
+      startOffset = Math.max(0, Math.min(text.length, safeStart - consumed))
+    }
+
+    if (startNode && safeEnd <= next) {
+      endNode = textNode
+      endOffset = Math.max(0, Math.min(text.length, safeEnd - consumed))
+      if (endNode === startNode) endOffset = Math.max(startOffset + 1, endOffset)
+      break
+    }
+
+    consumed = next
+  }
+
+  if (!startNode) return null
+  if (!endNode) {
+    endNode = startNode
+    endOffset = Math.min((startNode.nodeValue ?? '').length, startOffset + length)
+  }
+  if (endOffset <= startOffset && startNode === endNode) endOffset = Math.min((startNode.nodeValue ?? '').length, startOffset + 1)
+  if (endOffset <= startOffset && startNode === endNode) return null
+
+  const range = doc.createRange()
+  range.setStart(startNode, startOffset)
+  range.setEnd(endNode, endOffset)
+  return range
+}
+
 const convertDoc = (doc: Document, convert: (s: string) => string) => {
   const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT)
   let node: Node | null
@@ -386,6 +451,15 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
   const currentSpineIndexRef = useRef<number>(-1) // 追蹤當前合法的 spine 索引，用於朗讀時的備選
   const loadingAbortRef = useRef<{ aborted: boolean }>({ aborted: false }) // 追蹤異步章節載入，支持取消
   const isSelectingRef = useRef(false) // 追蹤是否正在選取文字，避免選取期間翻頁
+  const currentDocRef = useRef<Document | null>(null)
+  const ttsVisibleStartOffsetRef = useRef(0)
+  const ttsVisibleSpineIndexRef = useRef<number | null>(null)
+  const ttsChapterTextLengthRef = useRef(0)
+  const ttsChapterPageTotalRef = useRef(1)
+  const ttsAutoFollowBusyRef = useRef(false)
+  const ttsAutoFollowLastAtRef = useRef(0)
+  const ttsAutoFollowUnlockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const ttsManualNavigationUntilRef = useRef(0)
 
   const {
     fontSize, fontFamily, script, lineHeight, letterSpacing, readingDirection,
@@ -396,7 +470,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
   const fontFamilyRef = useRef(fontFamily)
   const letterSpacingRef = useRef(letterSpacing)
   const { addAnnotation, updateColor, removeAnnotation, clearAll: clearAnnotations, loadForBook } = useAnnotationStore()
-  const { playing, speak, stop, voices, selectedVoice, setSelectedVoice, rate, setRate } = useTTS()
+  const { playing, paused: ttsPaused, speak, pause, resume, stop, reset: resetTTS, voices, selectedVoice, setSelectedVoice, rate, setRate } = useTTS()
   const stopRef = useRef(stop)
   useEffect(() => { stopRef.current = stop }, [stop])
 
@@ -742,6 +816,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
           patchIframeViewPrototype(Object.getPrototypeOf(view) as Record<string, unknown>)
 
           const doc = (view as { document: Document }).document
+          currentDocRef.current = doc
 
           // 腳本轉換：只在顯示腳本與書本原始語言不同時才轉換
           if (scriptRef.current !== baseScriptRef.current) {
@@ -842,6 +917,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
           applyFontFamilyOverride(doc, fontFamilyRef.current)
           applyLineHeightOverride(doc, lineHeightRef.current)
           applyLetterSpacingOverride(doc, letterSpacingRef.current)
+          ensureTTSHighlightStyle(doc)
 
           // hooks.render 比 contents 就緒早，部分 annotation inject 可能失敗
           // 在 rendered（contents 已就緒）後對當前 view 做 clear + inject 確保顯示
@@ -891,6 +967,21 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
           setAtStart(l?.atStart ?? false)
           setAtEnd(l?.atEnd ?? false)
           atEndRef.current = l?.atEnd ?? false
+          if (ttsAutoFollowBusyRef.current) {
+            console.log('[TTS:follow] relocated 後等待版面穩定再解鎖自動翻頁', {
+              href: l?.start?.href,
+              spineIdx: l?.start?.index,
+              displayed: l?.start?.displayed,
+            })
+            if (ttsAutoFollowUnlockTimerRef.current) {
+              clearTimeout(ttsAutoFollowUnlockTimerRef.current)
+            }
+            ttsAutoFollowUnlockTimerRef.current = setTimeout(() => {
+              ttsAutoFollowBusyRef.current = false
+              ttsAutoFollowUnlockTimerRef.current = null
+              console.log('[TTS:follow] relocated 後已解鎖自動翻頁')
+            }, 900)
+          }
 
           // 章節剩餘頁（左側小字）
           const d = l?.start?.displayed as { page: number; total: number } | undefined
@@ -1028,6 +1119,19 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
       setToc([])
       setCurrentHref('')
       setCurrentCfi('')
+      clearTTSHighlight(currentDocRef.current)
+      currentDocRef.current = null
+      ttsVisibleSpineIndexRef.current = null
+      ttsVisibleStartOffsetRef.current = 0
+      ttsChapterTextLengthRef.current = 0
+      ttsChapterPageTotalRef.current = 1
+      ttsAutoFollowBusyRef.current = false
+      ttsAutoFollowLastAtRef.current = 0
+      ttsManualNavigationUntilRef.current = 0
+      if (ttsAutoFollowUnlockTimerRef.current) {
+        clearTimeout(ttsAutoFollowUnlockTimerRef.current)
+        ttsAutoFollowUnlockTimerRef.current = null
+      }
       setBookmarks([])
       setBookmarkPendingDeleteId(null)
       setBookTitle('')
@@ -1131,17 +1235,25 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
 
   const prevPage = useCallback(() => {
     if (!readyRef.current) return
+    if (playing || ttsPaused) {
+      ttsManualNavigationUntilRef.current = Date.now() + 6000
+      console.log('[TTS:follow] 使用者手動翻頁，暫停自動跟隨', { direction: 'prev', until: ttsManualNavigationUntilRef.current })
+    }
     if (renditionRef.current) removePendingAnnotation(renditionRef.current)
     setPopup(null)
     renditionRef.current?.prev()
-  }, [removePendingAnnotation])
+  }, [playing, ttsPaused, removePendingAnnotation])
 
   const nextPage = useCallback(() => {
     if (!readyRef.current) return
+    if (playing || ttsPaused) {
+      ttsManualNavigationUntilRef.current = Date.now() + 6000
+      console.log('[TTS:follow] 使用者手動翻頁，暫停自動跟隨', { direction: 'next', until: ttsManualNavigationUntilRef.current })
+    }
     if (renditionRef.current) removePendingAnnotation(renditionRef.current)
     setPopup(null)
     renditionRef.current?.next()
-  }, [removePendingAnnotation])
+  }, [playing, ttsPaused, removePendingAnnotation])
 
   // 保持 ref 指向最新版本，供 iframe 內鍵盤事件使用（useEffect 避免 render 期間 mutation，確保 React Compiler 可正常優化）
   useEffect(() => {
@@ -1357,6 +1469,125 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     })
   }
 
+  const updateTTSHighlight = (absoluteOffset: number, allowAutoFollow = true) => {
+    const doc = currentDocRef.current
+    if (!doc) {
+      console.log('[TTS:follow] skip highlight: no current doc', { absoluteOffset })
+      return
+    }
+    const loc = (renditionRef.current as any)?.currentLocation?.()
+    const visibleSpineIdx = loc?.start?.index as number | undefined
+    if (visibleSpineIdx !== undefined && ttsVisibleSpineIndexRef.current !== visibleSpineIdx) {
+      console.log('[TTS:follow] skip highlight: visible spine 不符合朗讀 spine', {
+        absoluteOffset,
+        visibleSpineIdx,
+        readingSpineIdx: ttsVisibleSpineIndexRef.current,
+      })
+      clearTTSHighlight(doc)
+      return
+    }
+
+    const highlights = (doc.defaultView as any)?.CSS?.highlights
+    const HighlightCtor = (doc.defaultView as any)?.Highlight
+    if (!highlights || !HighlightCtor) {
+      console.log('[TTS:follow] skip highlight: Custom Highlight API unavailable', { absoluteOffset })
+      return
+    }
+
+    ensureTTSHighlightStyle(doc)
+    const range = createRangeFromTextOffset(doc, absoluteOffset)
+    if (!range) {
+      console.log('[TTS:follow] skip highlight: range not found', { absoluteOffset })
+      return
+    }
+    highlights.set(TTS_HIGHLIGHT_ID, new HighlightCtor(range))
+    followTTSRange(range, doc, absoluteOffset, allowAutoFollow)
+  }
+
+  const followTTSRange = (range: Range, doc: Document, absoluteOffset: number, allowAutoFollow: boolean) => {
+    const loc = (renditionRef.current as any)?.currentLocation?.()
+    const displayed = loc?.start?.displayed as { page: number; total: number } | undefined
+    const currentPage = displayed?.page ?? 1
+    const totalPages = Math.max(displayed?.total ?? ttsChapterPageTotalRef.current, 1)
+    const textLength = Math.max(ttsChapterTextLengthRef.current, 1)
+    const continuousPage = absoluteOffset / textLength * totalPages + 1
+    const estimatedPage = Math.min(totalPages, Math.max(1, Math.floor(continuousPage)))
+
+    if (!allowAutoFollow) {
+      console.log('[TTS:follow] skip next: 初始 highlight 不觸發翻頁', { absoluteOffset, currentPage, estimatedPage, totalPages })
+      return
+    }
+
+    if (Date.now() < ttsManualNavigationUntilRef.current) {
+      console.log('[TTS:follow] skip display: 使用者剛手動翻頁，暫停自動跟隨', {
+        absoluteOffset,
+        currentPage,
+        estimatedPage,
+        until: ttsManualNavigationUntilRef.current,
+      })
+      return
+    }
+
+    if (ttsAutoFollowBusyRef.current) {
+      console.log('[TTS:follow] skip next: 翻頁中', { displayed })
+      return
+    }
+
+    const rect = range.getBoundingClientRect()
+    if (rect.width === 0 && rect.height === 0) {
+      console.log('[TTS:follow] skip next: empty rect')
+      return
+    }
+
+    const viewportWidth = doc.documentElement.clientWidth || doc.defaultView?.innerWidth || 0
+    const viewportHeight = doc.documentElement.clientHeight || doc.defaultView?.innerHeight || 0
+    if (viewportWidth <= 0 || viewportHeight <= 0) {
+      console.log('[TTS:follow] skip next: invalid viewport', { viewportWidth, viewportHeight })
+      return
+    }
+
+    const rectOutside =
+      rect.left > viewportWidth * 0.82 ||
+      rect.right > viewportWidth * 1.02 ||
+      rect.top > viewportHeight * 0.92 ||
+      rect.bottom > viewportHeight * 1.08
+
+    const shouldAdvance = rectOutside && continuousPage >= currentPage + 0.82
+
+    console.log('[TTS:follow] check', {
+      displayed,
+      absoluteOffset,
+      estimatedPage,
+      continuousPage: Number(continuousPage.toFixed(2)),
+      currentPage,
+      totalPages,
+      rect: { left: Math.round(rect.left), right: Math.round(rect.right), top: Math.round(rect.top), bottom: Math.round(rect.bottom) },
+      viewport: { width: viewportWidth, height: viewportHeight },
+      rectOutside,
+      shouldAdvance,
+    })
+
+    if (!shouldAdvance) return
+
+    const now = Date.now()
+    if (now - ttsAutoFollowLastAtRef.current < 650) {
+      console.log('[TTS:follow] skip next: 節流中', { msSinceLast: now - ttsAutoFollowLastAtRef.current, displayed })
+      return
+    }
+
+    ttsAutoFollowBusyRef.current = true
+    ttsAutoFollowLastAtRef.current = now
+    console.log('[TTS:follow] next() 延後自動翻到下一頁', { displayed, continuousPage: Number(continuousPage.toFixed(2)) })
+    if (ttsAutoFollowUnlockTimerRef.current) clearTimeout(ttsAutoFollowUnlockTimerRef.current)
+    ttsAutoFollowUnlockTimerRef.current = setTimeout(() => {
+      console.warn('[TTS:follow] relocated 未如期觸發，fallback 解鎖自動翻頁', { displayed })
+      ttsAutoFollowBusyRef.current = false
+      ttsAutoFollowUnlockTimerRef.current = null
+    }, 2500)
+    Promise.resolve(renditionRef.current?.next())
+      .catch((err: unknown) => console.warn('[TTS] 自動跟讀翻頁失敗:', err))
+  }
+
   const speakCurrentPage = () => {
     if (!viewerRef.current) return
     const iframe = viewerRef.current.querySelector('iframe')
@@ -1435,10 +1666,18 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
       currentSpineIdx = currentSpineIndexRef.current >= 0 ? currentSpineIndexRef.current : 0
       console.warn('[TTS] speakCurrentPage: location.index 未定義，使用備選 spine 索引', { currentSpineIdx })
     }
+    ttsVisibleSpineIndexRef.current = currentSpineIdx
+    ttsVisibleStartOffsetRef.current = startOffset
+    ttsChapterTextLengthRef.current = fullText.length
+    ttsChapterPageTotalRef.current = totalPages
+    updateTTSHighlight(startOffset, false)
     console.log('[TTS] speakCurrentPage 開始', { currentSpineIdx, pageIdx: currentPageIdx, textLength: textToRead.length })
     speak(textToRead, () => {
+      clearTTSHighlight(currentDocRef.current)
       console.log('[TTS] speakCurrentPage 完成，準備加載下一章節', { nextSpineIdx: currentSpineIdx + 1 })
       continueFromSpineRef.current(currentSpineIdx + 1)
+    }, (charIdx) => {
+      updateTTSHighlight(ttsVisibleStartOffsetRef.current + charIdx, charIdx > 24)
     })
   }
 
@@ -1506,7 +1745,36 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
         console.log('[TTS] continueFromSpine: 章節載入成功，準備朗讀', { spineIdx, textLength: text.length })
         // 更新追蹤的 spine 索引
         currentSpineIndexRef.current = spineIdx
-        speak(text, () => continueFromSpineRef.current(spineIdx + 1))
+        clearTTSHighlight(currentDocRef.current)
+        ttsVisibleSpineIndexRef.current = spineIdx
+        ttsVisibleStartOffsetRef.current = 0
+        ttsChapterTextLengthRef.current = text.length
+        ttsChapterPageTotalRef.current = 1
+        ttsAutoFollowBusyRef.current = false
+        ttsAutoFollowLastAtRef.current = 0
+
+        try {
+          await renditionRef.current?.display(item.href ?? item.idref)
+          const loc = (renditionRef.current as any)?.currentLocation?.()
+          const displayed = loc?.start?.displayed as { page: number; total: number } | undefined
+          ttsChapterPageTotalRef.current = Math.max(displayed?.total ?? 1, 1)
+          updateTTSHighlight(0, false)
+        } catch (displayErr) {
+          console.warn('[TTS] continueFromSpine: 主閱讀器跳至朗讀章節失敗，仍繼續背景朗讀', {
+            spineIdx,
+            error: displayErr instanceof Error ? displayErr.message : String(displayErr),
+          })
+          ttsVisibleSpineIndexRef.current = null
+        }
+
+        speak(
+          text,
+          () => {
+            clearTTSHighlight(currentDocRef.current)
+            continueFromSpineRef.current(spineIdx + 1)
+          },
+          (charIdx) => updateTTSHighlight(ttsVisibleStartOffsetRef.current + charIdx, charIdx > 24),
+        )
       } catch (err) {
         if (!token.aborted) {
           console.error('[TTS] continueFromSpine: 章節載入失敗', { spineIdx, error: err instanceof Error ? err.message : String(err) })
@@ -1545,6 +1813,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
         sleepIntervalRef.current = null
       }
       setSleepRemaining(null)
+      clearTTSHighlight(currentDocRef.current)
       stop()
     }
   }, [sleepRemaining, stop])
@@ -1561,16 +1830,46 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
   const handleTTSPlay = () => {
     if (renditionRef.current) removePendingAnnotation(renditionRef.current)
     setPopup(null)
+    ttsManualNavigationUntilRef.current = 0
+    if (ttsPaused) {
+      resume()
+      if (sleepMinutesRef.current > 0) startSleepTimer(sleepMinutesRef.current)
+      return
+    }
     speakCurrentPage()
     if (sleepMinutesRef.current > 0) startSleepTimer(sleepMinutesRef.current)
   }
 
-  const handleTTSStop = () => {
-    stop()
+  const handleTTSPause = () => {
+    pause()
     clearSleepTimer()
     // 取消任何待處理的章節載入（手機版保護機制）
     loadingAbortRef.current.aborted = true
-    console.log('[TTS] handleTTSStop: 朗讀停止，已取消待處理的異步操作')
+    ttsAutoFollowBusyRef.current = false
+    if (ttsAutoFollowUnlockTimerRef.current) {
+      clearTimeout(ttsAutoFollowUnlockTimerRef.current)
+      ttsAutoFollowUnlockTimerRef.current = null
+    }
+    console.log('[TTS] handleTTSPause: 朗讀暫停，已記錄目前進度並取消待處理的異步操作')
+  }
+
+  const handleTTSReset = () => {
+    resetTTS()
+    clearSleepTimer()
+    loadingAbortRef.current.aborted = true
+    clearTTSHighlight(currentDocRef.current)
+    ttsVisibleSpineIndexRef.current = null
+    ttsVisibleStartOffsetRef.current = 0
+    ttsChapterTextLengthRef.current = 0
+    ttsChapterPageTotalRef.current = 1
+    ttsAutoFollowBusyRef.current = false
+    ttsAutoFollowLastAtRef.current = 0
+    ttsManualNavigationUntilRef.current = 0
+    if (ttsAutoFollowUnlockTimerRef.current) {
+      clearTimeout(ttsAutoFollowUnlockTimerRef.current)
+      ttsAutoFollowUnlockTimerRef.current = null
+    }
+    console.log('[TTS] handleTTSReset: 已重置朗讀進度')
   }
 
 
@@ -1728,8 +2027,10 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
             readingDirection={readingDirection}
             onReadingDirectionChange={setReadingDirection}
             ttsPlaying={playing}
+            ttsPaused={ttsPaused}
             onTTSPlay={handleTTSPlay}
-            onTTSStop={handleTTSStop}
+            onTTSPause={handleTTSPause}
+            onTTSReset={handleTTSReset}
             ttsVoices={voices}
             ttsSelectedVoice={selectedVoice}
             onTTSVoiceChange={setSelectedVoice}

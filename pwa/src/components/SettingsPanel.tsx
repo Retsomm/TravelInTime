@@ -10,9 +10,16 @@ const IconPlay = () => (
     <polygon points="6 4 20 12 6 20 6 4" />
   </svg>
 )
-const IconStop = () => (
+const IconPause = () => (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none">
-    <rect x="6" y="6" width="12" height="12" rx="1" />
+    <rect x="6" y="5" width="4" height="14" rx="1" />
+    <rect x="14" y="5" width="4" height="14" rx="1" />
+  </svg>
+)
+const IconReset = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 12a9 9 0 1 0 3-6.7" />
+    <path d="M3 4v7h7" />
   </svg>
 )
 
@@ -175,8 +182,10 @@ interface Props {
   readingDirection: 'ltr' | 'rtl'
   onReadingDirectionChange: (d: 'ltr' | 'rtl') => void
   ttsPlaying: boolean
+  ttsPaused: boolean
   onTTSPlay: () => void
-  onTTSStop: () => void
+  onTTSPause: () => void
+  onTTSReset: () => void
   ttsVoices: SpeechSynthesisVoice[]
   ttsSelectedVoice: SpeechSynthesisVoice | null
   onTTSVoiceChange: (voice: SpeechSynthesisVoice) => void
@@ -201,7 +210,7 @@ const SectTitle = ({ children, ink3Col }: { children: React.ReactNode; ink3Col: 
 const SettingsPanel = ({
   fontSize, onFontSizeChange, fontFamily, onFontChange,
   script, onScriptToggle, readingDirection, onReadingDirectionChange,
-  ttsPlaying, onTTSPlay, onTTSStop, ttsVoices, ttsSelectedVoice, onTTSVoiceChange,
+  ttsPlaying, ttsPaused, onTTSPlay, onTTSPause, onTTSReset, ttsVoices, ttsSelectedVoice, onTTSVoiceChange,
   ttsRate, onTTSRateChange, ttsSleepMinutes, onTTSSleepChange, ttsSleepRemaining,
   lineHeight, onLineHeightChange, letterSpacing, onLetterSpacingChange, darkMode,
 }: Props) => {
@@ -277,10 +286,10 @@ const SettingsPanel = ({
               { label: '行距', value: lineHeight.toFixed(1), onDec: () => onLineHeightChange(parseFloat(Math.max(1.0, lineHeight - 0.1).toFixed(1))), onInc: () => onLineHeightChange(parseFloat(Math.min(3.0, lineHeight + 0.1).toFixed(1))) },
               { label: '字距', value: `${letterSpacing.toFixed(2)}em`, onDec: () => onLetterSpacingChange(parseFloat(Math.max(0, letterSpacing - 0.05).toFixed(2))), onInc: () => onLetterSpacingChange(parseFloat(Math.min(0.5, letterSpacing + 0.05).toFixed(2))) },
             ].map(({ label, value, onDec, onInc }) => (
-              <>
-                <span key={`${label}-l`} style={{ fontSize: 13, color: ink2Col }}>{label}</span>
-                <NumStepper key={`${label}-s`} value={value} onDec={onDec} onInc={onInc} {...stepperProps} />
-              </>
+              <div key={label} style={{ display: 'contents' }}>
+                <span style={{ fontSize: 13, color: ink2Col }}>{label}</span>
+                <NumStepper value={value} onDec={onDec} onInc={onInc} {...stepperProps} />
+              </div>
             ))}
           </div>
 
@@ -319,23 +328,43 @@ const SettingsPanel = ({
           <div style={{ border: `1px solid ${borderCol}`, borderRadius: 10, padding: 14, background: paperBg, marginBottom: 14 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div>
-                <div style={{ fontFamily: SERIF, fontSize: 15, color: inkCol }}>{ttsPlaying ? '正在朗讀' : '準備朗讀'}</div>
+                <div style={{ fontFamily: SERIF, fontSize: 15, color: inkCol }}>{ttsPlaying ? '正在朗讀' : ttsPaused ? '已暫停' : '準備朗讀'}</div>
                 <div style={{ fontSize: 11, color: ink3Col, marginTop: 2 }}>
                   {ttsSelectedVoice?.name.replace(/^(Google|Microsoft|Apple)\s*/i, '') || '系統語音'} · {ttsRate.toFixed(1)}×
                 </div>
               </div>
-              <button
-                onClick={ttsPlaying ? onTTSStop : onTTSPlay}
-                style={{
-                  width: 44, height: 44, borderRadius: '50%',
-                  background: ttsPlaying ? accentCol : inkCol,
-                  color: paperBg,
-                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                  cursor: 'pointer', transition: 'background .15s',
-                }}
-              >
-                {ttsPlaying ? <IconStop /> : <IconPlay />}
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <button
+                  onClick={onTTSReset}
+                  disabled={!ttsPlaying && !ttsPaused}
+                  style={{
+                    width: 34, height: 34, borderRadius: '50%',
+                    background: paperBg2,
+                    color: (!ttsPlaying && !ttsPaused) ? ink3Col : ink2Col,
+                    border: `1px solid ${borderCol}`,
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    cursor: (!ttsPlaying && !ttsPaused) ? 'default' : 'pointer',
+                    opacity: (!ttsPlaying && !ttsPaused) ? 0.45 : 1,
+                    transition: 'all .15s',
+                  }}
+                  aria-label="重置朗讀進度"
+                  title="重置朗讀進度"
+                >
+                  <IconReset />
+                </button>
+                <button
+                  onClick={ttsPlaying ? onTTSPause : onTTSPlay}
+                  style={{
+                    width: 44, height: 44, borderRadius: '50%',
+                    background: ttsPlaying ? accentCol : inkCol,
+                    color: paperBg,
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    cursor: 'pointer', transition: 'background .15s',
+                  }}
+                >
+                  {ttsPlaying ? <IconPause /> : <IconPlay />}
+                </button>
+              </div>
             </div>
 
             <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 10 }}>
