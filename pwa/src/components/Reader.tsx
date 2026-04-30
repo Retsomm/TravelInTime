@@ -1487,24 +1487,25 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
       return
     }
 
-    const highlights = (doc.defaultView as any)?.CSS?.highlights
-    const HighlightCtor = (doc.defaultView as any)?.Highlight
-    if (!highlights || !HighlightCtor) {
-      console.log('[TTS:follow] skip highlight: Custom Highlight API unavailable', { absoluteOffset })
-      return
-    }
-
     ensureTTSHighlightStyle(doc)
     const range = createRangeFromTextOffset(doc, absoluteOffset)
     if (!range) {
       console.log('[TTS:follow] skip highlight: range not found', { absoluteOffset })
+      followTTSRange(null, doc, absoluteOffset, allowAutoFollow)
       return
     }
-    highlights.set(TTS_HIGHLIGHT_ID, new HighlightCtor(range))
+
+    const highlights = (doc.defaultView as any)?.CSS?.highlights
+    const HighlightCtor = (doc.defaultView as any)?.Highlight
+    if (highlights && HighlightCtor) {
+      highlights.set(TTS_HIGHLIGHT_ID, new HighlightCtor(range))
+    } else {
+      console.log('[TTS:follow] Custom Highlight API unavailable, only auto-follow by progress', { absoluteOffset })
+    }
     followTTSRange(range, doc, absoluteOffset, allowAutoFollow)
   }
 
-  const followTTSRange = (range: Range, doc: Document, absoluteOffset: number, allowAutoFollow: boolean) => {
+  const followTTSRange = (range: Range | null, doc: Document, absoluteOffset: number, allowAutoFollow: boolean) => {
     const loc = (renditionRef.current as any)?.currentLocation?.()
     const displayed = loc?.start?.displayed as { page: number; total: number } | undefined
     const currentPage = displayed?.page ?? 1
@@ -1512,6 +1513,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     const textLength = Math.max(ttsChapterTextLengthRef.current, 1)
     const continuousPage = absoluteOffset / textLength * totalPages + 1
     const estimatedPage = Math.min(totalPages, Math.max(1, Math.floor(continuousPage)))
+    const progressShouldAdvance = continuousPage >= currentPage + 0.9
 
     if (!allowAutoFollow) {
       console.log('[TTS:follow] skip next: 初始 highlight 不觸發翻頁', { absoluteOffset, currentPage, estimatedPage, totalPages })
@@ -1533,26 +1535,19 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
       return
     }
 
-    const rect = range.getBoundingClientRect()
-    if (rect.width === 0 && rect.height === 0) {
-      console.log('[TTS:follow] skip next: empty rect')
-      return
-    }
-
     const viewportWidth = doc.documentElement.clientWidth || doc.defaultView?.innerWidth || 0
     const viewportHeight = doc.documentElement.clientHeight || doc.defaultView?.innerHeight || 0
-    if (viewportWidth <= 0 || viewportHeight <= 0) {
-      console.log('[TTS:follow] skip next: invalid viewport', { viewportWidth, viewportHeight })
-      return
-    }
+    const rect = range?.getBoundingClientRect()
+    const hasUsableRect = !!rect && !(rect.width === 0 && rect.height === 0) && viewportWidth > 0 && viewportHeight > 0
 
-    const rectOutside =
+    const rectOutside = hasUsableRect && !!rect && (
       rect.left > viewportWidth * 0.82 ||
       rect.right > viewportWidth * 1.02 ||
       rect.top > viewportHeight * 0.92 ||
       rect.bottom > viewportHeight * 1.08
+    )
 
-    const shouldAdvance = rectOutside && continuousPage >= currentPage + 0.82
+    const shouldAdvance = progressShouldAdvance || (rectOutside && continuousPage >= currentPage + 0.82)
 
     console.log('[TTS:follow] check', {
       displayed,
@@ -1561,9 +1556,11 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
       continuousPage: Number(continuousPage.toFixed(2)),
       currentPage,
       totalPages,
-      rect: { left: Math.round(rect.left), right: Math.round(rect.right), top: Math.round(rect.top), bottom: Math.round(rect.bottom) },
+      rect: rect ? { left: Math.round(rect.left), right: Math.round(rect.right), top: Math.round(rect.top), bottom: Math.round(rect.bottom) } : null,
       viewport: { width: viewportWidth, height: viewportHeight },
+      hasUsableRect,
       rectOutside,
+      progressShouldAdvance,
       shouldAdvance,
     })
 

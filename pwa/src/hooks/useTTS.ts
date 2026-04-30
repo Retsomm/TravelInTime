@@ -143,13 +143,24 @@ const useTTS = () => {
     }
     utterance.onend = () => {
       if (generationRef.current !== generation) return
-      const readChars = textOffsetRef.current + charIndexRef.current
       const totalChars = currentTextRef.current.length
-      const isTruncated = readChars < totalChars - 10  // 若距終點超過10字，視為提前截斷
+      const utteranceEnd = textOffsetRef.current + text.length
+      const boundaryEnd = textOffsetRef.current + charIndexRef.current
+      const readChars = charIndexRef.current > 0 && boundaryEnd < utteranceEnd - 10
+        ? boundaryEnd
+        : utteranceEnd
+      const hasMoreText = readChars < totalChars - 10
+      const isTruncated = charIndexRef.current > 0 && boundaryEnd < utteranceEnd - 10
       console.log(
-        isTruncated ? '[TTS] onend ⚠️ 疑似 iOS 截斷' : '[TTS] onend（正常結束）',
+        hasMoreText ? (isTruncated ? '[TTS] onend ⚠️ 疑似 iOS 截斷，繼續剩餘文字' : '[TTS] onend（區塊結束，繼續下一段）') : '[TTS] onend（正常結束）',
         { generation, charIndex: charIndexRef.current, offset: textOffsetRef.current, readChars, totalChars, remaining: totalChars - readChars }
       )
+      if (hasMoreText) {
+        textOffsetRef.current = readChars
+        charIndexRef.current = 0
+        playFromOffset(readChars)
+        return
+      }
       stopKeepalive()
       playingRef.current = false
       setPlaying(false)
@@ -174,7 +185,7 @@ const useTTS = () => {
           // generation 檢查並呼叫 onEndRef，否則會觸發下一章、再被 recovery 覆蓋造成重複朗讀
           const recoveryGen = ++generationRef.current
           setTimeout(() => {
-            if (playingRef.current && generationRef.current === recoveryGen) createAndPlay(remaining)
+            if (playingRef.current && generationRef.current === recoveryGen) playFromOffset(absolutePos)
           }, 300)
           return
         }
@@ -195,6 +206,19 @@ const useTTS = () => {
     console.log('[TTS] speak()', { generation, textLength: text.length, offset: textOffsetRef.current, voice: voice?.name })
     window.speechSynthesis.speak(utterance)
     startKeepalive()
+  }
+
+  const playFromOffset = (offset: number) => {
+    const safeOffset = Math.max(0, Math.min(offset, currentTextRef.current.length))
+    const remaining = currentTextRef.current.slice(safeOffset)
+    if (!remaining.trim()) {
+      stop()
+      return
+    }
+    const [chunk] = splitTextByLength(remaining)
+    textOffsetRef.current = safeOffset
+    charIndexRef.current = 0
+    createAndPlay(chunk)
   }
 
   const stop = () => {
@@ -260,7 +284,7 @@ const useTTS = () => {
 
     textOffsetRef.current = absolutePos
     charIndexRef.current = 0
-    createAndPlay(remaining)
+    playFromOffset(absolutePos)
   }
 
   // 將文本分割為適合 utterance 的區塊（某些行動浏覽器對文字長度有限制）
@@ -310,15 +334,11 @@ const useTTS = () => {
     setPlaying(true)
     setPaused(false)
 
-    // 檢查文本長度，必要時分割
     const chunks = splitTextByLength(text)
     if (chunks.length > 1) {
       console.log('[TTS] 文本過長，已分割為', chunks.length, '個區塊', { totalLength: text.length, maxLength: MAX_UTTERANCE_LENGTH })
-      // 只播放第一個區塊，onEnd 時處理下一個區塊
-      createAndPlay(chunks[0])
-    } else {
-      createAndPlay(text)
     }
+    playFromOffset(0)
   }
 
   // 語速變更：若正在朗讀，從當前位置重啟（不觸發 onEnd、不重置 onBoundary）
@@ -335,7 +355,7 @@ const useTTS = () => {
     textOffsetRef.current = absolutePos
     charIndexRef.current = 0
     // playing 狀態維持 true，直接重建 utterance
-    createAndPlay(remaining)
+    playFromOffset(absolutePos)
   }
 
   const getProgress = () => textOffsetRef.current + charIndexRef.current
