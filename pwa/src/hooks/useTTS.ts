@@ -171,6 +171,16 @@ const useTTS = () => {
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
   }, [handleVisibilityChange])
 
+  const finishPlayback = () => {
+    stopKeepalive()
+    stopProgressTimer()
+    playingRef.current = false
+    setPlaying(false)
+    pausedRef.current = false
+    setPaused(false)
+    onEndRef.current?.()
+  }
+
   // 建立並播放 utterance（內部用，使用當前 refs 值）
   const createAndPlay = (text: string) => {
     const generation = ++generationRef.current
@@ -230,7 +240,8 @@ const useTTS = () => {
       const readChars = charIndexRef.current > 0 && boundaryEnd < utteranceEnd - 10
         ? boundaryEnd
         : utteranceEnd
-      const hasMoreText = readChars < totalChars - 10
+      const remainingText = currentTextRef.current.slice(readChars)
+      const hasMoreText = readChars < totalChars - 10 && remainingText.trim().length > 0
       const isTruncated = charIndexRef.current > 0 && boundaryEnd < utteranceEnd - 10
       console.log(
         hasMoreText ? (isTruncated ? '[TTS] onend ⚠️ 疑似 iOS 截斷，繼續剩餘文字' : '[TTS] onend（區塊結束，繼續下一段）') : '[TTS] onend（正常結束）',
@@ -242,13 +253,7 @@ const useTTS = () => {
         playFromOffset(readChars)
         return
       }
-      stopKeepalive()
-      stopProgressTimer()
-      playingRef.current = false
-      setPlaying(false)
-      pausedRef.current = false
-      setPaused(false)
-      onEndRef.current?.()
+      finishPlayback()
     }
     utterance.onerror = (e) => {
       const err = (e as SpeechSynthesisErrorEvent).error
@@ -295,7 +300,8 @@ const useTTS = () => {
     const safeOffset = Math.max(0, Math.min(offset, currentTextRef.current.length))
     const remaining = currentTextRef.current.slice(safeOffset)
     if (!remaining.trim()) {
-      stop()
+      console.log('[TTS] playFromOffset: 沒有可朗讀的剩餘文字，視為自然結束', { offset: safeOffset, totalChars: currentTextRef.current.length })
+      finishPlayback()
       return
     }
     const [chunk] = splitTextByLength(remaining)
@@ -365,7 +371,7 @@ const useTTS = () => {
     const absolutePos = textOffsetRef.current + charIndexRef.current
     const remaining = currentTextRef.current.slice(absolutePos)
     if (!remaining.trim()) {
-      stop()
+      finishPlayback()
       return
     }
 
