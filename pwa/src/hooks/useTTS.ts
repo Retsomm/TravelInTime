@@ -10,6 +10,12 @@ const IOS_KEEPALIVE_INTERVAL = 10000
 
 // 手機版朗讀文本長度上限（某些行動浏覽器限制 utterance 文字長度）
 const MAX_UTTERANCE_LENGTH = 3000
+const PROGRESS_TICK_INTERVAL = 250
+const DEFAULT_CHARS_PER_SECOND = 6.2
+const MAX_ESTIMATED_BOUNDARY_LEAD = 90
+const DEBUG_TTS_PROGRESS = true
+
+export type TTSProgressSource = 'boundary' | 'estimate'
 
 const useTTS = () => {
   const [playing, setPlaying] = useState(false)
@@ -30,11 +36,18 @@ const useTTS = () => {
   const currentTextRef = useRef('')  // speak() 傳入的完整文字
   const textOffsetRef = useRef(0)    // 目前 utterance 在完整文字中的起始位置
   const charIndexRef = useRef(0)     // 目前 utterance 最後一個 boundary 的 charIndex
+  const currentUtteranceTextRef = useRef('')
+  const currentUtteranceStartAtRef = useRef(0)
+  const currentUtteranceLastBoundaryAtRef = useRef(0)
+  const currentUtteranceLastBoundaryIndexRef = useRef(0)
+  const estimatedCharsPerSecondRef = useRef(DEFAULT_CHARS_PER_SECOND)
+  const lastProgressDebugAtRef = useRef(0)
   const onEndRef = useRef<(() => void) | undefined>(undefined)
-  const onBoundaryRef = useRef<((charIdx: number) => void) | undefined>(undefined)
+  const onBoundaryRef = useRef<((charIdx: number, source: TTSProgressSource) => void) | undefined>(undefined)
 
   // iOS keepalive timer ref
   const keepaliveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const progressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => { rateRef.current = rate }, [rate])
   useEffect(() => { selectedVoiceRef.current = selectedVoice }, [selectedVoice])
@@ -55,6 +68,56 @@ const useTTS = () => {
       clearInterval(keepaliveTimerRef.current)
       keepaliveTimerRef.current = null
     }
+  }
+
+  const emitProgress = (absolutePos: number, source: TTSProgressSource) => {
+    const safePos = Math.max(0, Math.min(absolutePos, currentTextRef.current.length))
+    if (DEBUG_TTS_PROGRESS) {
+      const now = Date.now()
+      if (source === 'boundary' || now - lastProgressDebugAtRef.current >= 1000) {
+        lastProgressDebugAtRef.current = now
+        console.log('[TTS:progress]', {
+          source,
+          absolutePos: safePos,
+          textOffset: textOffsetRef.current,
+          charIndex: charIndexRef.current,
+          utteranceLength: currentUtteranceTextRef.current.length,
+          lastBoundaryIndex: currentUtteranceLastBoundaryIndexRef.current,
+          estimatedCps: Number(estimatedCharsPerSecondRef.current.toFixed(2)),
+          rate: rateRef.current,
+        })
+      }
+    }
+    onBoundaryRef.current?.(safePos, source)
+  }
+
+  const stopProgressTimer = () => {
+    if (progressTimerRef.current !== null) {
+      clearInterval(progressTimerRef.current)
+      progressTimerRef.current = null
+    }
+  }
+
+  const startProgressTimer = (textLength: number) => {
+    stopProgressTimer()
+    progressTimerRef.current = setInterval(() => {
+      if (!playingRef.current || pausedRef.current) return
+      const now = Date.now()
+      const elapsedSeconds = Math.max(0, (now - currentUtteranceStartAtRef.current) / 1000)
+      const estimatedInUtterance = Math.floor(elapsedSeconds * estimatedCharsPerSecondRef.current)
+      const maxEstimatedIndex = currentUtteranceLastBoundaryIndexRef.current + MAX_ESTIMATED_BOUNDARY_LEAD
+      const nextCharIndex = Math.max(charIndexRef.current, Math.min(textLength, estimatedInUtterance, maxEstimatedIndex))
+      if (nextCharIndex <= charIndexRef.current) return
+      charIndexRef.current = nextCharIndex
+      emitProgress(textOffsetRef.current + nextCharIndex, 'estimate')
+    }, PROGRESS_TICK_INTERVAL)
+  }
+
+  const resetProgressClockFromCurrentPosition = () => {
+    const cps = Math.max(estimatedCharsPerSecondRef.current, 0.1)
+    currentUtteranceStartAtRef.current = Date.now() - Math.floor(charIndexRef.current / cps * 1000)
+    currentUtteranceLastBoundaryAtRef.current = Date.now()
+    currentUtteranceLastBoundaryIndexRef.current = charIndexRef.current
   }
 
   useEffect(() => {
@@ -123,6 +186,11 @@ const useTTS = () => {
 
     utterance.onstart = () => {
       if (generationRef.current !== generation) return
+      currentUtteranceTextRef.current = text
+      currentUtteranceStartAtRef.current = Date.now()
+      currentUtteranceLastBoundaryAtRef.current = currentUtteranceStartAtRef.current
+      currentUtteranceLastBoundaryIndexRef.current = 0
+      startProgressTimer(text.length)
       pausedRef.current = false
       setPaused(false)
       console.log('[TTS] onstart', { generation, textLength: text.length, offset: textOffsetRef.current })
@@ -137,12 +205,25 @@ const useTTS = () => {
     }
     utterance.onboundary = (e) => {
       if (generationRef.current !== generation) return
-      charIndexRef.current = e.charIndex
+      const now = Date.now()
+      const nextCharIndex = Math.max(0, Math.min(e.charIndex, text.length))
+      const boundaryDelta = nextCharIndex - currentUtteranceLastBoundaryIndexRef.current
+      const timeDelta = (now - currentUtteranceLastBoundaryAtRef.current) / 1000
+      if (boundaryDelta > 8 && timeDelta > 0.5) {
+        const measured = boundaryDelta / timeDelta
+        if (measured > 2 && measured < 16) {
+          estimatedCharsPerSecondRef.current = estimatedCharsPerSecondRef.current * 0.7 + measured * 0.3
+        }
+      }
+      charIndexRef.current = nextCharIndex
+      currentUtteranceLastBoundaryAtRef.current = now
+      currentUtteranceLastBoundaryIndexRef.current = nextCharIndex
       // 通知外部目前在完整文字中的絕對位置
-      onBoundaryRef.current?.(textOffsetRef.current + e.charIndex)
+      emitProgress(textOffsetRef.current + nextCharIndex, 'boundary')
     }
     utterance.onend = () => {
       if (generationRef.current !== generation) return
+      stopProgressTimer()
       const totalChars = currentTextRef.current.length
       const utteranceEnd = textOffsetRef.current + text.length
       const boundaryEnd = textOffsetRef.current + charIndexRef.current
@@ -162,6 +243,7 @@ const useTTS = () => {
         return
       }
       stopKeepalive()
+      stopProgressTimer()
       playingRef.current = false
       setPlaying(false)
       pausedRef.current = false
@@ -193,6 +275,7 @@ const useTTS = () => {
       }
 
       stopKeepalive()
+      stopProgressTimer()
       playingRef.current = false
       setPlaying(false)
       pausedRef.current = false
@@ -225,6 +308,7 @@ const useTTS = () => {
     console.log('[TTS] stop() 被呼叫', { generation: generationRef.current })
     generationRef.current++ // 令所有舊 callback 失效
     stopKeepalive()
+    stopProgressTimer()
     window.speechSynthesis.cancel()
     utteranceRef.current = null
     playingRef.current = false
@@ -248,6 +332,7 @@ const useTTS = () => {
     console.log('[TTS] pause() 被呼叫', { generation: generationRef.current, offset: textOffsetRef.current, charIndex: charIndexRef.current })
     stopKeepalive()
     window.speechSynthesis.pause()
+    stopProgressTimer()
     playingRef.current = false
     pausedRef.current = true
     setPlaying(false)
@@ -271,6 +356,8 @@ const useTTS = () => {
 
     if (window.speechSynthesis.paused && window.speechSynthesis.speaking) {
       window.speechSynthesis.resume()
+      resetProgressClockFromCurrentPosition()
+      startProgressTimer(currentUtteranceTextRef.current.length)
       startKeepalive()
       return
     }
@@ -321,7 +408,7 @@ const useTTS = () => {
   const speak = (
     text: string,
     onEnd?: () => void,
-    onBoundary?: (charIdx: number) => void,
+    onBoundary?: (charIdx: number, source: TTSProgressSource) => void,
   ) => {
     if (!text.trim()) return
     currentTextRef.current = text

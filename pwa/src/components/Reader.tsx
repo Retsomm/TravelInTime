@@ -8,6 +8,7 @@ import ChapterPanel from './ChapterPanel'
 import type { TocItem } from './ChapterPanel'
 import SettingsPanel from './SettingsPanel'
 import useTTS from '../hooks/useTTS'
+import type { TTSProgressSource } from '../hooks/useTTS'
 import { FONT_OPTIONS, useReaderStore } from '../store/useReaderStore'
 import type { Script } from '../store/useReaderStore'
 import { useAnnotationStore, loadAnnotationsForBook, saveAnnotationsForBook } from '../store/useAnnotationStore'
@@ -106,6 +107,13 @@ const copyTextToClipboard = async (text: string) => {
 
 const TTS_HIGHLIGHT_ID = 'tit-tts-progress'
 const TTS_HIGHLIGHT_STYLE_ID = 'tit-tts-progress-style'
+const TTS_HIGHLIGHT_INTERVAL = 80
+const TTS_USER_INPUT_GRACE = 180
+const TTS_PAGE_END_BUFFER = 4
+const DEBUG_TTS_FOLLOW = true
+
+type TextIndex = { nodes: Text[]; starts: number[]; total: number; text: string }
+const ttsTextIndexCache = new WeakMap<Document, TextIndex>()
 
 const ensureTTSHighlightStyle = (doc: Document) => {
   injectStyle(doc, TTS_HIGHLIGHT_STYLE_ID, `
@@ -121,47 +129,104 @@ const clearTTSHighlight = (doc: Document | null | undefined) => {
   highlights?.delete?.(TTS_HIGHLIGHT_ID)
 }
 
-const createRangeFromTextOffset = (doc: Document, start: number, length = 14): Range | null => {
+const getTextIndex = (doc: Document): TextIndex | null => {
+  const cached = ttsTextIndexCache.get(doc)
+  if (cached) return cached
   const body = doc.body
   if (!body) return null
 
+  const nodes: Text[] = []
+  const starts: number[] = []
+  const pieces: string[] = []
   const walker = doc.createTreeWalker(body, NodeFilter.SHOW_TEXT)
   let node: Node | null
-  let consumed = 0
-  let startNode: Text | null = null
-  let endNode: Text | null = null
-  let startOffset = 0
-  let endOffset = 0
-  const safeStart = Math.max(start, 0)
-  const safeEnd = safeStart + length
-
+  let total = 0
   while ((node = walker.nextNode())) {
     const textNode = node as Text
-    const text = textNode.nodeValue ?? ''
-    const next = consumed + text.length
-
-    if (!startNode && safeStart <= next) {
-      startNode = textNode
-      startOffset = Math.max(0, Math.min(text.length, safeStart - consumed))
-    }
-
-    if (startNode && safeEnd <= next) {
-      endNode = textNode
-      endOffset = Math.max(0, Math.min(text.length, safeEnd - consumed))
-      if (endNode === startNode) endOffset = Math.max(startOffset + 1, endOffset)
-      break
-    }
-
-    consumed = next
+    const len = (textNode.nodeValue ?? '').length
+    if (len === 0) continue
+    nodes.push(textNode)
+    starts.push(total)
+    pieces.push(textNode.nodeValue ?? '')
+    total += len
   }
 
-  if (!startNode) return null
-  if (!endNode) {
-    endNode = startNode
-    endOffset = Math.min((startNode.nodeValue ?? '').length, startOffset + length)
+  const index = { nodes, starts, total, text: pieces.join('') }
+  ttsTextIndexCache.set(doc, index)
+  return index
+}
+
+const findTextNodeAt = (index: TextIndex, offset: number) => {
+  if (index.nodes.length === 0) return null
+  const safeOffset = Math.max(0, Math.min(offset, Math.max(index.total - 1, 0)))
+  let lo = 0
+  let hi = index.starts.length - 1
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1
+    const start = index.starts[mid]
+    const end = start + (index.nodes[mid].nodeValue ?? '').length
+    if (safeOffset < start) hi = mid - 1
+    else if (safeOffset >= end) lo = mid + 1
+    else return { node: index.nodes[mid], offset: safeOffset - start, index: mid }
   }
-  if (endOffset <= startOffset && startNode === endNode) endOffset = Math.min((startNode.nodeValue ?? '').length, startOffset + 1)
-  if (endOffset <= startOffset && startNode === endNode) return null
+  const last = index.nodes.length - 1
+  return {
+    node: index.nodes[last],
+    offset: Math.max(0, (index.nodes[last].nodeValue ?? '').length - 1),
+    index: last,
+  }
+}
+
+const getTextOffsetFromRange = (doc: Document, range: Range | null | undefined, edge: 'start' | 'end' = 'start'): number | null => {
+  if (!range) return null
+  const index = getTextIndex(doc)
+  if (!index) return null
+
+  const container = edge === 'end' ? range.endContainer : range.startContainer
+  const offset = edge === 'end' ? range.endOffset : range.startOffset
+
+  if (container.nodeType === Node.TEXT_NODE) {
+    const textIdx = index.nodes.indexOf(container as Text)
+    if (textIdx < 0) return null
+    const nodeLength = (container.nodeValue ?? '').length
+    return index.starts[textIdx] + Math.max(0, Math.min(offset, nodeLength))
+  }
+
+  const walker = doc.createTreeWalker(container, NodeFilter.SHOW_TEXT)
+  const textNode = (edge === 'end' ? null : walker.nextNode()) as Text | null
+  if (textNode) {
+    const textIdx = index.nodes.indexOf(textNode)
+    return textIdx >= 0 ? index.starts[textIdx] : null
+  }
+
+  let lastText: Text | null = null
+  let node: Node | null
+  while ((node = walker.nextNode())) lastText = node as Text
+  if (lastText) {
+    const textIdx = index.nodes.indexOf(lastText)
+    return textIdx >= 0 ? index.starts[textIdx] + (lastText.nodeValue ?? '').length : null
+  }
+
+  return null
+}
+
+const createRangeFromTextOffset = (doc: Document, start: number, length = 14): Range | null => {
+  const index = getTextIndex(doc)
+  if (!index || index.total === 0) return null
+
+  const safeStart = Math.max(0, Math.min(start, index.total - 1))
+  const safeEnd = Math.max(safeStart + 1, Math.min(safeStart + length, index.total))
+  const startMatch = findTextNodeAt(index, safeStart)
+  const endMatch = findTextNodeAt(index, safeEnd - 1)
+  if (!startMatch || !endMatch) return null
+
+  const startNode = startMatch.node
+  const endNode = endMatch.node
+  const startOffset = Math.max(0, Math.min((startNode.nodeValue ?? '').length, startMatch.offset))
+  let endOffset = Math.max(0, Math.min((endNode.nodeValue ?? '').length, endMatch.offset + 1))
+  if (endNode === startNode) endOffset = Math.max(startOffset + 1, endOffset)
+  if (endOffset > (endNode.nodeValue ?? '').length) endOffset = (endNode.nodeValue ?? '').length
+  if (endNode === startNode && endOffset <= startOffset) return null
 
   const range = doc.createRange()
   range.setStart(startNode, startOffset)
@@ -453,6 +518,8 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
   const isSelectingRef = useRef(false) // 追蹤是否正在選取文字，避免選取期間翻頁
   const currentDocRef = useRef<Document | null>(null)
   const ttsVisibleStartOffsetRef = useRef(0)
+  const ttsVisiblePageEndOffsetRef = useRef<number | null>(null)
+  const ttsLastAbsoluteOffsetRef = useRef(0)
   const ttsVisibleSpineIndexRef = useRef<number | null>(null)
   const ttsChapterTextLengthRef = useRef(0)
   const ttsChapterPageTotalRef = useRef(1)
@@ -460,6 +527,13 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
   const ttsAutoFollowLastAtRef = useRef(0)
   const ttsAutoFollowUnlockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const ttsManualNavigationUntilRef = useRef(0)
+  const ttsUserInputUntilRef = useRef(0)
+  const ttsHighlightFrameRef = useRef<number | null>(null)
+  const ttsHighlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const ttsPendingHighlightRef = useRef<{ absoluteOffset: number; allowAutoFollow: boolean; source: TTSProgressSource } | null>(null)
+  const ttsLastHighlightAtRef = useRef(0)
+  const ttsLastFollowDebugAtRef = useRef(0)
+  const ttsActiveRef = useRef(false)
 
   const {
     fontSize, fontFamily, script, lineHeight, letterSpacing, readingDirection,
@@ -473,6 +547,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
   const { playing, paused: ttsPaused, speak, pause, resume, stop, reset: resetTTS, voices, selectedVoice, setSelectedVoice, rate, setRate } = useTTS()
   const stopRef = useRef(stop)
   useEffect(() => { stopRef.current = stop }, [stop])
+  useEffect(() => { ttsActiveRef.current = playing || ttsPaused }, [playing, ttsPaused])
 
   useEffect(() => {
     if (!pageInfo || pageInfo.total <= 0) return
@@ -512,6 +587,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     const book = bookRef.current
     const viewer = viewerRef.current
     if (!book || !viewer) return
+    if (ttsActiveRef.current) return
 
     scanAbortRef.current.aborted = true
     const token = { aborted: false }
@@ -555,12 +631,12 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     const spineTotal = spineItems.length
     try {
       for (const item of spineItems) {
-        if (token.aborted) break
+        if (token.aborted || ttsActiveRef.current) break
         const href = item.href as string | undefined
         if (!href) continue
         try {
           await hiddenRendition.display(href)
-          if (token.aborted) break
+          if (token.aborted || ttsActiveRef.current) break
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const loc = (hiddenRendition as any).currentLocation?.()
           const d = loc?.start?.displayed as { page: number; total: number } | undefined
@@ -630,6 +706,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
   }, [])
 
   const triggerScan = useCallback(() => {
+    if (ttsActiveRef.current) return
     if (scanTimerRef.current) clearTimeout(scanTimerRef.current)
     scanTimerRef.current = setTimeout(scanAllChapterPages, 600)
   }, [scanAllChapterPages])
@@ -817,6 +894,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
 
           const doc = (view as { document: Document }).document
           currentDocRef.current = doc
+          ttsTextIndexCache.delete(doc)
 
           // 腳本轉換：只在顯示腳本與書本原始語言不同時才轉換
           if (scriptRef.current !== baseScriptRef.current) {
@@ -844,6 +922,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
             setEditPopup(null)
           })
           doc.addEventListener('touchstart', (e: TouchEvent) => {
+            noteUserInteraction()
             swipeStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }
             if (Date.now() - popupSetTime < 600) return
             setPopup(null)
@@ -967,6 +1046,11 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
           setAtStart(l?.atStart ?? false)
           setAtEnd(l?.atEnd ?? false)
           atEndRef.current = l?.atEnd ?? false
+          if (ttsActiveRef.current) {
+            setTimeout(() => {
+              refreshTTSPageEndOffset('relocated 後用 end.cfi 更新頁尾', (renditionRef.current as any)?.currentLocation?.())
+            }, 120)
+          }
           if (ttsAutoFollowBusyRef.current) {
             console.log('[TTS:follow] relocated 後等待版面穩定再解鎖自動翻頁', {
               href: l?.start?.href,
@@ -977,6 +1061,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
               clearTimeout(ttsAutoFollowUnlockTimerRef.current)
             }
             ttsAutoFollowUnlockTimerRef.current = setTimeout(() => {
+              refreshTTSPageEndOffset('relocated 後解鎖前用 end.cfi 更新頁尾', (renditionRef.current as any)?.currentLocation?.())
               ttsAutoFollowBusyRef.current = false
               ttsAutoFollowUnlockTimerRef.current = null
               console.log('[TTS:follow] relocated 後已解鎖自動翻頁')
@@ -1119,10 +1204,13 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
       setToc([])
       setCurrentHref('')
       setCurrentCfi('')
+      cancelScheduledTTSHighlight()
       clearTTSHighlight(currentDocRef.current)
       currentDocRef.current = null
       ttsVisibleSpineIndexRef.current = null
       ttsVisibleStartOffsetRef.current = 0
+      ttsVisiblePageEndOffsetRef.current = null
+      ttsLastAbsoluteOffsetRef.current = 0
       ttsChapterTextLengthRef.current = 0
       ttsChapterPageTotalRef.current = 1
       ttsAutoFollowBusyRef.current = false
@@ -1469,16 +1557,115 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     })
   }
 
-  const updateTTSHighlight = (absoluteOffset: number, allowAutoFollow = true) => {
+  const noteUserInteraction = () => {
+    ttsUserInputUntilRef.current = Date.now() + TTS_USER_INPUT_GRACE
+  }
+
+  const measureCurrentPageEndOffset = (doc: Document, loc?: any): number | null => {
+    const endCfi = loc?.end?.cfi as string | undefined
+    if (!endCfi) return null
+
+    try {
+      const range = (renditionRef.current as any)?.getRange?.(endCfi) as Range | null | undefined
+      const offset = getTextOffsetFromRange(doc, range, 'end')
+      const textLength = getTextIndex(doc)?.total ?? ttsChapterTextLengthRef.current
+      if (offset === null) return null
+      return Math.max(0, Math.min(offset, textLength))
+    } catch (err) {
+      if (DEBUG_TTS_FOLLOW) {
+        console.warn('[TTS:follow] end.cfi 轉 offset 失敗', {
+          endCfi,
+          error: err instanceof Error ? err.message : String(err),
+        })
+      }
+      return null
+    }
+  }
+
+  const refreshTTSPageEndOffset = (label: string, loc?: any) => {
+    const doc = currentDocRef.current
+    const visibleSpineIdx = loc?.start?.index as number | undefined
+    if (!doc || !ttsActiveRef.current || visibleSpineIdx !== ttsVisibleSpineIndexRef.current) return
+
+    const pageEndOffset = measureCurrentPageEndOffset(doc, loc)
+    ttsVisiblePageEndOffsetRef.current = pageEndOffset
+    if (DEBUG_TTS_FOLLOW) {
+      console.log(`[TTS:follow] ${label}`, {
+        absoluteOffset: ttsLastAbsoluteOffsetRef.current,
+        pageEndOffset,
+        displayed: loc?.start?.displayed,
+        endCfi: loc?.end?.cfi,
+      })
+    }
+  }
+
+  const cancelScheduledTTSHighlight = () => {
+    if (ttsHighlightFrameRef.current !== null) {
+      cancelAnimationFrame(ttsHighlightFrameRef.current)
+      ttsHighlightFrameRef.current = null
+    }
+    if (ttsHighlightTimerRef.current !== null) {
+      clearTimeout(ttsHighlightTimerRef.current)
+      ttsHighlightTimerRef.current = null
+    }
+    ttsPendingHighlightRef.current = null
+  }
+
+  const scheduleTTSHighlight = (absoluteOffset: number, allowAutoFollow = true, source: TTSProgressSource = 'boundary') => {
+    ttsPendingHighlightRef.current = { absoluteOffset, allowAutoFollow, source }
+    if (ttsHighlightFrameRef.current !== null || ttsHighlightTimerRef.current !== null) return
+
+    ttsHighlightFrameRef.current = requestAnimationFrame(() => {
+      ttsHighlightFrameRef.current = null
+      const pending = ttsPendingHighlightRef.current
+      if (!pending) return
+      if (Date.now() < ttsUserInputUntilRef.current) {
+        const delay = Math.max(0, ttsUserInputUntilRef.current - Date.now())
+        ttsHighlightTimerRef.current = setTimeout(() => {
+          ttsHighlightTimerRef.current = null
+          const latest = ttsPendingHighlightRef.current
+          if (!latest) return
+          ttsPendingHighlightRef.current = null
+          ttsLastHighlightAtRef.current = Date.now()
+          updateTTSHighlight(latest.absoluteOffset, latest.allowAutoFollow, latest.source)
+        }, delay)
+        return
+      }
+      const now = Date.now()
+      const shouldPaint = !pending.allowAutoFollow || now - ttsLastHighlightAtRef.current >= TTS_HIGHLIGHT_INTERVAL
+      if (!shouldPaint) {
+        const delay = TTS_HIGHLIGHT_INTERVAL - (now - ttsLastHighlightAtRef.current)
+        ttsHighlightTimerRef.current = setTimeout(() => {
+          ttsHighlightTimerRef.current = null
+          const latest = ttsPendingHighlightRef.current
+          if (!latest || Date.now() < ttsUserInputUntilRef.current) {
+            if (latest) scheduleTTSHighlight(latest.absoluteOffset, latest.allowAutoFollow, latest.source)
+            return
+          }
+          ttsPendingHighlightRef.current = null
+          ttsLastHighlightAtRef.current = Date.now()
+          updateTTSHighlight(latest.absoluteOffset, latest.allowAutoFollow, latest.source)
+        }, delay)
+        return
+      }
+
+      ttsPendingHighlightRef.current = null
+      ttsLastHighlightAtRef.current = now
+      updateTTSHighlight(pending.absoluteOffset, pending.allowAutoFollow, pending.source)
+    })
+  }
+
+  const updateTTSHighlight = (absoluteOffset: number, allowAutoFollow = true, source: TTSProgressSource = 'boundary') => {
+    ttsLastAbsoluteOffsetRef.current = absoluteOffset
     const doc = currentDocRef.current
     if (!doc) {
-      console.log('[TTS:follow] skip highlight: no current doc', { absoluteOffset })
+      if (DEBUG_TTS_FOLLOW) console.log('[TTS:follow] skip highlight: no current doc', { absoluteOffset })
       return
     }
     const loc = (renditionRef.current as any)?.currentLocation?.()
     const visibleSpineIdx = loc?.start?.index as number | undefined
     if (visibleSpineIdx !== undefined && ttsVisibleSpineIndexRef.current !== visibleSpineIdx) {
-      console.log('[TTS:follow] skip highlight: visible spine 不符合朗讀 spine', {
+      if (DEBUG_TTS_FOLLOW) console.log('[TTS:follow] skip highlight: visible spine 不符合朗讀 spine', {
         absoluteOffset,
         visibleSpineIdx,
         readingSpineIdx: ttsVisibleSpineIndexRef.current,
@@ -1490,8 +1677,8 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     ensureTTSHighlightStyle(doc)
     const range = createRangeFromTextOffset(doc, absoluteOffset)
     if (!range) {
-      console.log('[TTS:follow] skip highlight: range not found', { absoluteOffset })
-      followTTSRange(null, doc, absoluteOffset, allowAutoFollow)
+      if (DEBUG_TTS_FOLLOW) console.log('[TTS:follow] skip highlight: range not found', { absoluteOffset })
+      followTTSRange(null, doc, absoluteOffset, allowAutoFollow, source)
       return
     }
 
@@ -1500,12 +1687,12 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     if (highlights && HighlightCtor) {
       highlights.set(TTS_HIGHLIGHT_ID, new HighlightCtor(range))
     } else {
-      console.log('[TTS:follow] Custom Highlight API unavailable, only auto-follow by progress', { absoluteOffset })
+      if (DEBUG_TTS_FOLLOW) console.log('[TTS:follow] Custom Highlight API unavailable, only auto-follow by progress', { absoluteOffset })
     }
-    followTTSRange(range, doc, absoluteOffset, allowAutoFollow)
+    followTTSRange(range, doc, absoluteOffset, allowAutoFollow, source)
   }
 
-  const followTTSRange = (range: Range | null, doc: Document, absoluteOffset: number, allowAutoFollow: boolean) => {
+  const followTTSRange = (range: Range | null, doc: Document, absoluteOffset: number, allowAutoFollow: boolean, source: TTSProgressSource) => {
     const loc = (renditionRef.current as any)?.currentLocation?.()
     const displayed = loc?.start?.displayed as { page: number; total: number } | undefined
     const currentPage = displayed?.page ?? 1
@@ -1513,15 +1700,19 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     const textLength = Math.max(ttsChapterTextLengthRef.current, 1)
     const continuousPage = absoluteOffset / textLength * totalPages + 1
     const estimatedPage = Math.min(totalPages, Math.max(1, Math.floor(continuousPage)))
-    const progressShouldAdvance = continuousPage >= currentPage + 0.9
-
+    let pageEndOffset = ttsVisiblePageEndOffsetRef.current
+    if (pageEndOffset === null || pageEndOffset <= absoluteOffset) {
+      pageEndOffset = measureCurrentPageEndOffset(doc, loc)
+      ttsVisiblePageEndOffsetRef.current = pageEndOffset
+    }
+    const distanceToPageEnd = pageEndOffset === null ? null : pageEndOffset - absoluteOffset
     if (!allowAutoFollow) {
-      console.log('[TTS:follow] skip next: 初始 highlight 不觸發翻頁', { absoluteOffset, currentPage, estimatedPage, totalPages })
+      if (DEBUG_TTS_FOLLOW) console.log('[TTS:follow] skip next: 初始 highlight 不觸發翻頁', { absoluteOffset, currentPage, estimatedPage, totalPages, pageEndOffset, distanceToPageEnd })
       return
     }
 
     if (Date.now() < ttsManualNavigationUntilRef.current) {
-      console.log('[TTS:follow] skip display: 使用者剛手動翻頁，暫停自動跟隨', {
+      if (DEBUG_TTS_FOLLOW) console.log('[TTS:follow] skip display: 使用者剛手動翻頁，暫停自動跟隨', {
         absoluteOffset,
         currentPage,
         estimatedPage,
@@ -1531,7 +1722,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     }
 
     if (ttsAutoFollowBusyRef.current) {
-      console.log('[TTS:follow] skip next: 翻頁中', { displayed })
+      if (DEBUG_TTS_FOLLOW) console.log('[TTS:follow] skip next: 翻頁中', { displayed })
       return
     }
 
@@ -1547,34 +1738,63 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
       rect.bottom > viewportHeight * 1.08
     )
 
-    const shouldAdvance = progressShouldAdvance || (rectOutside && continuousPage >= currentPage + 0.82)
+    const progressShouldAdvance =
+      pageEndOffset === null && (
+        (source === 'boundary' && continuousPage >= currentPage + 1.05) ||
+        (!hasUsableRect && continuousPage >= currentPage + 1.12)
+      )
+    const measuredPageEndReached =
+      pageEndOffset !== null &&
+      distanceToPageEnd !== null &&
+      (distanceToPageEnd <= TTS_PAGE_END_BUFFER || (rectOutside && distanceToPageEnd <= TTS_PAGE_END_BUFFER * 4))
+    const shouldAdvance = measuredPageEndReached || progressShouldAdvance
 
-    console.log('[TTS:follow] check', {
-      displayed,
-      absoluteOffset,
-      estimatedPage,
-      continuousPage: Number(continuousPage.toFixed(2)),
-      currentPage,
-      totalPages,
-      rect: rect ? { left: Math.round(rect.left), right: Math.round(rect.right), top: Math.round(rect.top), bottom: Math.round(rect.bottom) } : null,
-      viewport: { width: viewportWidth, height: viewportHeight },
-      hasUsableRect,
-      rectOutside,
-      progressShouldAdvance,
-      shouldAdvance,
-    })
+    if (DEBUG_TTS_FOLLOW) {
+      const now = Date.now()
+      if (shouldAdvance || source === 'boundary' || now - ttsLastFollowDebugAtRef.current >= 1000) {
+        ttsLastFollowDebugAtRef.current = now
+        console.log('[TTS:follow] check', {
+          source,
+          displayed,
+          absoluteOffset,
+          visibleSpineIdx: loc?.start?.index,
+          readingSpineIdx: ttsVisibleSpineIndexRef.current,
+          visibleStartOffset: ttsVisibleStartOffsetRef.current,
+          pageEndOffset,
+          distanceToPageEnd,
+          chapterTextLength: textLength,
+          estimatedPage,
+          continuousPage: Number(continuousPage.toFixed(2)),
+          currentPage,
+          totalPages,
+          rect: rect ? { left: Math.round(rect.left), right: Math.round(rect.right), top: Math.round(rect.top), bottom: Math.round(rect.bottom) } : null,
+          viewport: { width: viewportWidth, height: viewportHeight },
+          hasUsableRect,
+          rectOutside,
+          measuredPageEndReached,
+          progressShouldAdvance,
+          shouldAdvance,
+        })
+      }
+    }
 
     if (!shouldAdvance) return
 
     const now = Date.now()
     if (now - ttsAutoFollowLastAtRef.current < 650) {
-      console.log('[TTS:follow] skip next: 節流中', { msSinceLast: now - ttsAutoFollowLastAtRef.current, displayed })
+      if (DEBUG_TTS_FOLLOW) console.log('[TTS:follow] skip next: 節流中', { msSinceLast: now - ttsAutoFollowLastAtRef.current, displayed })
       return
     }
 
     ttsAutoFollowBusyRef.current = true
     ttsAutoFollowLastAtRef.current = now
-    console.log('[TTS:follow] next() 延後自動翻到下一頁', { displayed, continuousPage: Number(continuousPage.toFixed(2)) })
+    if (DEBUG_TTS_FOLLOW) console.log('[TTS:follow] next() 延後自動翻到下一頁', {
+      displayed,
+      continuousPage: Number(continuousPage.toFixed(2)),
+      absoluteOffset,
+      pageEndOffset,
+      distanceToPageEnd,
+    })
     if (ttsAutoFollowUnlockTimerRef.current) clearTimeout(ttsAutoFollowUnlockTimerRef.current)
     ttsAutoFollowUnlockTimerRef.current = setTimeout(() => {
       console.warn('[TTS:follow] relocated 未如期觸發，fallback 解鎖自動翻頁', { displayed })
@@ -1590,7 +1810,8 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     const iframe = viewerRef.current.querySelector('iframe')
     if (!iframe?.contentDocument?.body) return
 
-    const fullText = iframe.contentDocument.body.innerText?.trim() ?? ''
+    const textIndex = getTextIndex(iframe.contentDocument)
+    const fullText = textIndex?.text ?? ''
     if (!fullText) return
 
     // 從 epub.js 取得當前頁資訊
@@ -1665,16 +1886,24 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     }
     ttsVisibleSpineIndexRef.current = currentSpineIdx
     ttsVisibleStartOffsetRef.current = startOffset
+    ttsLastAbsoluteOffsetRef.current = startOffset
     ttsChapterTextLengthRef.current = fullText.length
     ttsChapterPageTotalRef.current = totalPages
+    ttsVisiblePageEndOffsetRef.current = measureCurrentPageEndOffset(iframe.contentDocument, loc)
     updateTTSHighlight(startOffset, false)
-    console.log('[TTS] speakCurrentPage 開始', { currentSpineIdx, pageIdx: currentPageIdx, textLength: textToRead.length })
+    console.log('[TTS] speakCurrentPage 開始', {
+      currentSpineIdx,
+      pageIdx: currentPageIdx,
+      textLength: textToRead.length,
+      visibleStartOffset: startOffset,
+      pageEndOffset: ttsVisiblePageEndOffsetRef.current,
+    })
     speak(textToRead, () => {
       clearTTSHighlight(currentDocRef.current)
       console.log('[TTS] speakCurrentPage 完成，準備加載下一章節', { nextSpineIdx: currentSpineIdx + 1 })
       continueFromSpineRef.current(currentSpineIdx + 1)
-    }, (charIdx) => {
-      updateTTSHighlight(ttsVisibleStartOffsetRef.current + charIdx, charIdx > 24)
+    }, (charIdx, source) => {
+      scheduleTTSHighlight(ttsVisibleStartOffsetRef.current + charIdx, charIdx > 24, source)
     })
   }
 
@@ -1745,6 +1974,8 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
         clearTTSHighlight(currentDocRef.current)
         ttsVisibleSpineIndexRef.current = spineIdx
         ttsVisibleStartOffsetRef.current = 0
+        ttsVisiblePageEndOffsetRef.current = null
+        ttsLastAbsoluteOffsetRef.current = 0
         ttsChapterTextLengthRef.current = text.length
         ttsChapterPageTotalRef.current = 1
         ttsAutoFollowBusyRef.current = false
@@ -1754,7 +1985,13 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
           await renditionRef.current?.display(item.href ?? item.idref)
           const loc = (renditionRef.current as any)?.currentLocation?.()
           const displayed = loc?.start?.displayed as { page: number; total: number } | undefined
+          const visibleTextIndex = currentDocRef.current ? getTextIndex(currentDocRef.current) : null
+          if (visibleTextIndex?.text.trim()) {
+            text = visibleTextIndex.text
+          }
+          ttsChapterTextLengthRef.current = text.length
           ttsChapterPageTotalRef.current = Math.max(displayed?.total ?? 1, 1)
+          ttsVisiblePageEndOffsetRef.current = currentDocRef.current ? measureCurrentPageEndOffset(currentDocRef.current, loc) : null
           updateTTSHighlight(0, false)
         } catch (displayErr) {
           console.warn('[TTS] continueFromSpine: 主閱讀器跳至朗讀章節失敗，仍繼續背景朗讀', {
@@ -1770,7 +2007,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
             clearTTSHighlight(currentDocRef.current)
             continueFromSpineRef.current(spineIdx + 1)
           },
-          (charIdx) => updateTTSHighlight(ttsVisibleStartOffsetRef.current + charIdx, charIdx > 24),
+          (charIdx, source) => scheduleTTSHighlight(ttsVisibleStartOffsetRef.current + charIdx, charIdx > 24, source),
         )
       } catch (err) {
         if (!token.aborted) {
@@ -1810,6 +2047,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
         sleepIntervalRef.current = null
       }
       setSleepRemaining(null)
+      cancelScheduledTTSHighlight()
       clearTTSHighlight(currentDocRef.current)
       stop()
     }
@@ -1828,6 +2066,11 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     if (renditionRef.current) removePendingAnnotation(renditionRef.current)
     setPopup(null)
     ttsManualNavigationUntilRef.current = 0
+    scanAbortRef.current.aborted = true
+    if (scanTimerRef.current) {
+      clearTimeout(scanTimerRef.current)
+      scanTimerRef.current = null
+    }
     if (ttsPaused) {
       resume()
       if (sleepMinutesRef.current > 0) startSleepTimer(sleepMinutesRef.current)
@@ -1842,6 +2085,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     clearSleepTimer()
     // 取消任何待處理的章節載入（手機版保護機制）
     loadingAbortRef.current.aborted = true
+    cancelScheduledTTSHighlight()
     ttsAutoFollowBusyRef.current = false
     if (ttsAutoFollowUnlockTimerRef.current) {
       clearTimeout(ttsAutoFollowUnlockTimerRef.current)
@@ -1854,9 +2098,12 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     resetTTS()
     clearSleepTimer()
     loadingAbortRef.current.aborted = true
+    cancelScheduledTTSHighlight()
     clearTTSHighlight(currentDocRef.current)
     ttsVisibleSpineIndexRef.current = null
     ttsVisibleStartOffsetRef.current = 0
+    ttsVisiblePageEndOffsetRef.current = null
+    ttsLastAbsoluteOffsetRef.current = 0
     ttsChapterTextLengthRef.current = 0
     ttsChapterPageTotalRef.current = 1
     ttsAutoFollowBusyRef.current = false
@@ -1874,6 +2121,8 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     <div
       className="flex flex-col h-screen"
       style={{ background: darkMode ? '#1a1816' : '#f9f7f2' }}
+      onPointerDownCapture={noteUserInteraction}
+      onTouchStartCapture={noteUserInteraction}
       onClick={() => { setPopup(null); setEditPopup(null) }}
     >
       <Toolbar
