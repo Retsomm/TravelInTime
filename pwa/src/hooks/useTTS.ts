@@ -113,13 +113,6 @@ const useTTS = () => {
     }, PROGRESS_TICK_INTERVAL)
   }
 
-  const resetProgressClockFromCurrentPosition = () => {
-    const cps = Math.max(estimatedCharsPerSecondRef.current, 0.1)
-    currentUtteranceStartAtRef.current = Date.now() - Math.floor(charIndexRef.current / cps * 1000)
-    currentUtteranceLastBoundaryAtRef.current = Date.now()
-    currentUtteranceLastBoundaryIndexRef.current = charIndexRef.current
-  }
-
   useEffect(() => {
     const load = () => {
       const all = window.speechSynthesis.getVoices()
@@ -335,10 +328,20 @@ const useTTS = () => {
 
   const pause = () => {
     if (!playingRef.current) return
-    console.log('[TTS] pause() 被呼叫', { generation: generationRef.current, offset: textOffsetRef.current, charIndex: charIndexRef.current })
+    const absolutePos = Math.max(0, Math.min(textOffsetRef.current + charIndexRef.current, currentTextRef.current.length))
+    console.log('[TTS] pause() 被呼叫', {
+      generation: generationRef.current,
+      offset: textOffsetRef.current,
+      charIndex: charIndexRef.current,
+      absolutePos,
+    })
+    generationRef.current++ // 使用者暫停後，舊 utterance 的 onend/onerror/recovery 不可再恢復播放
     stopKeepalive()
-    window.speechSynthesis.pause()
     stopProgressTimer()
+    window.speechSynthesis.cancel()
+    utteranceRef.current = null
+    textOffsetRef.current = absolutePos
+    charIndexRef.current = 0
     playingRef.current = false
     pausedRef.current = true
     setPlaying(false)
@@ -359,14 +362,6 @@ const useTTS = () => {
     pausedRef.current = false
     setPlaying(true)
     setPaused(false)
-
-    if (window.speechSynthesis.paused && window.speechSynthesis.speaking) {
-      window.speechSynthesis.resume()
-      resetProgressClockFromCurrentPosition()
-      startProgressTimer(currentUtteranceTextRef.current.length)
-      startKeepalive()
-      return
-    }
 
     const absolutePos = textOffsetRef.current + charIndexRef.current
     const remaining = currentTextRef.current.slice(absolutePos)
