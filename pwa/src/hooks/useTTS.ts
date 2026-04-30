@@ -13,7 +13,7 @@ const MAX_UTTERANCE_LENGTH = 3000
 const PROGRESS_TICK_INTERVAL = 250
 const DEFAULT_CHARS_PER_SECOND = 6.2
 const MAX_ESTIMATED_BOUNDARY_LEAD = 90
-const DEBUG_TTS_PROGRESS = true
+const DEBUG_TTS_PROGRESS = false
 
 export type TTSProgressSource = 'boundary' | 'estimate'
 
@@ -57,7 +57,9 @@ const useTTS = () => {
     if (keepaliveTimerRef.current !== null) return
     keepaliveTimerRef.current = setInterval(() => {
       if (!playingRef.current) return
-      console.log('[TTS] keepalive ping', { speaking: window.speechSynthesis.speaking, paused: window.speechSynthesis.paused })
+      if (DEBUG_TTS_PROGRESS) {
+        console.log('[TTS] keepalive ping', { speaking: window.speechSynthesis.speaking, paused: window.speechSynthesis.paused })
+      }
       window.speechSynthesis.pause()
       window.speechSynthesis.resume()
     }, IOS_KEEPALIVE_INTERVAL)
@@ -200,11 +202,13 @@ const useTTS = () => {
     }
     utterance.onpause = () => {
       if (generationRef.current !== generation) return
-      console.warn('[TTS] onpause（系統暫停）', { generation, charIndex: charIndexRef.current })
+      if (DEBUG_TTS_PROGRESS) {
+        console.warn('[TTS] onpause（系統暫停）', { generation, charIndex: charIndexRef.current })
+      }
     }
     utterance.onresume = () => {
       if (generationRef.current !== generation) return
-      console.log('[TTS] onresume', { generation })
+      if (DEBUG_TTS_PROGRESS) console.log('[TTS] onresume', { generation })
     }
     utterance.onboundary = (e) => {
       if (generationRef.current !== generation) return

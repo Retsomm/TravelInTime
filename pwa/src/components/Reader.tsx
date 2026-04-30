@@ -113,7 +113,7 @@ const TTS_HIGHLIGHT_LENGTH = 4
 const TTS_GEOMETRY_LINE_BUFFER = 0.9
 const TTS_NEW_PAGE_AUTO_FOLLOW_GUARD = 36
 const TTS_PAGE_END_FIXED_LEAD = 8
-const DEBUG_TTS_FOLLOW = true
+const DEBUG_TTS_FOLLOW = false
 
 type TextIndex = { nodes: Text[]; starts: number[]; total: number; text: string }
 type TTSRangeViewportState = {
@@ -2014,7 +2014,9 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
       return
     }
 
-    const geometry = getTTSRangeViewportState(doc, range)
+    const geometry = (DEBUG_TTS_FOLLOW || pageEndOffset === null)
+      ? getTTSRangeViewportState(doc, range)
+      : null
     const pageSpan = pageStartOffset !== null && pageEndOffset !== null
       ? Math.max(1, pageEndOffset - pageStartOffset)
       : null
@@ -2031,7 +2033,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     const progressShouldAdvance =
       !beforeCurrentPageGuard &&
       !insideNewPageGuard &&
-      !geometry.hasUsableRect && pageEndOffset === null && (
+      !(geometry?.hasUsableRect ?? true) && pageEndOffset === null && (
         (source === 'boundary' && continuousPage >= currentPage + 1.05) ||
         (continuousPage >= currentPage + 1.12)
       )
@@ -2064,7 +2066,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
           continuousPage: Number(continuousPage.toFixed(2)),
           currentPage,
           totalPages,
-          rect: geometry.rect ? {
+          rect: geometry?.rect ? {
             left: Math.round(geometry.rect.left),
             right: Math.round(geometry.rect.right),
             top: Math.round(geometry.rect.top),
@@ -2072,13 +2074,13 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
             width: Math.round(geometry.rect.width),
             height: Math.round(geometry.rect.height),
           } : null,
-          viewport: geometry.viewport,
-          lineHeight: Math.round(geometry.lineHeight),
-          bottomGap: geometry.bottomGap === null ? null : Math.round(geometry.bottomGap),
-          leftGap: geometry.leftGap === null ? null : Math.round(geometry.leftGap),
-          rightGap: geometry.rightGap === null ? null : Math.round(geometry.rightGap),
-          hasUsableRect: geometry.hasUsableRect,
-          geometryReason: geometry.reason,
+          viewport: geometry?.viewport ?? null,
+          lineHeight: geometry ? Math.round(geometry.lineHeight) : null,
+          bottomGap: geometry?.bottomGap === null || geometry?.bottomGap === undefined ? null : Math.round(geometry.bottomGap),
+          leftGap: geometry?.leftGap === null || geometry?.leftGap === undefined ? null : Math.round(geometry.leftGap),
+          rightGap: geometry?.rightGap === null || geometry?.rightGap === undefined ? null : Math.round(geometry.rightGap),
+          hasUsableRect: geometry?.hasUsableRect ?? null,
+          geometryReason: geometry?.reason ?? null,
           pageBoundaryShouldAdvance,
           pageEntryGuard,
           beforeCurrentPageGuard,
@@ -2102,13 +2104,13 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
       pageEndLead: TTS_PAGE_END_FIXED_LEAD,
       distanceToPageEnd,
       trigger: pageBoundaryShouldAdvance ? 'page-end-cfi' : 'progress-fallback',
-      geometryReason: geometry.reason,
+      geometryReason: geometry?.reason ?? null,
       pageEntryGuard,
       beforeCurrentPageGuard,
-      bottomGap: geometry.bottomGap === null ? null : Math.round(geometry.bottomGap),
-      leftGap: geometry.leftGap === null ? null : Math.round(geometry.leftGap),
-      rightGap: geometry.rightGap === null ? null : Math.round(geometry.rightGap),
-      lineHeight: Math.round(geometry.lineHeight),
+      bottomGap: geometry?.bottomGap === null || geometry?.bottomGap === undefined ? null : Math.round(geometry.bottomGap),
+      leftGap: geometry?.leftGap === null || geometry?.leftGap === undefined ? null : Math.round(geometry.leftGap),
+      rightGap: geometry?.rightGap === null || geometry?.rightGap === undefined ? null : Math.round(geometry.rightGap),
+      lineHeight: geometry ? Math.round(geometry.lineHeight) : null,
     })
     requestTTSAutoNextPage(displayed, absoluteOffset, pageStartOffset, pageEndOffset)
   }
