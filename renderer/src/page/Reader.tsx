@@ -1,528 +1,26 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import ePub from 'epubjs'
 import type { Book, Rendition } from 'epubjs'
-import * as OpenCC from 'opencc-js'
-import Toolbar from './Toolbar'
-import NotePanel from './NotePanel'
-import ChapterPanel from './ChapterPanel'
-import type { TocItem } from './ChapterPanel'
-import SettingsPanel from './SettingsPanel'
-import useTTS from '../hooks/useTTS'
-import type { TTSProgressSource } from '../hooks/useTTS'
-import { FONT_OPTIONS, useReaderStore } from '../store/useReaderStore'
-import type { Script } from '../store/useReaderStore'
-import { useAnnotationStore, loadAnnotationsForBook, saveAnnotationsForBook } from '../store/useAnnotationStore'
-import { saveProgress, loadProgress, saveBookSettings, loadBookSettings, loadBookmarks, saveBookmarks } from '../hooks/useLibrary'
-import type { BookRecord, Bookmark } from '../hooks/useLibrary'
-
-let _toSC: ((s: string) => string) | null = null
-let _toTC: ((s: string) => string) | null = null
-const getToSC = () => { if (!_toSC) _toSC = OpenCC.Converter({ from: 'tw', to: 'cn' }); return _toSC }
-const getToTC = () => { if (!_toTC) _toTC = OpenCC.Converter({ from: 'cn', to: 'tw' }); return _toTC }
-
-// 各功能 CSS 注入完全獨立，使用不同的 <style> 標籤，互不干擾
-const injectStyle = (doc: Document, id: string, css: string) => {
-  let el = doc.getElementById(id) as HTMLStyleElement | null
-  if (!el) {
-    el = doc.createElement('style')
-    el.id = id
-    doc.head?.appendChild(el)
-  }
-  el.textContent = css
-}
-
-const applyDarkOverride = (doc: Document, isDark: boolean) => {
-  const bg = isDark ? '#1a1816' : '#f9f7f2'
-  const color = isDark ? '#e8e0d4' : '#2a2420'
-  const colorRule = isDark ? `* { color: ${color} !important; }` : ''
-  injectStyle(doc, 'tit-dark', `html, body { background-color: ${bg} !important; } ${colorRule}`)
-}
-
-const WEB_FONT_URLS: Record<string, string> = {
-  Huninn: 'https://fonts.googleapis.com/css2?family=Huninn&display=swap',
-  'Noto Serif TC': 'https://fonts.googleapis.com/css2?family=Noto+Serif+TC&display=swap',
-  'Noto Sans TC': 'https://fonts.googleapis.com/css2?family=Noto+Sans+TC&display=swap',
-  'LXGW WenKai TC': 'https://fonts.googleapis.com/css2?family=LXGW+WenKai+TC&display=swap',
-}
-
-const DEFAULT_FONT_FAMILY = FONT_OPTIONS[0].value
-
-const normalizeFontFamily = (family: string | null | undefined): string =>
-  family && FONT_OPTIONS.some(option => option.value === family) ? family : DEFAULT_FONT_FAMILY
-
-const injectWebFontLink = (doc: Document, href: string | null) => {
-  const id = 'tit-webfont-link'
-  let el = doc.getElementById(id) as HTMLLinkElement | null
-  if (!href) { el?.remove(); return }
-  if (!el) {
-    el = doc.createElement('link')
-    el.id = id
-    el.rel = 'stylesheet'
-    doc.head?.appendChild(el)
-  }
-  el.href = href
-}
-
-const applyFontFamilyOverride = (doc: Document, family: string) => {
-  const normalizedFamily = normalizeFontFamily(family)
-  injectStyle(doc, 'tit-font', `:root * { font-family: ${normalizedFamily} !important; }`)
-  const fontKey = Object.keys(WEB_FONT_URLS).find(k => normalizedFamily.includes(k))
-  injectWebFontLink(doc, fontKey ? WEB_FONT_URLS[fontKey] : null)
-}
-
-const applyLineHeightOverride = (doc: Document, lh: number) => {
-  injectStyle(doc, 'tit-lh', `:root * { line-height: ${lh} !important; }`)
-}
-
-const applyLetterSpacingOverride = (doc: Document, ls: number) => {
-  injectStyle(doc, 'tit-ls', `:root * { letter-spacing: ${ls}em !important; }`)
-}
-
-
-const originalTexts = new WeakMap<Node, string>()
-
-const HIGHLIGHT_COLORS = [
-  { label: '黃', value: '#eab308' },
-  { label: '綠', value: '#22c55e' },
-  { label: '藍', value: '#3b82f6' },
-  { label: '粉', value: '#f9b9d7' },
-  { label: '橘', value: '#f97316' },
-]
-
-const copyTextToClipboard = async (text: string) => {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text)
-    return
-  }
-
-  const textarea = document.createElement('textarea')
-  textarea.value = text
-  textarea.style.position = 'fixed'
-  textarea.style.left = '-9999px'
-  document.body.appendChild(textarea)
-  textarea.select()
-  document.execCommand('copy')
-  textarea.remove()
-}
-
-const TTS_HIGHLIGHT_ID = 'tit-tts-progress'
-const TTS_HIGHLIGHT_STYLE_ID = 'tit-tts-progress-style'
-const TTS_HIGHLIGHT_INTERVAL = 80
-const TTS_USER_INPUT_GRACE = 180
-const TTS_HIGHLIGHT_LENGTH = 4
-const TTS_GEOMETRY_LINE_BUFFER = 0.9
-const TTS_NEW_PAGE_AUTO_FOLLOW_GUARD = 36
-const TTS_PAGE_END_FIXED_LEAD = 8
-const DEBUG_TTS_FOLLOW = false
-
-type TextIndex = { nodes: Text[]; starts: number[]; total: number; text: string }
-type TTSRangeViewportState = {
-  rect: { left: number; right: number; top: number; bottom: number; width: number; height: number } | null
-  viewport: { width: number; height: number }
-  lineHeight: number
-  bottomGap: number | null
-  leftGap: number | null
-  rightGap: number | null
-  hasUsableRect: boolean
-  isVisible: boolean
-  nearPageEnd: boolean
-  outsidePage: boolean
-  reason: 'visible' | 'near-bottom' | 'near-right-edge' | 'near-left-edge' | 'below-page' | 'right-of-page' | 'left-of-page' | 'no-rect' | 'no-viewport'
-}
-const ttsTextIndexCache = new WeakMap<Document, TextIndex>()
-
-const ensureTTSHighlightStyle = (doc: Document) => {
-  injectStyle(doc, TTS_HIGHLIGHT_STYLE_ID, `
-    ::highlight(${TTS_HIGHLIGHT_ID}) {
-      background-color: rgba(245, 158, 11, 0.32);
-      color: inherit;
-    }
-  `)
-}
-
-const clearTTSHighlight = (doc: Document | null | undefined) => {
-  const highlights = (doc?.defaultView as any)?.CSS?.highlights
-  highlights?.delete?.(TTS_HIGHLIGHT_ID)
-}
-
-const clearTTSHighlights = (docs: Iterable<Document | null | undefined>) => {
-  for (const doc of docs) clearTTSHighlight(doc)
-}
-
-const collectContentDocuments = (viewer: HTMLElement | null, knownDocs: Iterable<Document>) => {
-  const docs = new Set<Document>()
-  for (const doc of knownDocs) docs.add(doc)
-  viewer?.querySelectorAll('iframe').forEach((iframe) => {
-    try {
-      const doc = (iframe as HTMLIFrameElement).contentDocument
-      if (doc) docs.add(doc)
-    } catch { /* ignore cross-origin iframe */ }
-  })
-  return docs
-}
-
-const getTextIndex = (doc: Document): TextIndex | null => {
-  const cached = ttsTextIndexCache.get(doc)
-  if (cached) return cached
-  const body = doc.body
-  if (!body) return null
-
-  const nodes: Text[] = []
-  const starts: number[] = []
-  const pieces: string[] = []
-  const walker = doc.createTreeWalker(body, NodeFilter.SHOW_TEXT)
-  let node: Node | null
-  let total = 0
-  while ((node = walker.nextNode())) {
-    const textNode = node as Text
-    const len = (textNode.nodeValue ?? '').length
-    if (len === 0) continue
-    nodes.push(textNode)
-    starts.push(total)
-    pieces.push(textNode.nodeValue ?? '')
-    total += len
-  }
-
-  const index = { nodes, starts, total, text: pieces.join('') }
-  ttsTextIndexCache.set(doc, index)
-  return index
-}
-
-const findTextNodeAt = (index: TextIndex, offset: number) => {
-  if (index.nodes.length === 0) return null
-  const safeOffset = Math.max(0, Math.min(offset, Math.max(index.total - 1, 0)))
-  let lo = 0
-  let hi = index.starts.length - 1
-  while (lo <= hi) {
-    const mid = (lo + hi) >> 1
-    const start = index.starts[mid]
-    const end = start + (index.nodes[mid].nodeValue ?? '').length
-    if (safeOffset < start) hi = mid - 1
-    else if (safeOffset >= end) lo = mid + 1
-    else return { node: index.nodes[mid], offset: safeOffset - start, index: mid }
-  }
-  const last = index.nodes.length - 1
-  return {
-    node: index.nodes[last],
-    offset: Math.max(0, (index.nodes[last].nodeValue ?? '').length - 1),
-    index: last,
-  }
-}
-
-const getTextOffsetFromRange = (doc: Document, range: Range | null | undefined, edge: 'start' | 'end' = 'start'): number | null => {
-  if (!range) return null
-  const index = getTextIndex(doc)
-  if (!index) return null
-
-  const container = edge === 'end' ? range.endContainer : range.startContainer
-  const offset = edge === 'end' ? range.endOffset : range.startOffset
-
-  if (container.nodeType === Node.TEXT_NODE) {
-    const textIdx = index.nodes.indexOf(container as Text)
-    if (textIdx < 0) return null
-    const nodeLength = (container.nodeValue ?? '').length
-    return index.starts[textIdx] + Math.max(0, Math.min(offset, nodeLength))
-  }
-
-  const walker = doc.createTreeWalker(container, NodeFilter.SHOW_TEXT)
-  const textNode = (edge === 'end' ? null : walker.nextNode()) as Text | null
-  if (textNode) {
-    const textIdx = index.nodes.indexOf(textNode)
-    return textIdx >= 0 ? index.starts[textIdx] : null
-  }
-
-  let lastText: Text | null = null
-  let node: Node | null
-  while ((node = walker.nextNode())) lastText = node as Text
-  if (lastText) {
-    const textIdx = index.nodes.indexOf(lastText)
-    return textIdx >= 0 ? index.starts[textIdx] + (lastText.nodeValue ?? '').length : null
-  }
-
-  return null
-}
-
-const getBoundaryOffsetFromRange = (doc: Document, range: Range | null | undefined, edge: 'start' | 'end' = 'start'): number | null => {
-  if (!range) return null
-  const startOffset = getTextOffsetFromRange(doc, range, 'start')
-  const endOffset = getTextOffsetFromRange(doc, range, 'end')
-  if (startOffset === null) return endOffset
-  if (endOffset === null) return startOffset
-
-  // epub.js getRange(cfi) can expand to an element range. For page boundary CFIs,
-  // the earlier text position is the actual page boundary; range.end may point
-  // to the end of a paragraph/element and make auto-follow turn far too late.
-  return edge === 'end' ? Math.min(startOffset, endOffset) : startOffset
-}
-
-const createRangeFromTextOffset = (doc: Document, start: number, length = TTS_HIGHLIGHT_LENGTH): Range | null => {
-  const index = getTextIndex(doc)
-  if (!index || index.total === 0) return null
-
-  const safeStart = Math.max(0, Math.min(start, index.total - 1))
-  const startMatch = findTextNodeAt(index, safeStart)
-  if (!startMatch) return null
-
-  const startNode = startMatch.node
-  const startOffset = Math.max(0, Math.min((startNode.nodeValue ?? '').length, startMatch.offset))
-  const nodeText = startNode.nodeValue ?? ''
-  let endOffset = Math.min(nodeText.length, startOffset + Math.max(1, length))
-  const localText = nodeText.slice(startOffset, endOffset)
-  const breakAt = localText.search(/[\n\r。！？!?；;，,、]/)
-  if (breakAt > 0) endOffset = startOffset + breakAt
-  if (endOffset <= startOffset) endOffset = Math.min(nodeText.length, startOffset + 1)
-  if (endOffset <= startOffset) return null
-
-  const range = doc.createRange()
-  range.setStart(startNode, startOffset)
-  range.setEnd(startNode, endOffset)
-  return range
-}
-
-const getTTSRangeViewportState = (doc: Document, range: Range | null): TTSRangeViewportState => {
-  const viewportWidth = doc.documentElement.clientWidth || doc.defaultView?.innerWidth || 0
-  const viewportHeight = doc.documentElement.clientHeight || doc.defaultView?.innerHeight || 0
-  const viewport = { width: viewportWidth, height: viewportHeight }
-  if (!viewportWidth || !viewportHeight) {
-    return {
-      rect: null,
-      viewport,
-      lineHeight: 0,
-      bottomGap: null,
-      leftGap: null,
-      rightGap: null,
-      hasUsableRect: false,
-      isVisible: false,
-      nearPageEnd: false,
-      outsidePage: false,
-      reason: 'no-viewport',
-    }
-  }
-
-  const rects = range
-    ? Array.from(range.getClientRects()).filter((rect) => rect.width > 0 || rect.height > 0)
-    : []
-  const rawRect = rects.find((rect) =>
-    rect.bottom >= 0 &&
-    rect.top <= viewportHeight &&
-    rect.right >= 0 &&
-    rect.left <= viewportWidth
-  ) ?? rects[0] ?? null
-
-  if (!rawRect) {
-    const hasRange = !!range
-    return {
-      rect: null,
-      viewport,
-      lineHeight: 0,
-      bottomGap: null,
-      leftGap: null,
-      rightGap: null,
-      hasUsableRect: false,
-      isVisible: false,
-      nearPageEnd: hasRange,
-      outsidePage: hasRange,
-      reason: 'no-rect',
-    }
-  }
-
-  const rect = {
-    left: rawRect.left,
-    right: rawRect.right,
-    top: rawRect.top,
-    bottom: rawRect.bottom,
-    width: rawRect.width,
-    height: rawRect.height,
-  }
-  const lineHeight = Math.max(
-    rect.height || 0,
-    (() => {
-      const container = range?.startContainer
-      const element = container?.nodeType === Node.TEXT_NODE
-        ? container.parentElement
-        : container?.nodeType === Node.ELEMENT_NODE
-          ? container as Element
-          : null
-      const value = element ? doc.defaultView?.getComputedStyle(element).lineHeight : null
-      const parsed = value ? Number.parseFloat(value) : Number.NaN
-      return Number.isFinite(parsed) ? parsed : 0
-    })(),
-    18
-  )
-  const bottomGap = viewportHeight - rect.bottom
-  const leftGap = rect.left
-  const rightGap = viewportWidth - rect.right
-  const isVisible =
-    rect.bottom >= 0 &&
-    rect.top <= viewportHeight &&
-    rect.right >= 0 &&
-    rect.left <= viewportWidth
-  const belowPage = rect.top >= viewportHeight || rect.bottom > viewportHeight + lineHeight * 0.35
-  const rightOfPage = rect.left >= viewportWidth || rect.right > viewportWidth + lineHeight * 0.35
-  const leftOfPage = rect.right <= 0 || rect.left < -lineHeight * 0.35
-  const nearBottom = isVisible && bottomGap <= lineHeight * TTS_GEOMETRY_LINE_BUFFER
-  const nearRightEdge = isVisible && rightGap <= lineHeight * TTS_GEOMETRY_LINE_BUFFER
-  const nearLeftEdge = isVisible && leftGap <= lineHeight * TTS_GEOMETRY_LINE_BUFFER
-  const isRtl = doc.documentElement.dir === 'rtl' || doc.body?.dir === 'rtl'
-  const nearHorizontalPageEnd = isRtl ? nearLeftEdge : nearRightEdge
-  const outsidePage = belowPage || rightOfPage || leftOfPage
-
-  return {
-    rect,
-    viewport,
-    lineHeight,
-    bottomGap,
-    leftGap,
-    rightGap,
-    hasUsableRect: true,
-    isVisible,
-    nearPageEnd: outsidePage || nearBottom || nearHorizontalPageEnd,
-    outsidePage,
-    reason: outsidePage
-      ? (belowPage ? 'below-page' : rightOfPage ? 'right-of-page' : 'left-of-page')
-      : nearBottom
-        ? 'near-bottom'
-        : nearHorizontalPageEnd
-          ? (isRtl ? 'near-left-edge' : 'near-right-edge')
-          : 'visible',
-  }
-}
-
-const convertDoc = (doc: Document, convert: (s: string) => string) => {
-  const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT)
-  let node: Node | null
-  while ((node = walker.nextNode())) {
-    if (node.nodeValue && !originalTexts.has(node)) {
-      originalTexts.set(node, node.nodeValue)
-      node.nodeValue = convert(node.nodeValue)
-    }
-  }
-}
-
-const restoreDoc = (doc: Document) => {
-  const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT)
-  let node: Node | null
-  while ((node = walker.nextNode())) {
-    const original = originalTexts.get(node)
-    if (original !== undefined) {
-      node.nodeValue = original
-      originalTexts.delete(node) // 刪除 entry，確保下次切換時可以重新轉換
-    }
-  }
-}
-
-const SERIF = '"Source Serif 4", "Noto Serif TC", Georgia, serif'
-const MONO  = '"JetBrains Mono", ui-monospace, monospace'
-
-const COVER_STYLES = [
-  { bg: 'oklch(0.92 0.04 80)',  ink: 'oklch(0.35 0.06 60)',  rule: 'oklch(0.68 0.08 55)' },
-  { bg: 'oklch(0.86 0.04 65)',  ink: 'oklch(0.30 0.04 50)',  rule: 'oklch(0.55 0.06 40)' },
-  { bg: 'oklch(0.30 0.06 260)', ink: 'oklch(0.92 0.02 260)', rule: 'oklch(0.72 0.10 260)' },
-  { bg: 'oklch(0.42 0.05 150)', ink: 'oklch(0.95 0.02 140)', rule: 'oklch(0.78 0.08 145)' },
-  { bg: 'oklch(0.88 0.04 20)',  ink: 'oklch(0.35 0.06 15)',  rule: 'oklch(0.62 0.12 20)' },
-  { bg: 'oklch(0.45 0.02 250)', ink: 'oklch(0.95 0.01 250)', rule: 'oklch(0.80 0.04 250)' },
-]
-const coverStyleFor = (id: string) => COVER_STYLES[id.split('').reduce((a, c) => a + c.charCodeAt(0), 0) % COVER_STYLES.length]
-const formatDate = (ts: number) =>
-  ts ? new Date(ts).toLocaleDateString('zh-TW', { year: 'numeric', month: 'numeric', day: 'numeric' }) : '—'
-
-const BookInfoPanel = ({
-  record, getCoverDataUrl, darkMode, onClose, progress,
-}: {
-  record: BookRecord
-  getCoverDataUrl: (id: string) => Promise<string | null>
-  darkMode: boolean
-  onClose?: () => void
-  progress?: number | null
-}) => {
-  const [coverUrl, setCoverUrl] = useState<string | null>(null)
-  useEffect(() => {
-    setCoverUrl(null)
-    if (!record.hasCover) return
-    getCoverDataUrl(record.id).then((url) => { if (url) setCoverUrl(url) })
-  }, [record.id, record.hasCover, getCoverDataUrl])
-
-  const paperBg   = darkMode ? '#1a1816' : '#f9f7f2'
-  const paperBg2  = darkMode ? '#231f1c' : '#f1ede4'
-  const borderCol = darkMode ? '#3a3430' : '#e4ddd0'
-  const inkCol    = darkMode ? '#e8e0d4' : '#2a2420'
-  const ink2Col   = darkMode ? '#b8afa4' : '#5a4e44'
-  const ink3Col   = darkMode ? '#7a706a' : '#9a8f80'
-  const accentCol = 'oklch(0.62 0.14 40)'
-  const cs = coverStyleFor(record.id)
-  const pct = progress != null ? Math.round(progress * 100) : null
-
-  const coverEl = coverUrl ? (
-    <img src={coverUrl} alt={record.title} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
-  ) : (
-    <div style={{ width: '100%', height: '100%', background: cs.bg, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', padding: 14, position: 'relative', overflow: 'hidden' }}>
-      <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(135deg, rgba(255,255,255,0.06) 0%, transparent 60%)' }} />
-      <div style={{ borderBottom: `1px solid ${cs.rule}`, marginBottom: 8, paddingBottom: 6 }}>
-        <div style={{ fontFamily: SERIF, fontSize: 16, fontWeight: 600, color: cs.ink, lineHeight: 1.4, wordBreak: 'break-all' }}>{record.title}</div>
-      </div>
-      {record.author && <div style={{ fontFamily: MONO, fontSize: 10, color: cs.rule, letterSpacing: '0.06em' }}>{record.author}</div>}
-    </div>
-  )
-
-  return (
-    <div style={{ width: 260, flexShrink: 0, height: '100%', borderLeft: `1px solid ${borderCol}`, background: paperBg, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      <div style={{ padding: '14px 20px', borderBottom: `1px solid ${borderCol}`, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ fontFamily: SERIF, fontSize: 15, fontWeight: 500, color: inkCol }}>書籍資訊</div>
-        {onClose && (
-          <button
-            onClick={onClose}
-            style={{ width: 26, height: 26, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', color: ink3Col, cursor: 'pointer', transition: 'all .12s' }}
-            onMouseEnter={(e) => { e.currentTarget.style.color = inkCol; e.currentTarget.style.background = paperBg2 }}
-            onMouseLeave={(e) => { e.currentTarget.style.color = ink3Col; e.currentTarget.style.background = 'transparent' }}
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-          </button>
-        )}
-      </div>
-      <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
-        <div style={{ padding: '16px 20px 12px' }}>
-          <div style={{ aspectRatio: '2/3', overflow: 'hidden', boxShadow: '0 4px 16px -4px rgba(0,0,0,0.25)', borderRadius: 4 }}>{coverEl}</div>
-        </div>
-        <div style={{ padding: '0 20px 16px' }}>
-          <div style={{ fontFamily: SERIF, fontSize: 16, fontWeight: 500, color: inkCol, lineHeight: 1.4, marginBottom: 4 }}>{record.title}</div>
-          {record.author && <div style={{ fontFamily: MONO, fontSize: 11, color: ink3Col, letterSpacing: '0.04em' }}>{record.author}</div>}
-        </div>
-        <div style={{ borderTop: `1px solid ${borderCol}` }} />
-        {pct !== null && (
-          <div style={{ padding: '14px 20px 0' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-              <span style={{ fontFamily: MONO, fontSize: 10, color: ink3Col, letterSpacing: '0.08em', textTransform: 'uppercase' }}>閱讀進度</span>
-              <span style={{ fontFamily: MONO, fontSize: 10, color: accentCol }}>{pct}%</span>
-            </div>
-            <div style={{ height: 3, background: borderCol, borderRadius: 2 }}>
-              <div style={{ width: `${pct}%`, height: '100%', background: accentCol, borderRadius: 2 }} />
-            </div>
-          </div>
-        )}
-        <div style={{ padding: '14px 20px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {[{ label: '匯入時間', value: formatDate(record.addedAt) }, { label: '最後閱讀', value: record.lastOpenedAt ? formatDate(record.lastOpenedAt) : '尚未記錄' }].map(({ label, value }) => (
-            <div key={label} style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
-              <span style={{ fontFamily: MONO, fontSize: 10, color: ink3Col, letterSpacing: '0.06em', flexShrink: 0 }}>{label}</span>
-              <span style={{ fontFamily: MONO, fontSize: 11, color: ink2Col, textAlign: 'right' }}>{value}</span>
-            </div>
-          ))}
-        </div>
-        <div style={{ borderTop: `1px solid ${borderCol}` }} />
-        <div style={{ padding: '12px 20px' }}>
-          <button
-            onClick={() => navigator.clipboard?.writeText(record.title)}
-            style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '9px 14px', borderRadius: 8, background: paperBg2, border: `1px solid ${borderCol}`, color: ink2Col, fontFamily: SERIF, fontSize: 13, cursor: 'pointer', transition: 'background .12s' }}
-            onMouseEnter={(e) => (e.currentTarget.style.background = borderCol)}
-            onMouseLeave={(e) => (e.currentTarget.style.background = paperBg2)}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
-            複製書名
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
+import Toolbar from '@/components/Toolbar'
+import NotePanel from '@/components/NotePanel'
+import ChapterPanel from '@/components/ChapterPanel'
+import type { TocItem } from '@/components/ChapterPanel'
+import SettingsPanel from '@/components/SettingsPanel'
+import useTTS from '@/hooks/useTTS'
+import type { TTSProgressSource } from '@/hooks/useTTS'
+import { useReaderStore } from '@/store/useReaderStore'
+import type { Script } from '@/store/useReaderStore'
+import { useAnnotationStore, loadAnnotationsForBook, saveAnnotationsForBook } from '@/store/useAnnotationStore'
+import { saveProgress, loadProgress, saveBookSettings, loadBookSettings, loadBookmarks, saveBookmarks } from '@/hooks/useLibrary'
+import type { BookRecord, Bookmark } from '@/hooks/useLibrary'
+import { copyTextToClipboard } from '@/components/Reader/annotationUtils'
+import BookInfoPanel from '@/components/Reader/BookInfoPanel'
+import BookmarkPanel from '@/components/Reader/BookmarkPanel'
+import HighlightPopup from '@/components/Reader/HighlightPopup'
+import { patchIframeViewPrototype, patchRenditionPrototype } from '@/components/Reader/epubPatches'
+import { applyDarkOverride, applyFontFamilyOverride, applyLetterSpacingOverride, applyLineHeightOverride, normalizeFontFamily } from '@/components/Reader/readerStyles'
+import { convertDoc, getToSC, getToTC, restoreDoc } from '@/components/Reader/scriptConversion'
+import { DEBUG_TTS_FOLLOW, TTS_HIGHLIGHT_ID, TTS_HIGHLIGHT_INTERVAL, TTS_NEW_PAGE_AUTO_FOLLOW_GUARD, TTS_PAGE_END_FIXED_LEAD, TTS_USER_INPUT_GRACE, clearTTSHighlight, clearTTSHighlights, collectContentDocuments, createRangeFromTextOffset, ensureTTSHighlightStyle, getBoundaryOffsetFromRange, getTextIndex, getTTSRangeViewportState, ttsTextIndexCache } from '@/components/Reader/ttsHighlight'
 
 interface Props {
   bookPath: string
@@ -537,50 +35,6 @@ interface Props {
 
 // epub.js prototype patch helpers（移到元件外；使用 Proxy.apply trap 完全避免 this 關鍵字）
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const patchRenditionPrototype = (renditionProto: any) => {
-  if (!renditionProto.injectIdentifier || renditionProto._injectIdentifierGuard) return
-  const orig = renditionProto.injectIdentifier
-  renditionProto.injectIdentifier = new Proxy(orig, {
-    apply(target, thisArg: { book?: { packaging?: unknown } }, args: [Document, unknown]) {
-      if (!thisArg.book?.packaging) return args[0]
-      return target.apply(thisArg, args)
-    },
-  })
-  renditionProto._injectIdentifierGuard = true
-}
-
-const patchIframeViewPrototype = (proto: Record<string, unknown>) => {
-  if (!proto._nullRangeGuard) {
-    const origUnderline = proto.underline
-    if (typeof origUnderline === 'function') proto.underline = new Proxy(origUnderline as (...a: unknown[]) => unknown, {
-      apply(target, thisArg: Record<string, unknown>, args: unknown[]) {
-        if (!thisArg.contents) return null
-        // 必須先確認 range 非 null 才可建立 Underline；
-        // 若讓 null range 進入 Underline constructor，pane.render() 時
-        // getClientRects() 會 crash，導致整個 pane 的 SVG 全部消失
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const range = (thisArg.contents as any).range?.(args[0])
-        if (!range) return null
-        return target.apply(thisArg, args)
-      },
-    })
-    proto._nullRangeGuard = true
-  }
-  if (!proto._reframeGuard) {
-    const origReframe = proto.reframe as ((...a: unknown[]) => unknown) | undefined
-    if (typeof origReframe === 'function') {
-      proto.reframe = new Proxy(origReframe, {
-        apply(target, thisArg: unknown, args: unknown[]) {
-          try { return target.apply(thisArg, args) } catch (e) {
-            console.warn('[epubjs] reframe null range 異常，已略過:', e)
-          }
-        },
-      })
-    }
-    proto._reframeGuard = true
-  }
-}
-
 const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMode, onToggleDark, onUpdateProgress }: Props) => {
   const viewerRef = useRef<HTMLDivElement>(null)
   const bookRef = useRef<Book | null>(null)
@@ -2260,71 +1714,28 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
             ›
           </button>
 
-          {/* 編輯現有註記 popup */}
           {editPopup && (
-            <div
-              className="fixed z-50 flex items-center gap-1.5 p-2 rounded-xl shadow-xl"
-              style={{ left: editPopup.x, top: editPopup.y - 52, transform: 'translateX(-50%)', background: darkMode ? '#231f1c' : '#f9f7f2', border: `1px solid ${darkMode ? '#3a3430' : '#e4ddd0'}` }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              {HIGHLIGHT_COLORS.map((c) => (
-                <button
-                  key={c.value}
-                  className="w-7 h-7 rounded-full border-2 border-white dark:border-gray-800 shadow hover:scale-110 transition-transform"
-                  style={{ backgroundColor: c.value }}
-                  onClick={() => handleEditColor(editPopup.annotationId, c.value)}
-                  aria-label={`${c.label}色`}
-                  title={`${c.label}色`}
-                />
-              ))}
-              <button
-                className="w-7 h-7 flex items-center justify-center rounded-full bg-stone-100 dark:bg-stone-700 hover:bg-red-100 dark:hover:bg-red-900 text-stone-400 hover:text-red-500 dark:hover:text-red-400 text-xs transition"
-                onClick={() => handleDeleteMark(editPopup.annotationId)}
-                aria-label="刪除此註記"
-                title="刪除"
-              >
-                ✕
-              </button>
-            </div>
+            <HighlightPopup
+              mode="edit"
+              x={editPopup.x}
+              y={editPopup.y}
+              darkMode={darkMode}
+              annotationId={editPopup.annotationId}
+              onEditColor={handleEditColor}
+              onDelete={handleDeleteMark}
+            />
           )}
 
-          {/* 顏色選擇器 popup */}
           {popup && (
-            <div
-              className="fixed z-50 flex gap-1.5 p-2 rounded-xl shadow-xl"
-              style={{ left: popup.x, top: popup.y - 52, transform: 'translateX(-50%)', background: darkMode ? '#231f1c' : '#f9f7f2', border: `1px solid ${darkMode ? '#3a3430' : '#e4ddd0'}` }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              {HIGHLIGHT_COLORS.map((c) => (
-                <button
-                  key={c.value}
-                  className="w-7 h-7 rounded-full border-2 border-white dark:border-gray-800 shadow hover:scale-110 transition-transform"
-                  style={{ backgroundColor: c.value }}
-                  onClick={() => handleHighlight(c.value)}
-                  aria-label={`${c.label}色標記`}
-                  title={`${c.label}色標記`}
-                />
-              ))}
-              <button
-                className="w-7 h-7 flex items-center justify-center rounded-full bg-stone-100 dark:bg-stone-700 hover:bg-stone-200 dark:hover:bg-stone-600 text-stone-500 dark:text-stone-300 text-xs font-semibold transition"
-                onClick={handleSearchSelectedText}
-                aria-label="使用 Google 搜尋選取文字"
-                title="Google 搜尋"
-              >
-                G
-              </button>
-              <button
-                className="w-7 h-7 flex items-center justify-center rounded-full bg-stone-100 dark:bg-stone-700 hover:bg-stone-200 dark:hover:bg-stone-600 text-stone-500 dark:text-stone-300 transition"
-                onClick={handleCopySelectedText}
-                aria-label="複製選取文字"
-                title="複製"
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <rect x="9" y="9" width="13" height="13" rx="2" />
-                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                </svg>
-              </button>
-            </div>
+            <HighlightPopup
+              mode="selection"
+              x={popup.x}
+              y={popup.y}
+              darkMode={darkMode}
+              onHighlight={handleHighlight}
+              onSearch={handleSearchSelectedText}
+              onCopy={handleCopySelectedText}
+            />
           )}
         </div>
 
@@ -2384,82 +1795,17 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
             progress={pageInfo && pageInfo.total > 0 ? pageInfo.page / pageInfo.total : null}
           />
         )}
-        {activePanel === 'bookmarks' && (() => {
-          const borderCol = darkMode ? '#3a3430' : '#e4ddd0'
-          const paperBg   = darkMode ? '#1a1816' : '#f9f7f2'
-          const paperBg2  = darkMode ? '#231f1c' : '#f1ede4'
-          const inkCol    = darkMode ? '#e8e0d4' : '#2a2420'
-          const ink3Col   = darkMode ? '#7a706a' : '#9a8f80'
-          return (
-            <div style={{ width: 260, flexShrink: 0, height: '100%', borderLeft: `1px solid ${borderCol}`, background: paperBg, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-              <div style={{ padding: '14px 20px', borderBottom: `1px solid ${borderCol}`, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <div style={{ fontFamily: SERIF, fontSize: 15, fontWeight: 500, color: inkCol }}>書籤清單</div>
-                <button
-                  className="no-drag"
-                  onClick={() => setActivePanel(null)}
-                  style={{ width: 26, height: 26, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', color: ink3Col, cursor: 'pointer', transition: 'all .12s' }}
-                  onMouseEnter={(e) => { e.currentTarget.style.color = inkCol; e.currentTarget.style.background = paperBg2 }}
-                  onMouseLeave={(e) => { e.currentTarget.style.color = ink3Col; e.currentTarget.style.background = 'transparent' }}
-                  aria-label="關閉"
-                >
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                </button>
-              </div>
-              <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
-                {bookmarks.length === 0 ? (
-                  <div style={{ padding: '32px 20px', textAlign: 'center', fontFamily: MONO, fontSize: 12, color: ink3Col, letterSpacing: '0.04em' }}>尚無書籤</div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column' }}>
-                    {[...bookmarks].sort((a, b) => a.addedAt - b.addedAt).map((bm) => (
-                      <div
-                        key={bm.id}
-                        className="no-drag"
-                        style={{ borderBottom: `1px solid ${borderCol}`, padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 6, cursor: 'pointer', transition: 'background .12s' }}
-                        onClick={() => { renditionRef.current?.display(bm.cfi).catch(() => {}); setActivePanel(null) }}
-                        onMouseEnter={(e) => (e.currentTarget.style.background = darkMode ? '#231f1c' : '#f1ede4')}
-                        onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-                      >
-                        <div style={{ fontFamily: SERIF, fontSize: 13, color: inkCol, lineHeight: 1.5, wordBreak: 'break-all' }}>
-                          {bm.label}
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                          <span style={{ fontFamily: MONO, fontSize: 10, color: ink3Col, letterSpacing: '0.04em' }}>
-                            {new Date(bm.addedAt).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' })}
-                          </span>
-                          <button
-                            className="no-drag"
-                            onClick={(e) => { e.stopPropagation(); setBookmarkPendingDeleteId(bookmarkPendingDeleteId === bm.id ? null : bm.id) }}
-                            style={{ fontFamily: MONO, fontSize: 10, color: bookmarkPendingDeleteId === bm.id ? '#ef4444' : ink3Col, cursor: 'pointer', padding: '2px 6px', borderRadius: 4, transition: 'all .12s', background: bookmarkPendingDeleteId === bm.id ? (darkMode ? '#3a1a1a' : '#fff0f0') : 'transparent' }}
-                            onMouseEnter={(e) => { e.currentTarget.style.color = '#ef4444'; e.currentTarget.style.background = darkMode ? '#3a1a1a' : '#fff0f0' }}
-                            onMouseLeave={(e) => { e.currentTarget.style.color = bookmarkPendingDeleteId === bm.id ? '#ef4444' : ink3Col; e.currentTarget.style.background = bookmarkPendingDeleteId === bm.id ? (darkMode ? '#3a1a1a' : '#fff0f0') : 'transparent' }}
-                            aria-label="移除書籤"
-                          >
-                            移除
-                          </button>
-                        </div>
-                        {bookmarkPendingDeleteId === bm.id && (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }} onClick={(e) => e.stopPropagation()}>
-                            <span style={{ fontFamily: MONO, fontSize: 11, color: '#ef4444', letterSpacing: '0.02em', flexShrink: 0 }}>確定移除？</span>
-                            <button
-                              className="no-drag"
-                              style={{ height: 22, padding: '0 8px', borderRadius: 5, fontFamily: MONO, fontSize: 11, color: ink3Col, background: darkMode ? '#2a2520' : '#ede8e0', cursor: 'pointer' }}
-                              onClick={(e) => { e.stopPropagation(); setBookmarkPendingDeleteId(null) }}
-                            >取消</button>
-                            <button
-                              className="no-drag"
-                              style={{ height: 22, padding: '0 8px', borderRadius: 5, fontFamily: MONO, fontSize: 11, color: '#fff', background: '#ef4444', cursor: 'pointer' }}
-                              onClick={(e) => { e.stopPropagation(); handleDeleteBookmark(bm.id); setBookmarkPendingDeleteId(null) }}
-                            >移除</button>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          )
-        })()}
+        {activePanel === 'bookmarks' && (
+          <BookmarkPanel
+            bookmarks={bookmarks}
+            darkMode={darkMode}
+            pendingDeleteId={bookmarkPendingDeleteId}
+            onClose={() => setActivePanel(null)}
+            onNavigate={(bookmark) => { renditionRef.current?.display(bookmark.cfi).catch(() => {}); setActivePanel(null) }}
+            onDeleteRequest={setBookmarkPendingDeleteId}
+            onDelete={handleDeleteBookmark}
+          />
+        )}
       </div>
     </div>
   )
