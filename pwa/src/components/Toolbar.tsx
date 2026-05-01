@@ -1,3 +1,14 @@
+import { useEffect, useRef, useState } from 'react'
+
+const IconRefresh = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 12a9 9 0 0 1-15.5 6.2" />
+    <path d="M3 12A9 9 0 0 1 18.5 5.8" />
+    <path d="M18 2v5h-5" />
+    <path d="M6 22v-5h5" />
+  </svg>
+)
+
 const IconSettings = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="12" cy="12" r="3" />
@@ -107,6 +118,7 @@ interface Props {
   isBookmarked: boolean
   onToggleBookmark: () => void
   onToggleBookmarkList: () => void
+  onApplyLatestVersion: () => void | Promise<void>
 }
 
 const SERIF = '"Source Serif 4", "Noto Serif TC", Georgia, serif'
@@ -128,7 +140,12 @@ const Toolbar = ({
   isBookmarked,
   onToggleBookmark,
   onToggleBookmarkList,
+  onApplyLatestVersion,
 }: Props) => {
+  const [logoMenuOpen, setLogoMenuOpen] = useState(false)
+  const [applyingUpdate, setApplyingUpdate] = useState(false)
+  const logoMenuRef = useRef<HTMLDivElement>(null)
+
   const paperBg   = darkMode ? '#1a1816' : '#f9f7f2'
   const borderCol = darkMode ? '#3a3430' : '#e4ddd0'
   const inkCol    = darkMode ? '#e8e0d4' : '#2a2420'
@@ -140,6 +157,22 @@ const Toolbar = ({
   const pct = pageInfo && pageInfo.total > 0
     ? Math.round(pageInfo.page / pageInfo.total * 100)
     : null
+
+  useEffect(() => {
+    if (!logoMenuOpen) return
+    const onPointerDown = (event: PointerEvent) => {
+      if (logoMenuRef.current?.contains(event.target as Node)) return
+      setLogoMenuOpen(false)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => document.removeEventListener('pointerdown', onPointerDown)
+  }, [logoMenuOpen])
+
+  const handleApplyLatestVersion = async () => {
+    if (applyingUpdate) return
+    setApplyingUpdate(true)
+    await onApplyLatestVersion()
+  }
 
   const btn = (
     isActive: boolean,
@@ -177,6 +210,55 @@ const Toolbar = ({
       {/* 左：返回 + 書名作者（固定寬度區塊） */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
         {btn(false, onBack, <IconBack />, '返回書庫', { color: inkCol })}
+        <div ref={logoMenuRef} style={{ position: 'relative', flexShrink: 0 }}>
+          <button
+            onClick={(e) => { e.stopPropagation(); setLogoMenuOpen((open) => !open) }}
+            onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); setLogoMenuOpen((open) => !open) }}
+            aria-label="Travel in Time 選單"
+            title="Travel in Time"
+            style={{
+              width: 34, height: 34, borderRadius: 8,
+              background: logoMenuOpen ? accentBg : inkCol,
+              color: logoMenuOpen ? accentCol : paperBg,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontFamily: SERIF, fontStyle: 'italic', fontWeight: 700, fontSize: 17,
+              cursor: 'pointer', touchAction: 'manipulation',
+            }}
+          >
+            T
+          </button>
+          {logoMenuOpen && (
+            <div
+              style={{
+                position: 'absolute', left: 0, top: 40, zIndex: 60,
+                width: 178, padding: 6, borderRadius: 8,
+                background: paperBg, border: `1px solid ${borderCol}`,
+                boxShadow: '0 14px 32px -14px rgba(0,0,0,0.45)',
+              }}
+              onClick={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
+            >
+              <button
+                onClick={handleApplyLatestVersion}
+                disabled={applyingUpdate}
+                style={{
+                  width: '100%', minHeight: 34, borderRadius: 6, padding: '8px 10px',
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  color: applyingUpdate ? ink3Col : inkCol,
+                  background: 'transparent',
+                  fontFamily: 'inherit', fontSize: 13, textAlign: 'left',
+                  cursor: applyingUpdate ? 'default' : 'pointer',
+                  opacity: applyingUpdate ? 0.7 : 1,
+                }}
+                onMouseEnter={(e) => { if (!applyingUpdate) e.currentTarget.style.background = hoverBg }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+              >
+                <IconRefresh />
+                <span>{applyingUpdate ? '更新中…' : '套用最新版'}</span>
+              </button>
+            </div>
+          )}
+        </div>
         {bookTitle && (
           <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', width: 150 }}>
             <div style={{ fontFamily: SERIF, fontSize: 13, color: inkCol, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: 1.3 }}>

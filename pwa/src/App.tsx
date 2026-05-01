@@ -32,6 +32,30 @@ const App = () => {
     setView('library')
   }
 
+  const handleApplyLatestVersion = async () => {
+    try {
+      if ('serviceWorker' in navigator) {
+        const registrations = await navigator.serviceWorker.getRegistrations()
+        await Promise.all(registrations.map((registration) => registration.unregister()))
+      }
+    } catch (err) {
+      console.warn('[PWA] Service Worker 清除失敗:', err)
+    }
+
+    try {
+      if ('caches' in window) {
+        const keys = await caches.keys()
+        await Promise.all(keys.map((key) => caches.delete(key)))
+      }
+    } catch (err) {
+      console.warn('[PWA] Cache Storage 清除失敗:', err)
+    }
+
+    const url = new URL(window.location.href)
+    url.searchParams.set('refresh', String(Date.now()))
+    window.location.replace(url.toString())
+  }
+
   return (
     <div className={darkMode ? 'dark' : ''}>
       <div className="min-h-screen bg-stone-50 dark:bg-gray-900 transition-colors">
@@ -44,6 +68,7 @@ const App = () => {
             onRemoveBook={removeBook}
             darkMode={darkMode}
             onToggleDark={() => setDarkMode(!darkMode)}
+            onApplyLatestVersion={handleApplyLatestVersion}
           />
         )}
         {view === 'reader' && activeBookUrl && (
@@ -56,6 +81,7 @@ const App = () => {
             darkMode={darkMode}
             onToggleDark={() => setDarkMode(!darkMode)}
             onUpdateProgress={(pct) => updateProgress(activeBookId, pct)}
+            onApplyLatestVersion={handleApplyLatestVersion}
           />
         )}
       </div>

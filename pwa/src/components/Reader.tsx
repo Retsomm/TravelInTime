@@ -107,6 +107,7 @@ const copyTextToClipboard = async (text: string) => {
 
 const TTS_HIGHLIGHT_ID = 'tit-tts-progress'
 const TTS_HIGHLIGHT_STYLE_ID = 'tit-tts-progress-style'
+const TTS_HIGHLIGHT_OVERLAY_ID = 'tit-tts-progress-overlay'
 const TTS_HIGHLIGHT_INTERVAL = 80
 const TTS_USER_INPUT_GRACE = 180
 const TTS_HIGHLIGHT_LENGTH = 4
@@ -143,6 +144,7 @@ const ensureTTSHighlightStyle = (doc: Document) => {
 const clearTTSHighlight = (doc: Document | null | undefined) => {
   const highlights = (doc?.defaultView as any)?.CSS?.highlights
   highlights?.delete?.(TTS_HIGHLIGHT_ID)
+  doc?.getElementById(TTS_HIGHLIGHT_OVERLAY_ID)?.remove()
 }
 
 const clearTTSHighlights = (docs: Iterable<Document | null | undefined>) => {
@@ -277,6 +279,57 @@ const createRangeFromTextOffset = (doc: Document, start: number, length = TTS_HI
   range.setStart(startNode, startOffset)
   range.setEnd(startNode, endOffset)
   return range
+}
+
+
+const paintTTSHighlightOverlay = (doc: Document, range: Range) => {
+  const body = doc.body
+  if (!body) return false
+
+  let overlay = doc.getElementById(TTS_HIGHLIGHT_OVERLAY_ID)
+  if (!overlay) {
+    overlay = doc.createElement('div')
+    overlay.id = TTS_HIGHLIGHT_OVERLAY_ID
+    Object.assign(overlay.style, {
+      position: 'fixed',
+      inset: '0',
+      pointerEvents: 'none',
+      zIndex: '2147483647',
+      overflow: 'hidden',
+      contain: 'layout style paint',
+    })
+    body.appendChild(overlay)
+  }
+
+  const viewportWidth = doc.documentElement.clientWidth || doc.defaultView?.innerWidth || 0
+  const viewportHeight = doc.documentElement.clientHeight || doc.defaultView?.innerHeight || 0
+  const rects = Array.from(range.getClientRects())
+    .filter((rect) =>
+      rect.width > 0 &&
+      rect.height > 0 &&
+      rect.bottom >= 0 &&
+      rect.top <= viewportHeight &&
+      rect.right >= 0 &&
+      rect.left <= viewportWidth
+    )
+
+  overlay.replaceChildren()
+  for (const rect of rects) {
+    const mark = doc.createElement('div')
+    Object.assign(mark.style, {
+      position: 'fixed',
+      left: `${Math.max(0, rect.left)}px`,
+      top: `${Math.max(0, rect.top)}px`,
+      width: `${Math.max(1, Math.min(rect.width, viewportWidth - Math.max(0, rect.left)))}px`,
+      height: `${Math.max(1, Math.min(rect.height, viewportHeight - Math.max(0, rect.top)))}px`,
+      background: 'rgba(245, 158, 11, 0.32)',
+      borderRadius: '2px',
+      pointerEvents: 'none',
+    })
+    overlay.appendChild(mark)
+  }
+
+  return rects.length > 0
 }
 
 const getTTSRangeViewportState = (doc: Document, range: Range | null): TTSRangeViewportState => {
@@ -421,6 +474,7 @@ interface Props {
   darkMode: boolean
   onToggleDark: () => void
   onUpdateProgress?: (pct: number) => void
+  onApplyLatestVersion: () => void | Promise<void>
 }
 
 const SERIF = '"Source Serif 4", "Noto Serif TC", Georgia, serif'
@@ -630,7 +684,7 @@ const patchIframeViewPrototype = (proto: Record<string, unknown>) => {
   }
 }
 
-const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMode, onToggleDark, onUpdateProgress }: Props) => {
+const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMode, onToggleDark, onUpdateProgress, onApplyLatestVersion }: Props) => {
   const viewerRef = useRef<HTMLDivElement>(null)
   const bookRef = useRef<Book | null>(null)
   const renditionRef = useRef<Rendition | null>(null)
@@ -1442,6 +1496,31 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     }, 50)
   }
 
+
+  const getVisibleContentDocument = (): Document | null => {
+    const viewer = viewerRef.current
+    if (!viewer) return null
+
+    const iframe = viewer.querySelector('iframe') as HTMLIFrameElement | null
+    if (iframe?.contentDocument?.body) return iframe.contentDocument
+
+    const viewerRect = viewer.getBoundingClientRect()
+    let best: { doc: Document; area: number } | null = null
+    for (const frame of Array.from(viewer.querySelectorAll('iframe')) as HTMLIFrameElement[]) {
+      try {
+        const doc = frame.contentDocument
+        if (!doc?.body) continue
+        const rect = frame.getBoundingClientRect()
+        const width = Math.max(0, Math.min(rect.right, viewerRect.right) - Math.max(rect.left, viewerRect.left))
+        const height = Math.max(0, Math.min(rect.bottom, viewerRect.bottom) - Math.max(rect.top, viewerRect.top))
+        const area = width * height
+        if (area > 0 && (!best || area > best.area)) best = { doc, area }
+      } catch { /* ignore cross-origin iframe */ }
+    }
+
+    return best?.doc ?? currentDocRef.current
+  }
+
   // 字體家族（獨立，不影響其他設定）
   useEffect(() => {
     if (!ready) return
@@ -1929,7 +2008,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
 
   const updateTTSHighlight = (absoluteOffset: number, allowAutoFollow = true, source: TTSProgressSource = 'boundary') => {
     ttsLastAbsoluteOffsetRef.current = absoluteOffset
-    const doc = currentDocRef.current
+    const doc = getVisibleContentDocument() ?? currentDocRef.current
     if (!doc) {
       if (DEBUG_TTS_FOLLOW) console.log('[TTS:follow] skip highlight: no current doc', { absoluteOffset })
       return
@@ -1955,16 +2034,13 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
       return
     }
 
-    const highlights = (doc.defaultView as any)?.CSS?.highlights
-    const HighlightCtor = (doc.defaultView as any)?.Highlight
-    if (highlights && HighlightCtor) {
-      clearOtherTTSHighlights(doc)
-      highlights.delete(TTS_HIGHLIGHT_ID)
-      highlights.set(TTS_HIGHLIGHT_ID, new HighlightCtor(range))
+    clearOtherTTSHighlights(doc)
+    const painted = paintTTSHighlightOverlay(doc, range)
+    if (painted) {
       ttsHighlightedDocRef.current = doc
     } else {
-      clearAllTTSHighlights()
-      if (DEBUG_TTS_FOLLOW) console.log('[TTS:follow] Custom Highlight API unavailable, only auto-follow by progress', { absoluteOffset })
+      clearTTSHighlight(doc)
+      if (DEBUG_TTS_FOLLOW) console.log('[TTS:follow] overlay 無可用 rect，僅自動跟隨進度', { absoluteOffset })
     }
     followTTSRange(range, doc, absoluteOffset, allowAutoFollow, source)
   }
@@ -2117,10 +2193,10 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
 
   const speakCurrentPage = () => {
     if (!viewerRef.current) return
-    const iframe = viewerRef.current.querySelector('iframe')
-    if (!iframe?.contentDocument?.body) return
+    const visibleDoc = getVisibleContentDocument()
+    if (!visibleDoc?.body) return
 
-    const textIndex = getTextIndex(iframe.contentDocument)
+    const textIndex = getTextIndex(visibleDoc)
     const fullText = textIndex?.text ?? ''
     if (!fullText) return
 
@@ -2196,11 +2272,11 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     }
     ttsVisibleSpineIndexRef.current = currentSpineIdx
     ttsVisibleStartOffsetRef.current = startOffset
-    ttsCurrentPageStartOffsetRef.current = measureCurrentPageStartOffset(iframe.contentDocument, loc)
+    ttsCurrentPageStartOffsetRef.current = measureCurrentPageStartOffset(visibleDoc, loc)
     ttsLastAbsoluteOffsetRef.current = startOffset
     ttsChapterTextLengthRef.current = fullText.length
     ttsChapterPageTotalRef.current = totalPages
-    ttsVisiblePageEndOffsetRef.current = measureCurrentPageEndOffset(iframe.contentDocument, loc)
+    ttsVisiblePageEndOffsetRef.current = measureCurrentPageEndOffset(visibleDoc, loc)
     updateTTSHighlight(startOffset, false)
     console.log('[TTS] speakCurrentPage 開始', {
       currentSpineIdx,
@@ -2459,6 +2535,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
         isBookmarked={isBookmarked}
         onToggleBookmark={handleToggleBookmark}
         onToggleBookmarkList={() => togglePanel('bookmarks')}
+        onApplyLatestVersion={onApplyLatestVersion}
       />
       <div className="flex flex-1 overflow-hidden">
         <div

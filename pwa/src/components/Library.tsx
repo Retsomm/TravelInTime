@@ -27,6 +27,14 @@ const IconPlus = () => (
     <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
   </svg>
 )
+const IconRefresh = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 12a9 9 0 0 1-15.5 6.2" />
+    <path d="M3 12A9 9 0 0 1 18.5 5.8" />
+    <path d="M18 2v5h-5" />
+    <path d="M6 22v-5h5" />
+  </svg>
+)
 
 // ── Cover styles ────────────────────────────────────────────────────────
 
@@ -170,16 +178,20 @@ interface Props {
   onRemoveBook: (id: string) => void
   darkMode: boolean
   onToggleDark: () => void
+  onApplyLatestVersion: () => void | Promise<void>
 }
 
 type SortKey = 'recent' | 'title' | 'progress'
 
-const Library = ({ records, getCoverDataUrl, onAddBooks, onOpenBook, onRemoveBook, darkMode, onToggleDark }: Props) => {
+const Library = ({ records, getCoverDataUrl, onAddBooks, onOpenBook, onRemoveBook, darkMode, onToggleDark, onApplyLatestVersion }: Props) => {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [loading, setLoading] = useState(false)
   const [pendingRemove, setPendingRemove] = useState<{ id: string; title: string } | null>(null)
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState<SortKey>('recent')
+  const [logoMenuOpen, setLogoMenuOpen] = useState(false)
+  const [applyingUpdate, setApplyingUpdate] = useState(false)
+  const logoMenuRef = useRef<HTMLDivElement>(null)
 
   const handleRemoveRequest = (id: string) => {
     const record = records.find((r) => r.id === id)
@@ -187,6 +199,11 @@ const Library = ({ records, getCoverDataUrl, onAddBooks, onOpenBook, onRemoveBoo
   }
   const handleConfirmRemove = () => { if (pendingRemove) { onRemoveBook(pendingRemove.id); setPendingRemove(null) } }
   const handleCancelRemove = () => setPendingRemove(null)
+  const handleApplyLatestVersion = async () => {
+    if (applyingUpdate) return
+    setApplyingUpdate(true)
+    await onApplyLatestVersion()
+  }
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
@@ -263,12 +280,48 @@ const Library = ({ records, getCoverDataUrl, onAddBooks, onOpenBook, onRemoveBoo
         <div style={{ borderBottom: `1px solid ${borderCol}`, background: paperBg }}>
           {/* 第一行：Logo + 標題 + 操作按鈕 */}
           <div className="flex items-center gap-2 px-4 pt-3 pb-2">
-            <div style={{
-              width: 26, height: 26, borderRadius: 6, flexShrink: 0,
-              background: inkCol, color: paperBg,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontFamily: SERIF, fontStyle: 'italic', fontWeight: 700, fontSize: 14,
-            }}>T</div>
+            <div ref={logoMenuRef} style={{ position: 'relative', flexShrink: 0 }}>
+              <button
+                onClick={() => setLogoMenuOpen((open) => !open)}
+                style={{
+                  width: 26, height: 26, borderRadius: 6,
+                  background: logoMenuOpen ? paperBg2 : inkCol,
+                  color: logoMenuOpen ? inkCol : paperBg,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontFamily: SERIF, fontStyle: 'italic', fontWeight: 700, fontSize: 14,
+                  cursor: 'pointer',
+                }}
+                aria-label="Travel in Time 選單"
+              >
+                T
+              </button>
+              {logoMenuOpen && (
+                <div
+                  style={{
+                    position: 'absolute', left: 0, top: 32, zIndex: 60,
+                    width: 178, padding: 6, borderRadius: 8,
+                    background: paperBg, border: `1px solid ${borderCol}`,
+                    boxShadow: '0 14px 32px -14px rgba(0,0,0,0.45)',
+                  }}
+                >
+                  <button
+                    onClick={handleApplyLatestVersion}
+                    disabled={applyingUpdate}
+                    style={{
+                      width: '100%', minHeight: 34, borderRadius: 6, padding: '8px 10px',
+                      display: 'flex', alignItems: 'center', gap: 8,
+                      color: applyingUpdate ? ink3Col : inkCol,
+                      fontFamily: 'inherit', fontSize: 13, textAlign: 'left',
+                      cursor: applyingUpdate ? 'default' : 'pointer',
+                      opacity: applyingUpdate ? 0.7 : 1,
+                    }}
+                  >
+                    <IconRefresh />
+                    <span>{applyingUpdate ? '更新中…' : '套用最新版'}</span>
+                  </button>
+                </div>
+              )}
+            </div>
             <span style={{ fontFamily: SERIF, fontSize: 16, fontWeight: 500, letterSpacing: '0.01em' }}>Travel in Time</span>
             <span style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', color: ink3Col }}>Library</span>
 
