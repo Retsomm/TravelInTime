@@ -1,6 +1,6 @@
 import { useRef, useState, useEffect } from 'react'
-import { useAnnotationStore } from '../store/useAnnotationStore'
-import type { Annotation } from '../store/useAnnotationStore'
+import { useAnnotationStore } from '@/store/useAnnotationStore'
+import type { Annotation } from '@/store/useAnnotationStore'
 
 const SERIF = '"Source Serif 4", "Noto Serif TC", Georgia, serif'
 const MONO  = '"JetBrains Mono", ui-monospace, monospace'

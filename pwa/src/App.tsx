@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import Library from './components/Library'
-import Reader from './components/Reader'
-import { useLibrary } from './hooks/useLibrary'
+import Library from '@/page/Library'
+import Reader from '@/page/Reader'
+import { useLibrary } from '@/hooks/useLibrary'
 
 type View = 'library' | 'reader'
 

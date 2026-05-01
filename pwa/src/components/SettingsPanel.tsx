@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { FONT_OPTIONS } from '../store/useReaderStore'
-import type { Script } from '../store/useReaderStore'
+import { FONT_OPTIONS } from '@/store/useReaderStore'
+import type { Script } from '@/store/useReaderStore'
 
 const SERIF = '"Source Serif 4", "Noto Serif TC", Georgia, serif'
 const MONO  = '"JetBrains Mono", ui-monospace, monospace'
