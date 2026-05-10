@@ -59,17 +59,8 @@ const useTTS = () => {
     if (keepaliveTimerRef.current !== null) return
     keepaliveTimerRef.current = setInterval(() => {
       if (!playingRef.current) return
-      const synth = window.speechSynthesis
-      console.log('[TTS] keepalive ping', {
-        speaking: synth.speaking,
-        paused: synth.paused,
-        generation: generationRef.current,
-        offset: textOffsetRef.current,
-        charIndex: charIndexRef.current,
-        consecutiveTruncation: consecutiveTruncationRef.current,
-      })
-      synth.pause()
-      synth.resume()
+      window.speechSynthesis.pause()
+      window.speechSynthesis.resume()
     }, IOS_KEEPALIVE_INTERVAL)
   }
 
@@ -178,20 +169,8 @@ const useTTS = () => {
   // 建立並播放 utterance（內部用，使用當前 refs 值）
   const createAndPlay = (text: string) => {
     const generation = ++generationRef.current
-    const now = Date.now()
-    const msSinceLast = lastCreateAndPlayAtRef.current > 0 ? now - lastCreateAndPlayAtRef.current : null
-    lastCreateAndPlayAtRef.current = now
-    const synth = window.speechSynthesis
-    console.log('[TTS] createAndPlay → cancel()', {
-      generation,
-      textLength: text.length,
-      offset: textOffsetRef.current,
-      synthSpeaking: synth.speaking,
-      synthPaused: synth.paused,
-      msSinceLast,
-      consecutiveTruncation: consecutiveTruncationRef.current,
-    })
-    synth.cancel()
+    lastCreateAndPlayAtRef.current = Date.now()
+    window.speechSynthesis.cancel()
 
     const utterance = new SpeechSynthesisUtterance(text)
     const voice = selectedVoiceRef.current
@@ -211,14 +190,6 @@ const useTTS = () => {
       startProgressTimer(text.length)
       pausedRef.current = false
       setPaused(false)
-      const msSinceCreate = startAt - lastCreateAndPlayAtRef.current
-      console.log('[TTS] onstart', {
-        generation,
-        textLength: text.length,
-        offset: textOffsetRef.current,
-        msSinceCreate,
-        synthSpeaking: window.speechSynthesis.speaking,
-      })
     }
     utterance.onpause = () => {
       if (generationRef.current !== generation) return
@@ -271,27 +242,24 @@ const useTTS = () => {
         consecutiveTruncationRef.current = 0
       }
 
-      let label = '[TTS] onend（正常結束）'
-      if (hasMoreText) {
-        if (silentTruncation) label = '[TTS] onend ‼️ 無聲截斷（charIndex=0，跳過文字！）'
-        else if (isTruncated) label = '[TTS] onend ⚠️ 疑似 iOS 截斷，繼續剩餘文字'
-        else label = '[TTS] onend（區塊結束，繼續下一段）'
+      if (isTruncated || silentTruncation) {
+        const label = silentTruncation
+          ? '[TTS] onend ‼️ 無聲截斷（charIndex=0，跳過文字！）'
+          : '[TTS] onend ⚠️ 疑似 iOS 截斷'
+        console.warn(label, {
+          generation,
+          elapsedMs,
+          onstartFired,
+          charIndex: charIndexRef.current,
+          offset: textOffsetRef.current,
+          readChars,
+          skippedChars: silentTruncation ? text.length : text.length - charIndexRef.current,
+          remaining: totalChars - readChars,
+          consecutiveTruncation: consecutiveTruncationRef.current,
+          synthSpeaking: window.speechSynthesis.speaking,
+          synthPaused: window.speechSynthesis.paused,
+        })
       }
-
-      console.log(label, {
-        generation,
-        elapsedMs,
-        onstartFired,
-        charIndex: charIndexRef.current,
-        offset: textOffsetRef.current,
-        readChars,
-        skippedChars: silentTruncation ? text.length : (isTruncated ? text.length - charIndexRef.current : 0),
-        totalChars,
-        remaining: totalChars - readChars,
-        consecutiveTruncation: consecutiveTruncationRef.current,
-        synthSpeaking: window.speechSynthesis.speaking,
-        synthPaused: window.speechSynthesis.paused,
-      })
 
       if (consecutiveTruncationRef.current >= 5) {
         console.warn('[TTS] ⚠️ 連續截斷超過 5 次，speechSynthesis 可能進入異常狀態', {
@@ -363,14 +331,6 @@ const useTTS = () => {
     }
 
     utteranceRef.current = utterance
-    console.log('[TTS] speak()', {
-      generation,
-      textLength: text.length,
-      offset: textOffsetRef.current,
-      voice: voice?.name,
-      synthSpeaking: window.speechSynthesis.speaking,
-      synthPaused: window.speechSynthesis.paused,
-    })
     window.speechSynthesis.speak(utterance)
     startKeepalive()
   }
