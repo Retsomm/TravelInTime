@@ -203,9 +203,13 @@ const Toolbar = ({
 
   return (
     <div style={{
-      display: 'flex', alignItems: 'center', gap: 2, padding: '0 10px',
-      height: 56, borderBottom: `1px solid ${borderCol}`,
       background: paperBg, flexShrink: 0,
+      borderBottom: `1px solid ${borderCol}`,
+      paddingTop: 'env(safe-area-inset-top)',
+    }}>
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 2, padding: '0 10px',
+      height: 56,
     }}>
       {/* 左：返回 + 書名作者（固定寬度區塊） */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
@@ -311,6 +315,7 @@ const Toolbar = ({
         </div>
         {btn(false, onToggleDark, darkMode ? <IconSun /> : <IconMoon />, darkMode ? '切換淺色模式' : '切換深色模式')}
       </div>
+    </div>
     </div>
   )
 }

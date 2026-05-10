@@ -1908,6 +1908,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
             const dy = e.changedTouches[0].clientY - start.y
             swipeStartRef.current = null
             if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy) * 1.5) return
+            if (isSelectingRef.current) return
             const isRtl = readingDirectionRef.current === 'rtl'
             if ((dx < 0) !== isRtl) nextPageRef.current()
             else prevPageRef.current()
@@ -2252,12 +2253,17 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
 
       {/* 手機版底部進度列 — 永遠佔位避免 epub 初始化尺寸錯誤 */}
       <div
-        className="flex md:hidden items-center"
+        className="md:hidden"
         style={{
-          height: 32, flexShrink: 0, gap: 10, padding: '0 16px',
+          flexShrink: 0,
           borderTop: `1px solid ${darkMode ? '#3a3430' : '#e4ddd0'}`,
           background: darkMode ? '#1a1816' : '#f9f7f2',
+          paddingBottom: 'env(safe-area-inset-bottom)',
         }}
+      >
+      <div
+        className="flex items-center"
+        style={{ height: 32, gap: 10, padding: '0 16px' }}
       >
         {ready && displayPageInfo && (
           <>
@@ -2272,6 +2278,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
             </span>
           </>
         )}
+      </div>
       </div>
     </div>
   )
