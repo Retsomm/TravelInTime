@@ -5,3 +5,18 @@
 @theme {
   --font-reading: Georgia, serif;
 }
+
+/* 防止 iOS 水平 rubber-band 捲動 */
+html,
+body {
+  overflow: hidden;
+  overscroll-behavior: none;
+  width: 100%;
+  height: 100%;
+}
+
+#root {
+  overflow: hidden;
+  width: 100%;
+  height: 100%;
+}
