@@ -121,7 +121,9 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
       // 掃描尚未完成，估算不可靠，跳過存入避免覆蓋 Library 正確進度
       return
     }
-    onUpdateProgress?.(pageInfo.page / pageInfo.total)
+    const rawProgress = pageInfo.page / pageInfo.total
+    // 朗讀播放中，視覺頁碼可能超前於音訊，避免提早顯示 100%
+    onUpdateProgress?.(ttsActiveRef.current ? Math.min(rawProgress, 0.99) : rawProgress)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pageInfo])
 
@@ -1653,6 +1655,11 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
   }
 
 
+  // 朗讀中視覺頁碼可能比音訊超前，用 displayPageInfo 避免 UI 顯示 100%
+  const displayPageInfo = ((playing || ttsPaused) && pageInfo && pageInfo.page >= pageInfo.total)
+    ? { page: Math.max(pageInfo.total - 1, 1), total: pageInfo.total }
+    : pageInfo
+
   return (
     <div
       className="flex flex-col h-screen"
@@ -1665,7 +1672,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
         onBack={onBack}
         bookTitle={bookTitle}
         bookAuthor={bookRecord?.author}
-        pageInfo={pageInfo}
+        pageInfo={displayPageInfo}
         darkMode={darkMode}
         onToggleDark={onToggleDark}
         onToggleBookInfo={() => togglePanel('bookinfo')}
@@ -1701,7 +1708,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
                 {chapterRemaining !== null ? `這一章還有 ${chapterRemaining} 頁` : ''}
               </span>
               <span className="text-xs text-stone-400 dark:text-stone-500 select-none">
-                {pageInfo ? `第 ${pageInfo.page} 頁（共 ${pageInfo.total} 頁）` : ''}
+                {displayPageInfo ? `第 ${displayPageInfo.page} 頁（共 ${displayPageInfo.total} 頁）` : ''}
               </span>
             </div>
           )}

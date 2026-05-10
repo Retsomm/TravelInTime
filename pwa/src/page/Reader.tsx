@@ -129,11 +129,14 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
       console.log('[Progress] 跳過存入（掃描中）', { knownChapters, spineTotal, estimatedPct: `${Math.round(pageInfo.page / pageInfo.total * 100)}%` })
       return
     }
-    const ratio = pageInfo.page / pageInfo.total
+    const rawRatio = pageInfo.page / pageInfo.total
+    // 朗讀播放中，視覺頁碼可能超前於音訊，避免提早存入 100%
+    const ratio = ttsActiveRef.current ? Math.min(rawRatio, 0.99) : rawRatio
     console.log('[Progress] 存入 Library', {
       page: pageInfo.page,
       total: pageInfo.total,
-      pct: `${Math.round(ratio * 100)}%`,
+      pct: `${Math.round(rawRatio * 100)}%`,
+      stored: `${Math.round(ratio * 100)}%`,
     })
     onUpdateProgress?.(ratio)
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1862,6 +1865,11 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
   }
 
 
+  // 朗讀中視覺頁碼可能比音訊超前，用 displayPageInfo 避免 UI 顯示 100%
+  const displayPageInfo = ((playing || ttsPaused) && pageInfo && pageInfo.page >= pageInfo.total)
+    ? { page: Math.max(pageInfo.total - 1, 1), total: pageInfo.total }
+    : pageInfo
+
   return (
     <div
       className="flex flex-col h-screen"
@@ -1874,7 +1882,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
         onBack={onBack}
         bookTitle={bookTitle}
         bookAuthor={bookRecord?.author}
-        pageInfo={pageInfo}
+        pageInfo={displayPageInfo}
         darkMode={darkMode}
         onToggleDark={onToggleDark}
         onToggleMobilePanel={() => togglePanel('mobilepanel')}
@@ -2251,16 +2259,16 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
           background: darkMode ? '#1a1816' : '#f9f7f2',
         }}
       >
-        {ready && pageInfo && (
+        {ready && displayPageInfo && (
           <>
             <span style={{ fontFamily: MONO, fontSize: 10, color: darkMode ? '#7a706a' : '#9a8f80', whiteSpace: 'nowrap', letterSpacing: '0.04em', flexShrink: 0 }}>
-              第 {pageInfo.page} 頁
+              第 {displayPageInfo.page} 頁
             </span>
             <div style={{ flex: 1, height: 2, background: darkMode ? '#3a3430' : '#e4ddd0', borderRadius: 2 }}>
-              <div style={{ width: `${Math.min(pageInfo.page / pageInfo.total * 100, 100)}%`, height: '100%', background: 'oklch(0.62 0.14 40)', borderRadius: 2, transition: 'width .3s' }} />
+              <div style={{ width: `${Math.min(displayPageInfo.page / displayPageInfo.total * 100, 100)}%`, height: '100%', background: 'oklch(0.62 0.14 40)', borderRadius: 2, transition: 'width .3s' }} />
             </div>
             <span style={{ fontFamily: MONO, fontSize: 10, color: darkMode ? '#7a706a' : '#9a8f80', whiteSpace: 'nowrap', letterSpacing: '0.04em', flexShrink: 0 }}>
-              / {pageInfo.total} · {Math.round(pageInfo.page / pageInfo.total * 100)}%
+              / {displayPageInfo.total} · {Math.round(displayPageInfo.page / displayPageInfo.total * 100)}%
             </span>
           </>
         )}
