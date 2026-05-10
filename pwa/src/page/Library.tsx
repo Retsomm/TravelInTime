@@ -68,7 +68,7 @@ const Library = ({ records, getCoverDataUrl, onAddBooks, onOpenBook, onRemoveBoo
   if (records.length === 0) {
     return (
       <div className="flex flex-col min-h-screen" style={{ background: paperBg, color: inkCol }}>
-        <div className="flex items-center justify-between px-4 py-3">
+        <div className="flex items-center justify-between px-4 py-3" style={{ paddingTop: 'max(env(safe-area-inset-top), 12px)' }}>
           <div className="flex-1" />
           <button className="p-2 rounded-full transition" style={{ color: ink3Col }} onClick={onToggleDark}>
             {darkMode ? <IconSun /> : <IconMoon />}
@@ -112,7 +112,7 @@ const Library = ({ records, getCoverDataUrl, onAddBooks, onOpenBook, onRemoveBoo
       <div className="flex flex-col min-h-screen" style={{ background: paperBg, color: inkCol }}>
 
         {/* ── Header ── */}
-        <div style={{ borderBottom: `1px solid ${borderCol}`, background: paperBg }}>
+        <div style={{ borderBottom: `1px solid ${borderCol}`, background: paperBg, paddingTop: 'env(safe-area-inset-top)' }}>
           {/* 第一行：Logo + 標題 + 操作按鈕 */}
           <div className="flex items-center gap-2 px-4 pt-3 pb-2">
             <div ref={logoMenuRef} style={{ position: 'relative', flexShrink: 0 }}>

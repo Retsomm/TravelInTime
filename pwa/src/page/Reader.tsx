@@ -511,7 +511,8 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
             const dy = e.changedTouches[0].clientY - start.y
             swipeStartRef.current = null
             if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy) * 1.5) return
-            // 有實際選取範圍（長按選字）時不翻頁
+            // 正在選取文字或有選取範圍時不翻頁
+            if (isSelectingRef.current) return
             const currentSel = doc.defaultView?.getSelection()
             if (currentSel && !currentSel.isCollapsed && currentSel.rangeCount > 0) return
             const isRtl = readingDirectionRef.current === 'rtl'
