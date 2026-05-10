@@ -6,17 +6,10 @@
   --font-reading: Georgia, serif;
 }
 
-/* 防止 iOS 水平 rubber-band 捲動 */
+/* 防止 iOS 水平 rubber-band 捲動，保留垂直捲動供書庫頁使用 */
 html,
 body {
-  overflow: hidden;
-  overscroll-behavior: none;
-  width: 100%;
-  height: 100%;
-}
-
-#root {
-  overflow: hidden;
-  width: 100%;
-  height: 100%;
+  overflow-x: hidden;
+  overscroll-behavior-x: none;
+  max-width: 100%;
 }
