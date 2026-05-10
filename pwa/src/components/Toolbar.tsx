@@ -214,7 +214,8 @@ const Toolbar = ({
       {/* 左：返回 + 書名作者（固定寬度區塊） */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
         {btn(false, onBack, <IconBack />, '返回書庫', { color: inkCol })}
-        <div ref={logoMenuRef} style={{ position: 'relative', flexShrink: 0 }}>
+        {/* T logo + 套用最新版選單：桌面版才顯示，行動版空間不足故隱藏 */}
+        <div ref={logoMenuRef} className="hidden md:block" style={{ position: 'relative', flexShrink: 0 }}>
           <button
             onClick={(e) => { e.stopPropagation(); setLogoMenuOpen((open) => !open) }}
             onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); setLogoMenuOpen((open) => !open) }}
