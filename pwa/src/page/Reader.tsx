@@ -284,6 +284,9 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     scanTimerRef.current = setTimeout(scanAllChapterPages, 600)
   }, [scanAllChapterPages])
 
+  // bookId 變更時（或 StrictMode 雙重 invoke 後）重新從 localStorage 載入書籤
+  useEffect(() => { setBookmarks(loadBookmarks(bookId)) }, [bookId])
+
   // 同步 darkModeRef
   useEffect(() => { darkModeRef.current = darkMode }, [darkMode])
 

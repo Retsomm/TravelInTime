@@ -5,8 +5,8 @@ const ALLOWED = /Meijia|Tingting|美佳|婷婷/i
 const pickBest = (voices: SpeechSynthesisVoice[]) =>
   voices.find((v) => /Meijia|美佳/i.test(v.name)) ?? voices[0] ?? null
 
-// iOS 上 speechSynthesis 約每 15 秒會被系統靜默，需定期 pause/resume 保活
-const IOS_KEEPALIVE_INTERVAL = 10000
+// iOS 上 speechSynthesis 約每 15 秒會被系統靜默，輪詢偵測靜默後重啟（不再 pause/resume 以避免 utterance 被重頭播放）
+const IOS_SILENCE_POLL_INTERVAL = 2000
 
 // 手機版朗讀文本長度上限（某些行動浏覽器限制 utterance 文字長度）
 const MAX_UTTERANCE_LENGTH = 3000
@@ -54,14 +54,39 @@ const useTTS = () => {
   useEffect(() => { rateRef.current = rate }, [rate])
   useEffect(() => { selectedVoiceRef.current = selectedVoice }, [selectedVoice])
 
-  // iOS keepalive：定期 pause + resume 防止系統在 15 秒後靜默語音
+  // iOS keepalive：輪詢偵測靜默，若系統斷音則從估算位置重啟
+  // 注意：不使用 pause()+resume()，該組合在 iOS 上會導致 utterance 從頭播放
   const startKeepalive = () => {
     if (keepaliveTimerRef.current !== null) return
     keepaliveTimerRef.current = setInterval(() => {
-      if (!playingRef.current) return
-      window.speechSynthesis.pause()
-      window.speechSynthesis.resume()
-    }, IOS_KEEPALIVE_INTERVAL)
+      if (!playingRef.current || pausedRef.current) return
+      if (window.speechSynthesis.paused) {
+        // 系統暫停（非使用者操作）→ 嘗試恢復，不強制 pause
+        window.speechSynthesis.resume()
+        return
+      }
+      if (!window.speechSynthesis.speaking) {
+        // iOS 靜默（系統斷音），從估算位置重啟
+        const elapsedSinceLastBoundary = currentUtteranceLastBoundaryAtRef.current > 0
+          ? (Date.now() - currentUtteranceLastBoundaryAtRef.current) / 1000
+          : 0
+        const addChars = Math.round(elapsedSinceLastBoundary * estimatedCharsPerSecondRef.current * rateRef.current)
+        const utterancePos = Math.min(
+          currentUtteranceLastBoundaryIndexRef.current + addChars,
+          currentUtteranceTextRef.current.length
+        )
+        const absolutePos = Math.min(textOffsetRef.current + utterancePos, currentTextRef.current.length)
+        const remaining = currentTextRef.current.slice(absolutePos)
+        if (remaining.trim()) {
+          console.log('[TTS:keepalive] iOS 靜默偵測 → 從位置重啟', { absolutePos, utterancePos, addChars })
+          textOffsetRef.current = absolutePos
+          charIndexRef.current = 0
+          playFromOffset(absolutePos)
+        } else {
+          finishPlayback()
+        }
+      }
+    }, IOS_SILENCE_POLL_INTERVAL)
   }
 
   const stopKeepalive = () => {
@@ -128,24 +153,31 @@ const useTTS = () => {
     }
   }, [])
 
-  // iOS visibilitychange：頁面回到前台時，若正在播放則呼叫 resume() 恢復被系統暫停的語音
-  // 手機版強化：隱藏時記錄狀態，復出時嘗試恢復
+  // iOS visibilitychange：頁面回到前台時恢復朗讀
+  // 注意：進入背景時不強制 pause()，避免前台後 resume() 觸發 utterance 從頭播放
   const handleVisibilityChange = () => {
     const isHidden = document.visibilityState === 'hidden'
     if (isHidden) {
       console.log('[TTS] 頁面進入背景', { playing: playingRef.current })
-      // 可選：在背景時暫停以節省資源
-      if (playingRef.current && window.speechSynthesis.speaking) {
-        window.speechSynthesis.pause()
-      }
     } else {
-      console.log('[TTS] 頁面回到前台', { playing: playingRef.current })
-      if (playingRef.current) {
-        // 嘗試恢復朗讀
+      console.log('[TTS] 頁面回到前台', { playing: playingRef.current, synthSpeaking: window.speechSynthesis.speaking, synthPaused: window.speechSynthesis.paused })
+      if (playingRef.current && !pausedRef.current) {
         if (window.speechSynthesis.paused) {
+          // 系統暫停 → 恢復（此時 utterance 狀態完整，resume 不會重頭）
           window.speechSynthesis.resume()
+        } else if (!window.speechSynthesis.speaking) {
+          // 系統靜默（utterance 已結束但 onend 未觸發）→ 從估算位置重啟
+          const absolutePos = textOffsetRef.current + charIndexRef.current
+          const remaining = currentTextRef.current.slice(absolutePos)
+          if (remaining.trim()) {
+            console.log('[TTS] 前台恢復：靜默偵測 → 從位置重啟', { absolutePos })
+            textOffsetRef.current = absolutePos
+            charIndexRef.current = 0
+            playFromOffset(absolutePos)
+          } else {
+            finishPlayback()
+          }
         }
-        // 重新啟動 keepalive（防止後台暫停期間的系統靜默）
         startKeepalive()
       }
     }
@@ -205,6 +237,23 @@ const useTTS = () => {
       if (generationRef.current !== generation) return
       const now = Date.now()
       const nextCharIndex = Math.max(0, Math.min(e.charIndex, text.length))
+
+      // 偵測 iOS utterance 被系統重啟（charIndex 顯著倒退）
+      // 發生原因：外部 cancel/speak 或系統介入導致 utterance 從頭播放，charIndex 突然回到 0 附近
+      const prevCharIndex = charIndexRef.current
+      if (prevCharIndex > 80 && nextCharIndex < prevCharIndex - 50) {
+        const savedPos = textOffsetRef.current + prevCharIndex
+        console.warn('[TTS] onboundary 倒退偵測 → 取消並從正確位置恢復', { prevCharIndex, nextCharIndex, savedPos, generation })
+        const recoveryGen = ++generationRef.current
+        window.speechSynthesis.cancel()
+        textOffsetRef.current = savedPos
+        charIndexRef.current = 0
+        setTimeout(() => {
+          if (playingRef.current && generationRef.current === recoveryGen) playFromOffset(savedPos)
+        }, 150)
+        return
+      }
+
       const boundaryDelta = nextCharIndex - currentUtteranceLastBoundaryIndexRef.current
       const timeDelta = (now - currentUtteranceLastBoundaryAtRef.current) / 1000
       if (boundaryDelta > 8 && timeDelta > 0.5) {
@@ -229,9 +278,16 @@ const useTTS = () => {
       const utteranceEnd = textOffsetRef.current + text.length
       const boundaryEnd = textOffsetRef.current + charIndexRef.current
       const silentTruncation = charIndexRef.current === 0  // onend 在任何 boundary 前觸發
+      // silentTruncation 時改用時間估算，避免假設整段都讀完（實際可能讀到一半被截斷）
+      const silentEstimatedEnd = silentTruncation && currentUtteranceStartAtRef.current > 0
+        ? textOffsetRef.current + Math.min(
+            Math.round((elapsedMs / 1000) * estimatedCharsPerSecondRef.current * rateRef.current),
+            text.length
+          )
+        : utteranceEnd
       const readChars = charIndexRef.current > 0 && boundaryEnd < utteranceEnd - 10
         ? boundaryEnd
-        : utteranceEnd
+        : silentTruncation ? silentEstimatedEnd : utteranceEnd
       const remainingText = currentTextRef.current.slice(readChars)
       const hasMoreText = readChars < totalChars - 10 && remainingText.trim().length > 0
       const isTruncated = charIndexRef.current > 0 && boundaryEnd < utteranceEnd - 10
@@ -298,12 +354,22 @@ const useTTS = () => {
 
       // iOS 上 'interrupted' 錯誤代表被系統強制中斷，嘗試從斷點自動繼續
       if (err === 'interrupted' && playingRef.current) {
-        const absolutePos = textOffsetRef.current + charIndexRef.current
+        // charIndex=0 表示 interrupted 在任何 boundary 前觸發（常見於 keepalive 舊方案 pause/resume 後）
+        // 用時間估算實際讀到的位置，避免退回 chunk 起點重複朗讀
+        let absolutePos: number
+        if (charIndexRef.current === 0 && currentUtteranceStartAtRef.current > 0) {
+          const elapsedS = (Date.now() - currentUtteranceStartAtRef.current) / 1000
+          const estimatedPos = Math.round(elapsedS * estimatedCharsPerSecondRef.current * rateRef.current)
+          absolutePos = textOffsetRef.current + Math.min(estimatedPos, currentUtteranceTextRef.current.length)
+        } else {
+          absolutePos = textOffsetRef.current + charIndexRef.current
+        }
         const remaining = currentTextRef.current.slice(absolutePos)
         if (remaining.trim()) {
           consecutiveTruncationRef.current++
-          console.log('[TTS] interrupted → 從位置重試', {
+          console.log('[TTS] interrupted → 從估算/記錄位置重試', {
             absolutePos,
+            charIndex: charIndexRef.current,
             consecutiveTruncation: consecutiveTruncationRef.current,
           })
           textOffsetRef.current = absolutePos

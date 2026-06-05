@@ -1,176 +1,12 @@
-import { useEffect, useRef, useState } from 'react'
 import { FONT_OPTIONS } from '@/store/useReaderStore'
 import type { Script } from '@/store/useReaderStore'
-
-const SERIF = '"Source Serif 4", "Noto Serif TC", Georgia, serif'
-const MONO  = '"JetBrains Mono", ui-monospace, monospace'
-
-const IconPlay = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none">
-    <polygon points="6 4 20 12 6 20 6 4" />
-  </svg>
-)
-const IconPause = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none">
-    <rect x="6" y="5" width="4" height="14" rx="1" />
-    <rect x="14" y="5" width="4" height="14" rx="1" />
-  </svg>
-)
-const IconReset = () => (
-  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M3 12a9 9 0 1 0 3-6.7" />
-    <path d="M3 4v7h7" />
-  </svg>
-)
-
-// ── NumStepper ──────────────────────────────────────────────────────────
-
-const NumStepper = ({
-  value, onDec, onInc, borderCol, inkCol, ink3Col, paperBg, paperBg2,
-}: {
-  value: string; onDec: () => void; onInc: () => void
-  borderCol: string; inkCol: string; ink3Col: string; paperBg: string; paperBg2: string
-}) => (
-  <div style={{
-    display: 'inline-flex', alignItems: 'center',
-    border: `1px solid ${borderCol}`, borderRadius: 8, overflow: 'hidden', height: 30,
-    background: paperBg,
-  }}>
-    <button
-      onClick={onDec}
-      style={{ width: 30, height: 30, color: ink3Col, fontSize: 14, fontFamily: 'inherit', cursor: 'pointer', transition: 'background .12s' }}
-      onMouseEnter={(e) => (e.currentTarget.style.background = paperBg2)}
-      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-    >−</button>
-    <span style={{
-      width: 58, textAlign: 'center', fontSize: 13, color: inkCol,
-      fontFamily: MONO, borderLeft: `1px solid ${borderCol}`, borderRight: `1px solid ${borderCol}`,
-      height: 30, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-      letterSpacing: '0.02em',
-    }}>{value}</span>
-    <button
-      onClick={onInc}
-      style={{ width: 30, height: 30, color: ink3Col, fontSize: 14, fontFamily: 'inherit', cursor: 'pointer', transition: 'background .12s' }}
-      onMouseEnter={(e) => (e.currentTarget.style.background = paperBg2)}
-      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-    >＋</button>
-  </div>
-)
-
-// ── SegBtn ──────────────────────────────────────────────────────────────
-
-const SegBtn = ({
-  active, onClick, children, paperBg, inkCol, ink3Col,
-}: {
-  active: boolean; onClick: () => void; children: React.ReactNode
-  paperBg: string; inkCol: string; ink3Col: string
-}) => (
-  <button
-    onClick={onClick}
-    style={{
-      flex: 1, height: 26, borderRadius: 6, fontSize: 12, fontFamily: 'inherit',
-      background: active ? paperBg : 'transparent',
-      color: active ? inkCol : ink3Col,
-      boxShadow: active ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
-      cursor: 'pointer', transition: 'all .12s',
-    }}
-  >
-    {children}
-  </button>
-)
-
-// ── CustomSelect ────────────────────────────────────────────────────────
-
-interface SelectOption { label: string; value: string }
-
-const CustomSelect = ({
-  value, options, onChange, ariaLabel,
-  borderCol, inkCol, ink3Col, paperBg, paperBg2,
-}: {
-  value: string; options: SelectOption[]; onChange: (v: string) => void; ariaLabel?: string
-  borderCol: string; inkCol: string; ink3Col: string; paperBg: string; paperBg2: string
-}) => {
-  const [open, setOpen] = useState(false)
-  const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({})
-  const triggerRef = useRef<HTMLButtonElement>(null)
-  const listRef = useRef<HTMLDivElement>(null)
-  const selected = options.find((o) => o.value === value)
-
-  const openDropdown = () => {
-    if (!triggerRef.current) return
-    const rect = triggerRef.current.getBoundingClientRect()
-    const spaceBelow = window.innerHeight - rect.bottom
-    const estimatedH = Math.min(options.length * 32 + 8, 240)
-    const showAbove = spaceBelow < estimatedH && rect.top > estimatedH
-    setDropdownStyle({
-      position: 'fixed', left: rect.left, width: rect.width,
-      ...(showAbove ? { bottom: window.innerHeight - rect.top, top: 'auto' } : { top: rect.bottom, bottom: 'auto' }),
-      zIndex: 9999,
-    })
-    setOpen(true)
-  }
-
-  useEffect(() => {
-    if (!open) return
-    const handler = (e: MouseEvent) => {
-      if (!triggerRef.current?.contains(e.target as Node) && !listRef.current?.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [open])
-
-  return (
-    <div style={{ position: 'relative', width: '100%' }}>
-      <button
-        ref={triggerRef}
-        type="button"
-        style={{
-          width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          fontSize: 13, padding: '6px 10px', borderRadius: 8, textAlign: 'left',
-          background: paperBg2, border: `1px solid ${borderCol}`, color: inkCol,
-          fontFamily: 'inherit', cursor: 'pointer',
-        }}
-        onClick={() => open ? setOpen(false) : openDropdown()}
-        aria-label={ariaLabel}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-      >
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{selected?.label ?? ''}</span>
-        <svg style={{ flexShrink: 0, marginLeft: 4, color: ink3Col }} width="12" height="12" viewBox="0 0 12 12" fill="none">
-          <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-        </svg>
-      </button>
-      {open && (
-        <div
-          ref={listRef}
-          style={{ ...dropdownStyle, background: paperBg, border: `1px solid ${borderCol}`, borderRadius: 8, boxShadow: '0 8px 24px -8px rgba(0,0,0,0.2)', overflowY: 'auto', maxHeight: 240, padding: '4px 0' }}
-          role="listbox"
-        >
-          {options.map((o) => (
-            <div
-              key={o.value}
-              role="option"
-              aria-selected={o.value === value}
-              style={{
-                padding: '7px 12px', fontSize: 13, cursor: 'pointer',
-                background: o.value === value ? paperBg2 : 'transparent',
-                color: o.value === value ? inkCol : ink3Col,
-                fontFamily: 'inherit',
-              }}
-              onMouseEnter={(e) => { if (o.value !== value) e.currentTarget.style.background = paperBg2 }}
-              onMouseLeave={(e) => { if (o.value !== value) e.currentTarget.style.background = 'transparent' }}
-              onMouseDown={() => { onChange(o.value); setOpen(false) }}
-            >
-              {o.label}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ── SettingsPanel ───────────────────────────────────────────────────────
+import { SERIF, MONO } from '@/constants/fonts'
+import { useThemeColors } from '@/hooks/useThemeColors'
+import NumStepper from '@/components/SettingsPanel/NumStepper'
+import SegBtn from '@/components/SettingsPanel/SegBtn'
+import CustomSelect from '@/components/SettingsPanel/CustomSelect'
+import SectTitle from '@/components/SettingsPanel/SectTitle'
+import { IconPlay, IconPause, IconReset } from '@/components/SettingsPanel/icons'
 
 interface Props {
   fontSize: number
@@ -201,12 +37,6 @@ interface Props {
   darkMode?: boolean
 }
 
-const SectTitle = ({ children, ink3Col }: { children: React.ReactNode; ink3Col: string }) => (
-  <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', color: ink3Col, marginBottom: 10 }}>
-    {children}
-  </div>
-)
-
 const SettingsPanel = ({
   fontSize, onFontSizeChange, fontFamily, onFontChange,
   script, onScriptToggle, readingDirection, onReadingDirectionChange,
@@ -214,13 +44,7 @@ const SettingsPanel = ({
   ttsRate, onTTSRateChange, ttsSleepMinutes, onTTSSleepChange, ttsSleepRemaining,
   lineHeight, onLineHeightChange, letterSpacing, onLetterSpacingChange, darkMode,
 }: Props) => {
-  const paperBg   = darkMode ? '#1a1816' : '#f9f7f2'
-  const paperBg2  = darkMode ? '#231f1c' : '#f1ede4'
-  const borderCol = darkMode ? '#3a3430' : '#e4ddd0'
-  const inkCol    = darkMode ? '#e8e0d4' : '#2a2420'
-  const ink2Col   = darkMode ? '#b8afa4' : '#5a4e44'
-  const ink3Col   = darkMode ? '#7a706a' : '#9a8f80'
-  const accentCol = 'oklch(0.62 0.14 40)'
+  const { paperBg, paperBg2, borderCol, inkCol, ink2Col, ink3Col, accentCol } = useThemeColors(darkMode)
 
   const stepperProps = { borderCol, inkCol, ink3Col, paperBg, paperBg2 }
   const segBg = { background: paperBg2, border: `1px solid ${borderCol}`, borderRadius: 8, padding: 2, display: 'flex', gap: 2 }

@@ -1,5 +1,7 @@
 import { useState } from 'react'
-import ePub from 'epubjs'
+import { META_KEY, bookmarksKey, progressKey, settingsKey } from '@/constants/storageKeys'
+import { idbGet, idbPut, idbDelete } from '@/utils/indexedDb'
+import { extractMeta } from '@/utils/epubMetadata'
 
 export interface BookRecord {
   id: string
@@ -11,61 +13,6 @@ export interface BookRecord {
   hasCover: boolean
   progress?: number
 }
-
-const META_KEY = 'tit-library'
-const DB_NAME = 'tit-books'
-const DB_VERSION = 1
-
-// ── IndexedDB helpers ──────────────────────────────────────────────────
-
-let _dbPromise: Promise<IDBDatabase> | null = null
-
-const openDB = (): Promise<IDBDatabase> => {
-  if (_dbPromise) return _dbPromise
-  _dbPromise = new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION)
-    req.onupgradeneeded = () => {
-      req.result.createObjectStore('files')
-      req.result.createObjectStore('covers')
-    }
-    req.onsuccess = () => resolve(req.result)
-    req.onerror = () => {
-      _dbPromise = null
-      reject(req.error)
-    }
-  })
-  return _dbPromise
-}
-
-const idbGet = <T>(store: string, key: string): Promise<T | null> =>
-  openDB().then(
-    (db) =>
-      new Promise((resolve, reject) => {
-        const req = db.transaction(store, 'readonly').objectStore(store).get(key)
-        req.onsuccess = () => resolve((req.result as T) ?? null)
-        req.onerror = () => reject(req.error)
-      }),
-  )
-
-const idbPut = (store: string, key: string, value: unknown): Promise<void> =>
-  openDB().then(
-    (db) =>
-      new Promise((resolve, reject) => {
-        const req = db.transaction(store, 'readwrite').objectStore(store).put(value, key)
-        req.onsuccess = () => resolve()
-        req.onerror = () => reject(req.error)
-      }),
-  )
-
-const idbDelete = (store: string, key: string): Promise<void> =>
-  openDB().then(
-    (db) =>
-      new Promise((resolve, reject) => {
-        const req = db.transaction(store, 'readwrite').objectStore(store).delete(key)
-        req.onsuccess = () => resolve()
-        req.onerror = () => reject(req.error)
-      }),
-  )
 
 // ── LocalStorage helpers ───────────────────────────────────────────────
 
@@ -80,52 +27,6 @@ const loadMeta = (): BookRecord[] => {
 const saveMeta = (records: BookRecord[]) =>
   localStorage.setItem(META_KEY, JSON.stringify(records))
 
-// ── Epub metadata extraction (best-effort, with timeout) ───────────────
-
-const blobToDataUrl = (blob: Blob): Promise<string> =>
-  new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(reader.result as string)
-    reader.onerror = reject
-    reader.readAsDataURL(blob)
-  })
-
-const extractMeta = (
-  buffer: ArrayBuffer,
-  filename: string,
-): Promise<{ title: string; author: string; coverDataUrl: string | null }> => {
-  const fallback = { title: filename.replace(/\.epub$/i, ''), author: '', coverDataUrl: null }
-
-  const work = async () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const book = ePub(buffer.slice(0)) as any
-    await book.ready
-    const pkg = book.package?.metadata
-    const title = (pkg?.title as string | undefined)?.trim() || fallback.title
-    const author = (pkg?.creator as string | undefined)?.trim() || ''
-
-    let coverDataUrl: string | null = null
-    try {
-      const coverUrl: string | null = await book.coverUrl()
-      if (coverUrl) {
-        const blob = await fetch(coverUrl).then((r) => r.blob())
-        coverDataUrl = await blobToDataUrl(blob)
-        URL.revokeObjectURL(coverUrl)
-      }
-    } catch { /* 無封面 */ }
-
-    book.destroy()
-    return { title, author, coverDataUrl }
-  }
-
-  // 10 秒 timeout，避免 book.ready 永久 pending 導致 addBook 卡住
-  const timeout = new Promise<typeof fallback>((resolve) =>
-    setTimeout(() => resolve(fallback), 10_000),
-  )
-
-  return Promise.race([work().catch(() => fallback), timeout])
-}
-
 // ── Bookmarks ──────────────────────────────────────────────────────────
 
 export interface Bookmark {
@@ -135,8 +36,6 @@ export interface Bookmark {
   addedAt: number
 }
 
-const bookmarksKey = (bookId: string) => `tit-bookmarks-${bookId}`
-
 export const loadBookmarks = (bookId: string): Bookmark[] => {
   try { return JSON.parse(localStorage.getItem(bookmarksKey(bookId)) ?? '[]') } catch { return [] }
 }
@@ -145,8 +44,6 @@ export const saveBookmarks = (bookId: string, bookmarks: Bookmark[]) =>
   localStorage.setItem(bookmarksKey(bookId), JSON.stringify(bookmarks))
 
 // ── Reading progress ───────────────────────────────────────────────────
-
-const progressKey = (bookId: string) => `tit-progress-${bookId}`
 
 export const saveProgress = (bookId: string, cfi: string) =>
   localStorage.setItem(progressKey(bookId), cfi)
@@ -164,8 +61,6 @@ export interface BookSettings {
   letterSpacing: number
   readingDirection: 'ltr' | 'rtl'
 }
-
-const settingsKey = (bookId: string) => `tit-settings-${bookId}`
 
 export const saveBookSettings = (bookId: string, settings: BookSettings) =>
   localStorage.setItem(settingsKey(bookId), JSON.stringify(settings))
@@ -188,10 +83,8 @@ export const useLibrary = () => {
     const buffer = await file.arrayBuffer()
     const id = crypto.randomUUID()
 
-    // 1. 立刻存入 IndexedDB（確保可開啟）
     await idbPut('files', id, buffer)
 
-    // 2. 以檔名為標題，立刻寫入書庫（不等 metadata）
     const initial: BookRecord = {
       id,
       title: file.name.replace(/\.epub$/i, ''),
@@ -207,7 +100,6 @@ export const useLibrary = () => {
       return next
     })
 
-    // 3. 背景提取 metadata 後更新（不阻塞開書流程）
     extractMeta(buffer, file.name).then(({ title, author, coverDataUrl }) => {
       if (coverDataUrl) idbPut('covers', id, coverDataUrl)
       setRecords((prev) => {

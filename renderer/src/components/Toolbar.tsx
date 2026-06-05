@@ -1,3 +1,6 @@
+import { SERIF, MONO } from '@/constants/fonts'
+import { useThemeColors } from '@/hooks/useThemeColors'
+
 const IconSettings = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="12" cy="12" r="3" />
@@ -83,19 +86,13 @@ interface Props {
   onToggleBookmarkList: () => void
 }
 
-const SERIF = '"Source Serif 4", "Noto Serif TC", Georgia, serif'
-const MONO  = '"JetBrains Mono", ui-monospace, monospace'
-
 const Toolbar = ({
   onBack, bookTitle, bookAuthor, pageInfo,
   darkMode, onToggleDark,
   onToggleNotes, onToggleChapters, onToggleSettings, onToggleBookInfo,
   activePanel, isBookmarked, onToggleBookmark, onToggleBookmarkList,
 }: Props) => {
-  const paperBg   = darkMode ? '#1a1816' : '#f9f7f2'
-  const borderCol = darkMode ? '#3a3430' : '#e4ddd0'
-  const inkCol    = darkMode ? '#e8e0d4' : '#2a2420'
-  const ink3Col   = darkMode ? '#7a706a' : '#9a8f80'
+  const { paperBg, borderCol, inkCol, ink3Col } = useThemeColors(darkMode)
   const hoverBg   = darkMode ? '#231f1c' : '#f1ede4'
   const accentBg  = darkMode ? 'rgba(180,100,60,0.18)' : 'rgba(180,100,60,0.10)'
   const accentCol = 'oklch(0.62 0.14 40)'

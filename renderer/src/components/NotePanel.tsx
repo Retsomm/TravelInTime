@@ -1,17 +1,11 @@
 import { useRef, useState, useEffect } from 'react'
 import { useAnnotationStore } from '@/store/useAnnotationStore'
 import type { Annotation } from '@/store/useAnnotationStore'
-
-const SERIF = '"Source Serif 4", "Noto Serif TC", Georgia, serif'
-const MONO  = '"JetBrains Mono", ui-monospace, monospace'
-
-const COLORS = [
-  { label: '黃', value: '#eab308' },
-  { label: '綠', value: '#22c55e' },
-  { label: '藍', value: '#3b82f6' },
-  { label: '粉', value: '#f9b9d7' },
-  { label: '橘', value: '#f97316' },
-]
+import { SERIF, MONO } from '@/constants/fonts'
+import { HIGHLIGHT_PALETTE } from '@/constants/highlightColors'
+import { exportAnnotations } from '@/utils/annotationExport'
+import { formatDate } from '@/utils/dateFormat'
+import { useThemeColors } from '@/hooks/useThemeColors'
 
 interface Props {
   onNavigate: (cfi: string) => void
@@ -21,40 +15,14 @@ interface Props {
   bookTitle: string
 }
 
-const formatDate = (ts: number) =>
-  new Date(ts).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-
-const exportAnnotations = (selected: Annotation[], bookTitle: string) => {
-  const sorted = [...selected].sort((a, b) => a.createdAt - b.createdAt)
-  const grouped = new Map<string, Annotation[]>()
-  sorted.forEach((a) => {
-    const ch = a.chapter || '未分類'
-    if (!grouped.has(ch)) grouped.set(ch, [])
-    grouped.get(ch)!.push(a)
-  })
-  const lines: string[] = ['我的閱讀註記', `匯出時間：${new Date().toLocaleString('zh-TW')}`, `共 ${selected.length} 筆`, '']
-  grouped.forEach((anns, chapter) => {
-    lines.push(chapter)
-    anns.forEach((a) => { lines.push(`• ${a.text}`); lines.push('') })
-  })
-  const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  const now = new Date()
-  const dateStr = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`
-  const timeStr = `${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`
-  link.download = `${(bookTitle || '閱讀註記').replace(/[\\/:*?"<>|]/g, '_')}_${dateStr}_${timeStr}.txt`
-  link.click()
-  URL.revokeObjectURL(url)
-}
-
 const NotePanel = ({ onNavigate, onChangeColor, onRemoveAnnotation, darkMode, bookTitle }: Props) => {
   const { annotations } = useAnnotationStore()
   const [pickerOpenId, setPickerOpenId] = useState<string | null>(null)
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const selectAllRef = useRef<HTMLInputElement>(null)
+
+  const { paperBg, paperBg2, borderCol, inkCol, ink2Col, ink3Col, accentCol } = useThemeColors(darkMode)
 
   const allSelected = annotations.length > 0 && selectedIds.size === annotations.length
   const someSelected = selectedIds.size > 0 && !allSelected
@@ -66,14 +34,6 @@ const NotePanel = ({ onNavigate, onChangeColor, onRemoveAnnotation, darkMode, bo
   const toggleSelectAll = () => setSelectedIds(allSelected ? new Set() : new Set(annotations.map((a) => a.id)))
   const toggleSelect = (id: string) => setSelectedIds((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
   const handleExport = () => { const s = annotations.filter((a) => selectedIds.has(a.id)); if (s.length > 0) exportAnnotations(s, bookTitle) }
-
-  const paperBg   = darkMode ? '#1a1816' : '#f9f7f2'
-  const paperBg2  = darkMode ? '#231f1c' : '#f1ede4'
-  const borderCol = darkMode ? '#3a3430' : '#e4ddd0'
-  const inkCol    = darkMode ? '#e8e0d4' : '#2a2420'
-  const ink2Col   = darkMode ? '#b8afa4' : '#5a4e44'
-  const ink3Col   = darkMode ? '#7a706a' : '#9a8f80'
-  const accentCol = 'oklch(0.62 0.14 40)'
 
   return (
     <div style={{
@@ -126,7 +86,7 @@ const NotePanel = ({ onNavigate, onChangeColor, onRemoveAnnotation, darkMode, bo
           </div>
         ) : (
           <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
-            {annotations.map((a) => (
+            {annotations.map((a: Annotation) => (
               <li key={a.id} style={{ borderBottom: `1px solid ${borderCol}` }}>
                 <div
                   style={{ padding: '14px 20px', cursor: 'pointer', transition: 'background .12s' }}
@@ -140,7 +100,6 @@ const NotePanel = ({ onNavigate, onChangeColor, onRemoveAnnotation, darkMode, bo
                       style={{ marginTop: 3, flexShrink: 0, accentColor: accentCol, cursor: 'pointer' }} />
 
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      {/* Highlighted quote */}
                       <div style={{
                         fontFamily: SERIF, fontSize: 14, lineHeight: 1.65, color: inkCol,
                         borderLeft: `3px solid ${a.color}`, paddingLeft: 10, marginBottom: 8,
@@ -148,14 +107,12 @@ const NotePanel = ({ onNavigate, onChangeColor, onRemoveAnnotation, darkMode, bo
                         {a.text}
                       </div>
 
-                      {/* Meta */}
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontFamily: MONO, fontSize: 10, color: ink3Col, letterSpacing: '0.04em' }}>
                         <span>{a.chapter || ''}</span>
                         <span>{formatDate(a.createdAt)}</span>
                       </div>
                     </div>
 
-                    {/* Color swatch + delete */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0, marginTop: 2 }}>
                       <button
                         style={{ width: 14, height: 14, borderRadius: '50%', background: a.color, border: '1.5px solid rgba(0,0,0,0.12)', flexShrink: 0, cursor: 'pointer' }}
@@ -182,10 +139,9 @@ const NotePanel = ({ onNavigate, onChangeColor, onRemoveAnnotation, darkMode, bo
                     </div>
                   </div>
 
-                  {/* Color picker */}
                   {pickerOpenId === a.id && (
                     <div style={{ display: 'flex', gap: 8, marginTop: 10, paddingLeft: 24 }} onClick={(e) => e.stopPropagation()}>
-                      {COLORS.map((c) => (
+                      {HIGHLIGHT_PALETTE.map((c) => (
                         <button
                           key={c.label}
                           style={{
@@ -199,7 +155,6 @@ const NotePanel = ({ onNavigate, onChangeColor, onRemoveAnnotation, darkMode, bo
                       ))}
                     </div>
                   )}
-                  {/* Delete confirmation */}
                   {pendingDeleteId === a.id && (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, paddingLeft: 24 }} onClick={(e) => e.stopPropagation()}>
                       <span style={{ fontFamily: MONO, fontSize: 11, color: '#ef4444', letterSpacing: '0.02em', flexShrink: 0 }}>確定刪除？</span>

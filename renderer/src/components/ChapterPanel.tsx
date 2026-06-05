@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { SERIF, MONO } from '@/constants/fonts'
+import { useThemeColors } from '@/hooks/useThemeColors'
 
 export interface TocItem {
   id: string
@@ -6,9 +8,6 @@ export interface TocItem {
   label: string
   subitems?: TocItem[]
 }
-
-const SERIF = '"Source Serif 4", "Noto Serif TC", Georgia, serif'
-const MONO  = '"JetBrains Mono", ui-monospace, monospace'
 
 interface RowProps {
   item: TocItem
@@ -114,13 +113,7 @@ interface Props {
 
 const ChapterPanel = ({ toc, currentHref, onNavigate, darkMode }: Props) => {
   const activeHref = findBestMatch(toc, currentHref)
-  const paperBg   = darkMode ? '#1a1816' : '#f9f7f2'
-  const paperBg2  = darkMode ? '#231f1c' : '#f1ede4'
-  const borderCol = darkMode ? '#3a3430' : '#e4ddd0'
-  const inkCol    = darkMode ? '#e8e0d4' : '#2a2420'
-  const ink2Col   = darkMode ? '#b8afa4' : '#5a4e44'
-  const ink3Col   = darkMode ? '#7a706a' : '#9a8f80'
-  const accentCol = 'oklch(0.62 0.14 40)'
+  const { paperBg, paperBg2, borderCol, inkCol, ink2Col, ink3Col, accentCol } = useThemeColors(darkMode)
 
   return (
     <div style={{
