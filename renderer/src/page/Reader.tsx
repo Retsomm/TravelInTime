@@ -1268,7 +1268,8 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     const progressShouldAdvance =
       !beforeCurrentPageGuard &&
       !insideNewPageGuard &&
-      !(geometry?.hasUsableRect ?? true) && pageEndOffset === null && (
+      pageEndOffset === null && (
+        (geometry?.outsidePage ?? false) ||
         (source === 'boundary' && continuousPage >= currentPage + 1.05) ||
         (continuousPage >= currentPage + 1.12)
       )
