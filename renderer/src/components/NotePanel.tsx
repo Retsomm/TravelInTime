@@ -16,13 +16,36 @@ interface Props {
 }
 
 const NotePanel = ({ onNavigate, onChangeColor, onRemoveAnnotation, darkMode, bookTitle }: Props) => {
-  const { annotations } = useAnnotationStore()
+  const { annotations, updateNote } = useAnnotationStore()
   const [pickerOpenId, setPickerOpenId] = useState<string | null>(null)
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const selectAllRef = useRef<HTMLInputElement>(null)
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null)
+  const [editingNoteText, setEditingNoteText] = useState('')
+  const noteTextareaRef = useRef<HTMLTextAreaElement>(null)
 
   const { paperBg, paperBg2, borderCol, inkCol, ink2Col, ink3Col, accentCol } = useThemeColors(darkMode)
+
+  const startEditNote = (a: Annotation) => {
+    setPickerOpenId(null)
+    setPendingDeleteId(null)
+    setEditingNoteId(a.id)
+    setEditingNoteText(a.note ?? '')
+    setTimeout(() => noteTextareaRef.current?.focus(), 50)
+  }
+
+  const saveNote = (id: string) => {
+    updateNote(id, editingNoteText)
+    setEditingNoteId(null)
+  }
+
+  const cancelNote = () => setEditingNoteId(null)
+
+  const deleteNote = (id: string) => {
+    updateNote(id, '')
+    setEditingNoteId(null)
+  }
 
   const allSelected = annotations.length > 0 && selectedIds.size === annotations.length
   const someSelected = selectedIds.size > 0 && !allSelected
@@ -173,6 +196,68 @@ const NotePanel = ({ onNavigate, onChangeColor, onRemoveAnnotation, darkMode, bo
                       >刪除</button>
                     </div>
                   )}
+                  {/* 感想筆記區塊 */}
+                  <div style={{ paddingLeft: 24, marginTop: 8 }} onClick={(e) => e.stopPropagation()}>
+                    {editingNoteId === a.id ? (
+                      <div>
+                        <textarea
+                          ref={noteTextareaRef}
+                          value={editingNoteText}
+                          onChange={(e) => setEditingNoteText(e.target.value)}
+                          placeholder="寫下你的感想…"
+                          rows={3}
+                          style={{
+                            width: '100%', boxSizing: 'border-box',
+                            padding: '7px 10px', borderRadius: 7,
+                            border: `1px solid ${accentCol}`,
+                            background: darkMode ? '#231f1b' : '#f4f0e8',
+                            color: inkCol, fontFamily: SERIF, fontSize: 13,
+                            lineHeight: 1.65, resize: 'vertical',
+                            outline: 'none',
+                          }}
+                          onKeyDown={(e) => { if (e.key === 'Escape') cancelNote() }}
+                        />
+                        <div style={{ display: 'flex', gap: 6, marginTop: 5 }}>
+                          <button
+                            style={{ height: 24, padding: '0 10px', borderRadius: 5, fontFamily: MONO, fontSize: 11, color: '#fff', background: accentCol, cursor: 'pointer' }}
+                            onClick={() => saveNote(a.id)}
+                          >儲存</button>
+                          <button
+                            style={{ height: 24, padding: '0 10px', borderRadius: 5, fontFamily: MONO, fontSize: 11, color: ink3Col, background: darkMode ? '#2a2520' : '#ede8e0', cursor: 'pointer' }}
+                            onClick={cancelNote}
+                          >取消</button>
+                          {a.note && (
+                            <button
+                              style={{ height: 24, padding: '0 10px', borderRadius: 5, fontFamily: MONO, fontSize: 11, color: '#ef4444', background: 'transparent', cursor: 'pointer' }}
+                              onClick={() => deleteNote(a.id)}
+                            >刪除筆記</button>
+                          )}
+                        </div>
+                      </div>
+                    ) : a.note ? (
+                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+                        <div style={{
+                          flex: 1, fontFamily: SERIF, fontSize: 12.5, color: ink2Col,
+                          lineHeight: 1.65, background: darkMode ? '#231f1b' : '#f4f0e8',
+                          borderRadius: 7, padding: '6px 10px',
+                          borderLeft: `3px solid ${darkMode ? '#5a5248' : '#c8bfad'}`,
+                          whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                        }}>
+                          {a.note}
+                        </div>
+                        <button
+                          style={{ flexShrink: 0, marginTop: 4, width: 22, height: 22, borderRadius: 6, fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center', color: ink3Col, background: 'transparent', cursor: 'pointer' }}
+                          onClick={() => startEditNote(a)}
+                          aria-label="編輯筆記"
+                        >✏︎</button>
+                      </div>
+                    ) : (
+                      <button
+                        style={{ fontFamily: MONO, fontSize: 11, color: ink3Col, background: 'transparent', cursor: 'pointer', letterSpacing: '0.04em', padding: '2px 0' }}
+                        onClick={() => startEditNote(a)}
+                      >＋ 新增感想</button>
+                    )}
+                  </div>
                 </div>
               </li>
             ))}

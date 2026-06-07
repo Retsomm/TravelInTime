@@ -7,6 +7,7 @@ export interface Annotation {
   color: string
   chapter: string
   createdAt: number
+  note?: string
 }
 
 interface AnnotationStore {
@@ -15,6 +16,7 @@ interface AnnotationStore {
   addAnnotation: (a: Omit<Annotation, 'id' | 'createdAt'>) => void
   removeAnnotation: (id: string) => void
   updateColor: (id: string, color: string) => void
+  updateNote: (id: string, note: string) => void
   clearAll: () => void
 }
 
@@ -43,6 +45,10 @@ export const useAnnotationStore = create<AnnotationStore>((set) => ({
   updateColor: (id, color) =>
     set((state) => ({
       annotations: state.annotations.map((a) => (a.id === id ? { ...a, color } : a)),
+    })),
+  updateNote: (id, note) =>
+    set((state) => ({
+      annotations: state.annotations.map((a) => (a.id === id ? { ...a, note: note.trim() || undefined } : a)),
     })),
   clearAll: () => set({ annotations: [] }),
 }))

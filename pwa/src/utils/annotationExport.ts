@@ -11,7 +11,11 @@ export const exportAnnotations = (selected: Annotation[], bookTitle: string) => 
   const lines: string[] = ['我的閱讀註記', `匯出時間：${new Date().toLocaleString('zh-TW')}`, `共 ${selected.length} 筆`, '']
   grouped.forEach((anns, chapter) => {
     lines.push(chapter)
-    anns.forEach((a) => { lines.push(`• ${a.text}`); lines.push('') })
+    anns.forEach((a) => {
+      lines.push(`• ${a.text}`)
+      if (a.note) lines.push(`  筆記：${a.note}`)
+      lines.push('')
+    })
   })
   const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' })
   const url = URL.createObjectURL(blob)
