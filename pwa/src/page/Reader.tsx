@@ -1935,7 +1935,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
           >
             ‹
           </button>
-          <div ref={viewerRef} className="absolute top-2 bottom-2 md:bottom-8 left-0 right-0 overflow-hidden" />
+          <div ref={viewerRef} className="absolute top-2 bottom-2 md:bottom-13 left-0 right-0 overflow-hidden" />
 
           {/* 章節剩餘頁（底部左側小字，僅桌面版） */}
           {ready && chapterRemaining !== null && (
@@ -2259,57 +2259,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
         )}
       </div>
 
-      {/* 桌面版朗讀控制列 — 僅朗讀中或暫停時才顯示，佔用版面讓內容自然上移 */}
-      {(playing || ttsPaused) && (
-        <div
-          className="hidden md:flex"
-          style={{
-            flexShrink: 0,
-            alignItems: 'center',
-            gap: 10,
-            padding: '0 20px',
-            height: 44,
-            borderTop: `1px solid ${darkMode ? '#3a3430' : '#e4ddd0'}`,
-            background: darkMode ? '#1a1816' : '#f9f7f2',
-          }}
-        >
-          <span style={{ flex: 1, fontSize: 12, fontFamily: MONO, letterSpacing: '0.04em', color: playing ? (darkMode ? '#c8b89a' : 'oklch(0.62 0.14 40)') : (darkMode ? '#7a706a' : '#9a8f80'), userSelect: 'none' }}>
-            {playing ? '朗讀中…' : '已暫停'}
-          </span>
-          <button
-            onClick={() => playing ? handleTTSPause() : handleTTSPlay()}
-            style={{
-              width: 44, height: 32, borderRadius: 8, cursor: 'pointer',
-              background: darkMode ? '#2a2520' : '#f1ede4',
-              border: `1px solid ${darkMode ? '#3a3430' : '#e4ddd0'}`,
-              color: darkMode ? '#e8e0d4' : '#2a2420',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-            }}
-            aria-label={playing ? '暫停朗讀' : '繼續朗讀'}
-          >
-            {playing ? (
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
-            ) : (
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="5,3 19,12 5,21"/></svg>
-            )}
-          </button>
-          <button
-            onClick={handleTTSReset}
-            style={{
-              width: 44, height: 32, borderRadius: 8, cursor: 'pointer',
-              background: darkMode ? '#2a2520' : '#f1ede4',
-              border: `1px solid ${darkMode ? '#3a3430' : '#e4ddd0'}`,
-              color: darkMode ? '#7a706a' : '#9a8f80',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-            }}
-            aria-label="停止朗讀"
-          >
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
-          </button>
-        </div>
-      )}
-
-      {/* 手機版底部進度列 — 永遠佔位避免 epub 初始化尺寸錯誤 */}
+      {/* 手機版底部列 — 永遠佔位避免 epub 初始化尺寸錯誤 */}
       <div
         className="md:hidden"
         style={{
@@ -2319,54 +2269,32 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
           paddingBottom: 'env(safe-area-inset-bottom)',
         }}
       >
-        {/* 朗讀控制列：朗讀中或暫停時才顯示 */}
-        {(playing || ttsPaused) && (
-          <div
-            style={{
-              display: 'flex', alignItems: 'center', gap: 10,
-              padding: '0 16px', height: 44,
-              borderBottom: `1px solid ${darkMode ? '#3a3430' : '#e4ddd0'}`,
-            }}
+        {/* 手機版朗讀控制列：永遠佔位（44px），用 visibility 切換顯示，避免動態加入/移除造成 epub.js ResizeObserver 觸發重新分頁 */}
+        <div
+          style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0 16px', height: 44, borderBottom: `1px solid ${darkMode ? '#3a3430' : '#e4ddd0'}`, visibility: (playing || ttsPaused) ? 'visible' : 'hidden', pointerEvents: (playing || ttsPaused) ? 'auto' : 'none' }}
+          onClick={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
+        >
+          <span style={{ flex: 1, fontSize: 12, fontFamily: MONO, letterSpacing: '0.04em', color: playing ? (darkMode ? '#c8b89a' : 'oklch(0.62 0.14 40)') : (darkMode ? '#7a706a' : '#9a8f80'), userSelect: 'none' }}>
+            {playing ? '朗讀中…' : '已暫停'}
+          </span>
+          <button
+            onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); playing ? handleTTSPause() : handleTTSPlay() }}
+            onClick={(e) => { e.stopPropagation(); playing ? handleTTSPause() : handleTTSPlay() }}
+            style={{ width: 44, height: 36, borderRadius: 8, cursor: 'pointer', background: darkMode ? '#2a2520' : '#f1ede4', border: `1px solid ${darkMode ? '#3a3430' : '#e4ddd0'}`, color: darkMode ? '#e8e0d4' : '#2a2420', display: 'flex', alignItems: 'center', justifyContent: 'center', touchAction: 'manipulation', flexShrink: 0 }}
+            aria-label={playing ? '暫停朗讀' : '繼續朗讀'}
           >
-            <span style={{ flex: 1, fontSize: 12, color: playing ? (darkMode ? '#c8b89a' : 'oklch(0.62 0.14 40)') : (darkMode ? '#7a706a' : '#9a8f80'), fontFamily: MONO, letterSpacing: '0.04em', userSelect: 'none' }}>
-              {playing ? '朗讀中…' : '已暫停'}
-            </span>
-            <button
-              onTouchEnd={(e) => { e.preventDefault(); playing ? handleTTSPause() : handleTTSPlay() }}
-              onClick={() => playing ? handleTTSPause() : handleTTSPlay()}
-              style={{
-                width: 44, height: 36, borderRadius: 8, cursor: 'pointer',
-                background: darkMode ? '#2a2520' : '#f1ede4',
-                border: `1px solid ${darkMode ? '#3a3430' : '#e4ddd0'}`,
-                color: darkMode ? '#e8e0d4' : '#2a2420',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                touchAction: 'manipulation', flexShrink: 0,
-              }}
-              aria-label={playing ? '暫停朗讀' : '繼續朗讀'}
-            >
-              {playing ? (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
-              ) : (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="5,3 19,12 5,21"/></svg>
-              )}
-            </button>
-            <button
-              onTouchEnd={(e) => { e.preventDefault(); handleTTSReset() }}
-              onClick={handleTTSReset}
-              style={{
-                width: 44, height: 36, borderRadius: 8, cursor: 'pointer',
-                background: darkMode ? '#2a2520' : '#f1ede4',
-                border: `1px solid ${darkMode ? '#3a3430' : '#e4ddd0'}`,
-                color: darkMode ? '#7a706a' : '#9a8f80',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                touchAction: 'manipulation', flexShrink: 0,
-              }}
-              aria-label="停止朗讀"
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
-            </button>
-          </div>
-        )}
+            {playing ? <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg> : <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="5,3 19,12 5,21"/></svg>}
+          </button>
+          <button
+            onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); handleTTSReset() }}
+            onClick={(e) => { e.stopPropagation(); handleTTSReset() }}
+            style={{ width: 44, height: 36, borderRadius: 8, cursor: 'pointer', background: darkMode ? '#2a2520' : '#f1ede4', border: `1px solid ${darkMode ? '#3a3430' : '#e4ddd0'}`, color: darkMode ? '#7a706a' : '#9a8f80', display: 'flex', alignItems: 'center', justifyContent: 'center', touchAction: 'manipulation', flexShrink: 0 }}
+            aria-label="停止朗讀"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+          </button>
+        </div>
         <div
           className="flex items-center"
           style={{ height: 32, gap: 10, padding: '0 16px' }}
@@ -2386,6 +2314,38 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
           )}
         </div>
       </div>
+
+      {/* 桌面版朗讀控制列 — fixed 定位，永遠佔位，用 visibility 切換，避免條件渲染觸發任何潛在副作用 */}
+      <div
+        className="hidden md:flex"
+        style={{
+          position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 20,
+          height: 44,
+          alignItems: 'center', gap: 10, padding: '0 20px',
+          background: darkMode ? '#1a1816' : '#f9f7f2',
+          borderTop: `1px solid ${darkMode ? '#3a3430' : '#e4ddd0'}`,
+          visibility: (playing || ttsPaused) ? 'visible' : 'hidden',
+          pointerEvents: (playing || ttsPaused) ? 'auto' : 'none',
+        }}
+      >
+          <span style={{ flex: 1, fontSize: 12, fontFamily: MONO, letterSpacing: '0.04em', color: playing ? (darkMode ? '#c8b89a' : 'oklch(0.62 0.14 40)') : (darkMode ? '#7a706a' : '#9a8f80'), userSelect: 'none' }}>
+            {playing ? '朗讀中…' : '已暫停'}
+          </span>
+          <button
+            onClick={() => playing ? handleTTSPause() : handleTTSPlay()}
+            style={{ width: 44, height: 32, borderRadius: 8, cursor: 'pointer', background: darkMode ? '#2a2520' : '#f1ede4', border: `1px solid ${darkMode ? '#3a3430' : '#e4ddd0'}`, color: darkMode ? '#e8e0d4' : '#2a2420', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
+            aria-label={playing ? '暫停朗讀' : '繼續朗讀'}
+          >
+            {playing ? <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg> : <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="5,3 19,12 5,21"/></svg>}
+          </button>
+          <button
+            onClick={handleTTSReset}
+            style={{ width: 44, height: 32, borderRadius: 8, cursor: 'pointer', background: darkMode ? '#2a2520' : '#f1ede4', border: `1px solid ${darkMode ? '#3a3430' : '#e4ddd0'}`, color: darkMode ? '#7a706a' : '#9a8f80', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
+            aria-label="停止朗讀"
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+          </button>
+        </div>
     </div>
   )
 }
