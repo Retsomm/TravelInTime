@@ -2259,6 +2259,56 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
         )}
       </div>
 
+      {/* 桌面版朗讀控制列 — 僅朗讀中或暫停時才顯示，佔用版面讓內容自然上移 */}
+      {(playing || ttsPaused) && (
+        <div
+          className="hidden md:flex"
+          style={{
+            flexShrink: 0,
+            alignItems: 'center',
+            gap: 10,
+            padding: '0 20px',
+            height: 44,
+            borderTop: `1px solid ${darkMode ? '#3a3430' : '#e4ddd0'}`,
+            background: darkMode ? '#1a1816' : '#f9f7f2',
+          }}
+        >
+          <span style={{ flex: 1, fontSize: 12, fontFamily: MONO, letterSpacing: '0.04em', color: playing ? (darkMode ? '#c8b89a' : 'oklch(0.62 0.14 40)') : (darkMode ? '#7a706a' : '#9a8f80'), userSelect: 'none' }}>
+            {playing ? '朗讀中…' : '已暫停'}
+          </span>
+          <button
+            onClick={() => playing ? handleTTSPause() : handleTTSPlay()}
+            style={{
+              width: 44, height: 32, borderRadius: 8, cursor: 'pointer',
+              background: darkMode ? '#2a2520' : '#f1ede4',
+              border: `1px solid ${darkMode ? '#3a3430' : '#e4ddd0'}`,
+              color: darkMode ? '#e8e0d4' : '#2a2420',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+            }}
+            aria-label={playing ? '暫停朗讀' : '繼續朗讀'}
+          >
+            {playing ? (
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+            ) : (
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="5,3 19,12 5,21"/></svg>
+            )}
+          </button>
+          <button
+            onClick={handleTTSReset}
+            style={{
+              width: 44, height: 32, borderRadius: 8, cursor: 'pointer',
+              background: darkMode ? '#2a2520' : '#f1ede4',
+              border: `1px solid ${darkMode ? '#3a3430' : '#e4ddd0'}`,
+              color: darkMode ? '#7a706a' : '#9a8f80',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+            }}
+            aria-label="停止朗讀"
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+          </button>
+        </div>
+      )}
+
       {/* 手機版底部進度列 — 永遠佔位避免 epub 初始化尺寸錯誤 */}
       <div
         className="md:hidden"
@@ -2269,74 +2319,72 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
           paddingBottom: 'env(safe-area-inset-bottom)',
         }}
       >
-      {/* 朗讀控制列：朗讀中或暫停時才顯示 */}
-      {(playing || ttsPaused) && (
-        <div
-          style={{
-            display: 'flex', alignItems: 'center', gap: 10,
-            padding: '0 16px', height: 44,
-            borderBottom: `1px solid ${darkMode ? '#3a3430' : '#e4ddd0'}`,
-          }}
-        >
-          <span style={{ flex: 1, fontSize: 12, color: darkMode ? '#c8b89a' : 'oklch(0.62 0.14 40)', fontFamily: MONO, letterSpacing: '0.04em' }}>
-            {playing ? '朗讀中…' : '已暫停'}
-          </span>
-          {/* 暫停 / 繼續 */}
-          <button
-            onTouchEnd={(e) => { e.preventDefault(); playing ? handleTTSPause() : handleTTSPlay() }}
-            onClick={() => playing ? handleTTSPause() : handleTTSPlay()}
+        {/* 朗讀控制列：朗讀中或暫停時才顯示 */}
+        {(playing || ttsPaused) && (
+          <div
             style={{
-              width: 44, height: 36, borderRadius: 8, cursor: 'pointer',
-              background: darkMode ? '#2a2520' : '#f1ede4',
-              border: `1px solid ${darkMode ? '#3a3430' : '#e4ddd0'}`,
-              color: darkMode ? '#e8e0d4' : '#2a2420',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              touchAction: 'manipulation', flexShrink: 0,
+              display: 'flex', alignItems: 'center', gap: 10,
+              padding: '0 16px', height: 44,
+              borderBottom: `1px solid ${darkMode ? '#3a3430' : '#e4ddd0'}`,
             }}
-            aria-label={playing ? '暫停朗讀' : '繼續朗讀'}
           >
-            {playing ? (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
-            ) : (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>
-            )}
-          </button>
-          {/* 停止 */}
-          <button
-            onTouchEnd={(e) => { e.preventDefault(); handleTTSReset() }}
-            onClick={handleTTSReset}
-            style={{
-              width: 44, height: 36, borderRadius: 8, cursor: 'pointer',
-              background: darkMode ? '#2a2520' : '#f1ede4',
-              border: `1px solid ${darkMode ? '#3a3430' : '#e4ddd0'}`,
-              color: darkMode ? '#7a706a' : '#9a8f80',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              touchAction: 'manipulation', flexShrink: 0,
-            }}
-            aria-label="停止朗讀"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
-          </button>
-        </div>
-      )}
-      <div
-        className="flex items-center"
-        style={{ height: 32, gap: 10, padding: '0 16px' }}
-      >
-        {ready && displayPageInfo && (
-          <>
-            <span style={{ fontFamily: MONO, fontSize: 10, color: darkMode ? '#7a706a' : '#9a8f80', whiteSpace: 'nowrap', letterSpacing: '0.04em', flexShrink: 0 }}>
-              第 {displayPageInfo.page} 頁
+            <span style={{ flex: 1, fontSize: 12, color: playing ? (darkMode ? '#c8b89a' : 'oklch(0.62 0.14 40)') : (darkMode ? '#7a706a' : '#9a8f80'), fontFamily: MONO, letterSpacing: '0.04em', userSelect: 'none' }}>
+              {playing ? '朗讀中…' : '已暫停'}
             </span>
-            <div style={{ flex: 1, height: 2, background: darkMode ? '#3a3430' : '#e4ddd0', borderRadius: 2 }}>
-              <div style={{ width: `${Math.min(displayPageInfo.page / displayPageInfo.total * 100, 100)}%`, height: '100%', background: 'oklch(0.62 0.14 40)', borderRadius: 2, transition: 'width .3s' }} />
-            </div>
-            <span style={{ fontFamily: MONO, fontSize: 10, color: darkMode ? '#7a706a' : '#9a8f80', whiteSpace: 'nowrap', letterSpacing: '0.04em', flexShrink: 0 }}>
-              / {displayPageInfo.total} · {Math.round(displayPageInfo.page / displayPageInfo.total * 100)}%
-            </span>
-          </>
+            <button
+              onTouchEnd={(e) => { e.preventDefault(); playing ? handleTTSPause() : handleTTSPlay() }}
+              onClick={() => playing ? handleTTSPause() : handleTTSPlay()}
+              style={{
+                width: 44, height: 36, borderRadius: 8, cursor: 'pointer',
+                background: darkMode ? '#2a2520' : '#f1ede4',
+                border: `1px solid ${darkMode ? '#3a3430' : '#e4ddd0'}`,
+                color: darkMode ? '#e8e0d4' : '#2a2420',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                touchAction: 'manipulation', flexShrink: 0,
+              }}
+              aria-label={playing ? '暫停朗讀' : '繼續朗讀'}
+            >
+              {playing ? (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+              ) : (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="5,3 19,12 5,21"/></svg>
+              )}
+            </button>
+            <button
+              onTouchEnd={(e) => { e.preventDefault(); handleTTSReset() }}
+              onClick={handleTTSReset}
+              style={{
+                width: 44, height: 36, borderRadius: 8, cursor: 'pointer',
+                background: darkMode ? '#2a2520' : '#f1ede4',
+                border: `1px solid ${darkMode ? '#3a3430' : '#e4ddd0'}`,
+                color: darkMode ? '#7a706a' : '#9a8f80',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                touchAction: 'manipulation', flexShrink: 0,
+              }}
+              aria-label="停止朗讀"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+            </button>
+          </div>
         )}
-      </div>
+        <div
+          className="flex items-center"
+          style={{ height: 32, gap: 10, padding: '0 16px' }}
+        >
+          {ready && displayPageInfo && (
+            <>
+              <span style={{ fontFamily: MONO, fontSize: 10, color: darkMode ? '#7a706a' : '#9a8f80', whiteSpace: 'nowrap', letterSpacing: '0.04em', flexShrink: 0 }}>
+                第 {displayPageInfo.page} 頁
+              </span>
+              <div style={{ flex: 1, height: 2, background: darkMode ? '#3a3430' : '#e4ddd0', borderRadius: 2 }}>
+                <div style={{ width: `${Math.min(displayPageInfo.page / displayPageInfo.total * 100, 100)}%`, height: '100%', background: 'oklch(0.62 0.14 40)', borderRadius: 2, transition: 'width .3s' }} />
+              </div>
+              <span style={{ fontFamily: MONO, fontSize: 10, color: darkMode ? '#7a706a' : '#9a8f80', whiteSpace: 'nowrap', letterSpacing: '0.04em', flexShrink: 0 }}>
+                / {displayPageInfo.total} · {Math.round(displayPageInfo.page / displayPageInfo.total * 100)}%
+              </span>
+            </>
+          )}
+        </div>
       </div>
     </div>
   )
