@@ -18,7 +18,7 @@ import BookInfoPanel from '@/components/Reader/BookInfoPanel'
 import BookmarkPanel from '@/components/Reader/BookmarkPanel'
 import HighlightPopup from '@/components/Reader/HighlightPopup'
 import { patchIframeViewPrototype, patchRenditionPrototype } from '@/components/Reader/epubPatches'
-import { applyDarkOverride, applyFontFamilyOverride, applyLetterSpacingOverride, applyLineHeightOverride, normalizeFontFamily } from '@/components/Reader/readerStyles'
+import { applyDarkOverride, applyFontFamilyOverride, applyFontSizeOverride, applyLetterSpacingOverride, applyLineHeightOverride, normalizeFontFamily } from '@/components/Reader/readerStyles'
 import { convertDoc, getToSC, getToTC, restoreDoc } from '@/components/Reader/scriptConversion'
 import { DEBUG_TTS_FOLLOW, TTS_HIGHLIGHT_ID, TTS_HIGHLIGHT_INTERVAL, TTS_NEW_PAGE_AUTO_FOLLOW_GUARD, TTS_PAGE_END_FIXED_LEAD, TTS_USER_INPUT_GRACE, clearTTSHighlight, clearTTSHighlights, collectContentDocuments, createRangeFromTextOffset, ensureTTSHighlightStyle, getBoundaryOffsetFromRange, getTextIndex, getTTSRangeViewportState, ttsTextIndexCache } from '@/components/Reader/ttsHighlight'
 
@@ -420,6 +420,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
           // 各功能獨立注入 !important 樣式，互不干擾
           applyDarkOverride(doc, darkModeRef.current)
           applyFontFamilyOverride(doc, fontFamilyRef.current)
+          applyFontSizeOverride(doc, fontSizeRef.current)
           applyLineHeightOverride(doc, lineHeightRef.current)
           applyLetterSpacingOverride(doc, letterSpacingRef.current)
           ensureTTSHighlightStyle(doc)
@@ -652,6 +653,8 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     if (!ready) return
     fontSizeRef.current = fontSize
     try { renditionRef.current?.themes.fontSize(`${fontSize}px`) } catch { /* epubjs 時序問題，忽略 */ }
+    applyToCurrentDoc(doc => applyFontSizeOverride(doc, fontSize))
+    rerenderAnnotationPane()
     triggerScan()
   }, [fontSize, ready])
 

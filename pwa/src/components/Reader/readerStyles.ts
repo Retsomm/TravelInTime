@@ -11,11 +11,28 @@ export const injectStyle = (doc: Document, id: string, css: string) => {
   el.textContent = css
 }
 
+const MEDIA_TAGS = new Set(['img', 'svg', 'canvas', 'video', 'picture'])
+
 export const applyDarkOverride = (doc: Document, isDark: boolean) => {
   const bg = isDark ? '#1a1816' : '#f9f7f2'
   const color = isDark ? '#e5e7eb' : '#1c1917'
-  const colorRule = isDark ? `* { color: ${color} !important; }` : ''
-  injectStyle(doc, 'tit-dark', `html, body { background-color: ${bg} !important; } ${colorRule}`)
+  const mediaClear = `img, svg, canvas, video, picture { background-color: transparent !important; }`
+  injectStyle(doc, 'tit-dark', [
+    `html, body { background-color: ${bg} !important; color: ${color} !important; }`,
+    `* { color: ${color} !important; background-color: ${bg} !important; }`,
+    mediaClear,
+  ].join(' '))
+  // 強制覆寫 inline !important styles（CSS 注入無法蓋過書本元素的 inline !important）
+  doc.querySelectorAll('body, body *').forEach(el => {
+    try {
+      const style = (el as HTMLElement).style
+      if (!style) return
+      if (!MEDIA_TAGS.has((el as HTMLElement).tagName?.toLowerCase())) {
+        style.setProperty('background-color', bg, 'important')
+      }
+      style.setProperty('color', color, 'important')
+    } catch { /* SVG / MathML 等特殊元素略過 */ }
+  })
 }
 
 const WEB_FONT_URLS: Record<string, string> = {
@@ -56,4 +73,19 @@ export const applyLineHeightOverride = (doc: Document, lh: number) => {
 
 export const applyLetterSpacingOverride = (doc: Document, ls: number) => {
   injectStyle(doc, 'tit-ls', `* { letter-spacing: ${ls}em !important; }`)
+}
+
+const setInlineFontSize = (doc: Document, size: number) => {
+  doc.querySelectorAll('body, body *').forEach(el => {
+    try {
+      const style = (el as HTMLElement).style
+      if (style) style.setProperty('font-size', `${size}px`, 'important')
+    } catch { /* SVG / MathML 等特殊元素略過 */ }
+  })
+}
+
+export const applyFontSizeOverride = (doc: Document, size: number) => {
+  injectStyle(doc, 'tit-fs', `* { font-size: ${size}px !important; }`)
+  setInlineFontSize(doc, size)
+  setTimeout(() => setInlineFontSize(doc, size), 150)
 }
