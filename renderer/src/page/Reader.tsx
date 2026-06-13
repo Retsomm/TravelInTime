@@ -727,6 +727,28 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     triggerScan()
   }, [letterSpacing, ready])
 
+  // 設定面板開關時重新計算 epub 寬高（桌面版 settings panel 是 flex 側欄，會縮窄 viewer）
+  useEffect(() => {
+    if (!ready) return
+    const rendition = renditionRef.current
+    const viewer = viewerRef.current
+    if (!rendition || !viewer) return
+    const t = setTimeout(() => {
+      const newWidth = viewer.clientWidth
+      const newHeight = viewer.clientHeight
+      if (newWidth <= 0 || newHeight <= 0) return
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const curWidth = (rendition as any).settings?.width
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const curHeight = (rendition as any).settings?.height
+      if (Math.abs(curWidth - newWidth) > 2 || Math.abs(curHeight - newHeight) > 2) {
+        try { rendition.resize(newWidth, newHeight) } catch { /* ignore */ }
+        triggerScan()
+      }
+    }, 80)
+    return () => clearTimeout(t)
+  }, [activePanel, ready, triggerScan])
+
   // 深色模式（獨立，不影響其他設定）
   useEffect(() => {
     if (!ready) return

@@ -178,6 +178,18 @@ export const createRangeFromTextOffset = (doc: Document, start: number, length =
 
 
 export const paintTTSHighlightOverlay = (doc: Document, range: Range) => {
+  // 優先使用 CSS Highlight API：完全不修改 iframe DOM，避免觸發 epub.js 的 ResizeObserver
+  // （epub.js 監聽 iframe 的 documentElement ResizeObserver，DOM 修改會導致正回饋迴圈使 epub-view 暴增）
+  const win = doc.defaultView as (Window & typeof globalThis & { Highlight?: new (...ranges: Range[]) => unknown }) | null
+  if (win?.CSS?.highlights !== undefined && typeof win.Highlight === 'function') {
+    try {
+      const highlight = new win.Highlight(range)
+      ;(win.CSS.highlights as unknown as Map<string, unknown>).set(TTS_HIGHLIGHT_ID, highlight)
+      return true
+    } catch { /* 降級 */ }
+  }
+
+  // 降級：DOM overlay（CSS Highlight API 不支援時才使用）
   const body = doc.body
   if (!body) return false
 
@@ -191,7 +203,7 @@ export const paintTTSHighlightOverlay = (doc: Document, range: Range) => {
       pointerEvents: 'none',
       zIndex: '2147483647',
       overflow: 'hidden',
-      contain: 'layout style paint',
+      contain: 'layout style paint size',
     })
     body.appendChild(overlay)
   }

@@ -43,6 +43,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
   const currentChapterPageRef = useRef<number>(1) // 當前章節內頁碼，供掃描完成後重算 page
   const bookRecordRef = useRef(bookRecord)
   useEffect(() => { bookRecordRef.current = bookRecord }, [bookRecord])
+  const bookBufferRef = useRef<ArrayBuffer | null>(null) // 儲存書本原始 buffer，供掃描用獨立 ePub 實例使用
   const scanAbortRef = useRef<{ aborted: boolean }>({ aborted: false })
   const scanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingAnnotationCfiRef = useRef<string | null>(null)
@@ -119,6 +120,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
   useEffect(() => { stopRef.current = stop }, [stop])
   useEffect(() => { ttsActiveRef.current = playing || ttsPaused }, [playing, ttsPaused])
 
+
   useEffect(() => {
     if (!pageInfo || pageInfo.total <= 0) return
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -159,7 +161,8 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
   const scanAllChapterPages = useCallback(async () => {
     const book = bookRef.current
     const viewer = viewerRef.current
-    if (!book || !viewer) return
+    const buffer = bookBufferRef.current
+    if (!book || !viewer || !buffer) return
     if (ttsActiveRef.current) return
 
     scanAbortRef.current.aborted = true
@@ -180,8 +183,12 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     })
     document.body.appendChild(hiddenEl)
 
+    // 建立完全獨立的 ePub 實例進行掃描，避免與主渲染器共享 book.spine.hooks 等狀態
+    // （epub.js 的 book.renderTo 會覆寫 book.rendition，且 spine.hooks.content 為共享，
+    //   使用同一 book 的第二個 rendition 會導致 hooks 互相觸發，進而讓主渲染器內容消失）
+    const scanBook = ePub(buffer.slice(0))
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const hiddenRendition = (book as any).renderTo(hiddenEl, {
+    const hiddenRendition = (scanBook as any).renderTo(hiddenEl, {
       width, height, spread: 'none', flow: 'paginated', allowScriptedContent: true,
     })
 
@@ -263,18 +270,8 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
       }
     } finally {
       hiddenEl.remove()
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const annCountBefore = Object.keys((renditionRef.current?.annotations as any)?._annotations ?? {}).length
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      try { (hiddenRendition as any).destroy() } catch { /* ignore */ }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const annCountAfter = Object.keys((renditionRef.current?.annotations as any)?._annotations ?? {}).length
-      // 若 hiddenRendition.destroy() 清除了主渲染器的 annotation registry，從 store 重新注入
-      if (!token.aborted && renditionRef.current && annCountAfter < annCountBefore && addEpubAnnotationRef.current) {
-        const rend = renditionRef.current
-        const storeAnns = useAnnotationStore.getState().annotations
-        storeAnns.forEach(ann => addEpubAnnotationRef.current!(rend, ann))
-      }
+      // scanBook 是完全獨立的 ePub 實例，destroy() 不影響主渲染器
+      try { (scanBook as any).destroy() } catch { /* ignore */ }
     }
   }, [])
 
@@ -438,6 +435,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
       .then((buffer) => {
         if (destroyed) return
 
+        bookBufferRef.current = buffer
         const book = ePub(buffer)
         bookRef.current = book
 
@@ -450,7 +448,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
         })
         renditionRef.current = rendition
 
-        // epub.js bug 修補：Rendition.injectIdentifier 在 book.destroy() 後 this.book 會變成
+// epub.js bug 修補：Rendition.injectIdentifier 在 book.destroy() 後 this.book 會變成
         // undefined，若此時仍有非同步 section content hook 在觸發就會 crash。
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         patchRenditionPrototype(Object.getPrototypeOf(rendition) as any)
@@ -915,6 +913,30 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     rerenderAnnotationPane()
     triggerScan()
   }, [letterSpacing, ready])
+
+  // 設定面板開關時重新計算 epub 寬高（桌面版 settings panel 是 flex 側欄，會縮窄 viewer）
+  useEffect(() => {
+    if (!ready) return
+    const rendition = renditionRef.current
+    const viewer = viewerRef.current
+    if (!rendition || !viewer) return
+    // 延遲讓 React layout 更新完成
+    const t = setTimeout(() => {
+      const newWidth = viewer.clientWidth
+      const newHeight = viewer.clientHeight
+      if (newWidth <= 0 || newHeight <= 0) return
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const curWidth = (rendition as any).settings?.width
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const curHeight = (rendition as any).settings?.height
+      if (Math.abs(curWidth - newWidth) > 2 || Math.abs(curHeight - newHeight) > 2) {
+        console.log('[Reader] activePanel 變更，重設 rendition 尺寸', { curWidth, curHeight, newWidth, newHeight })
+        try { rendition.resize(newWidth, newHeight) } catch { /* ignore */ }
+        triggerScan()
+      }
+    }, 80)
+    return () => clearTimeout(t)
+  }, [activePanel, ready, triggerScan])
 
   // 深色模式（獨立，不影響其他設定）
   useEffect(() => {
@@ -1905,7 +1927,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
         onToggleBookmarkList={() => togglePanel('bookmarks')}
         onApplyLatestVersion={onApplyLatestVersion}
       />
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden relative">
         <div
           className="flex-1 relative overflow-hidden"
           onTouchStart={(e) => { swipeStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY } }}
@@ -2026,34 +2048,40 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
         </div>
 
         {activePanel === 'settings' && (
-          <SettingsPanel
-            darkMode={darkMode}
-            fontSize={fontSize}
-            onFontSizeChange={setFontSize}
-            fontFamily={fontFamily}
-            onFontChange={setFontFamily}
-            script={script}
-            onScriptToggle={handleScriptToggle}
-            readingDirection={readingDirection}
-            onReadingDirectionChange={setReadingDirection}
-            ttsPlaying={playing}
-            ttsPaused={ttsPaused}
-            onTTSPlay={handleTTSPlay}
-            onTTSPause={handleTTSPause}
-            onTTSReset={handleTTSReset}
-            ttsVoices={voices}
-            ttsSelectedVoice={selectedVoice}
-            onTTSVoiceChange={setSelectedVoice}
-            ttsRate={rate}
-            onTTSRateChange={setRate}
-            ttsSleepMinutes={sleepMinutes}
-            onTTSSleepChange={handleSleepChange}
-            ttsSleepRemaining={sleepRemaining}
-            lineHeight={lineHeight}
-            onLineHeightChange={setLineHeight}
-            letterSpacing={letterSpacing}
-            onLetterSpacingChange={setLetterSpacing}
-          />
+          /* 手機版：absolute 覆層，不佔 flex 空間，epub 容器寬度不受影響；桌面版：正常 flex 側欄 */
+          <div
+            className="absolute inset-0 z-40 overflow-hidden md:relative md:inset-auto md:z-auto"
+            style={{ background: darkMode ? '#1a1816' : '#f9f7f2' }}
+          >
+            <SettingsPanel
+              darkMode={darkMode}
+              fontSize={fontSize}
+              onFontSizeChange={setFontSize}
+              fontFamily={fontFamily}
+              onFontChange={setFontFamily}
+              script={script}
+              onScriptToggle={handleScriptToggle}
+              readingDirection={readingDirection}
+              onReadingDirectionChange={setReadingDirection}
+              ttsPlaying={playing}
+              ttsPaused={ttsPaused}
+              onTTSPlay={handleTTSPlay}
+              onTTSPause={handleTTSPause}
+              onTTSReset={handleTTSReset}
+              ttsVoices={voices}
+              ttsSelectedVoice={selectedVoice}
+              onTTSVoiceChange={setSelectedVoice}
+              ttsRate={rate}
+              onTTSRateChange={setRate}
+              ttsSleepMinutes={sleepMinutes}
+              onTTSSleepChange={handleSleepChange}
+              ttsSleepRemaining={sleepRemaining}
+              lineHeight={lineHeight}
+              onLineHeightChange={setLineHeight}
+              letterSpacing={letterSpacing}
+              onLetterSpacingChange={setLetterSpacing}
+            />
+          </div>
         )}
         {activePanel === 'notes' && (
           <NotePanel
@@ -2152,7 +2180,8 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
           )
         })()}
         {activePanel === 'mobilepanel' && (
-          <div style={{ width: 260, flexShrink: 0, display: 'flex', flexDirection: 'column', borderLeft: `1px solid ${darkMode ? '#3a3430' : '#e4ddd0'}`, background: darkMode ? '#1a1816' : '#f9f7f2', overflow: 'hidden' }}>
+          /* absolute 覆層：不佔 flex 空間，epub 容器寬度不受影響 */
+          <div className="absolute inset-0 z-40 overflow-hidden" style={{ display: 'flex', flexDirection: 'column', background: darkMode ? '#1a1816' : '#f9f7f2' }}>
             {/* Tab 切換列 */}
             <div style={{ display: 'flex', flexShrink: 0, borderBottom: `1px solid ${darkMode ? '#3a3430' : '#e4ddd0'}` }}>
               {([
