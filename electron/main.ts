@@ -65,7 +65,7 @@ ipcMain.handle('get-app-version', () => app.getVersion())
 
 app.whenReady().then(() => {
   if (process.platform === 'darwin') {
-    app.dock.setIcon(iconPath)
+    app.dock?.setIcon(iconPath)
   }
   createWindow()
   app.on('activate', () => {
