@@ -16,7 +16,7 @@ import {
 } from '../../lib/library';
 import { READER_HTML } from '../../lib/readerHtml.generated';
 import type { OutboundMessage } from '../../lib/readerMessages';
-import { INK3_COLOR, INK_COLOR, PAPER_BG } from '../../lib/theme';
+import { useTheme } from '../../lib/theme';
 
 const GRID_GAP = 16;
 const H_PADDING = 16;
@@ -25,6 +25,7 @@ const COLUMNS = 2;
 const META_EXTRACT_TIMEOUT_MS = 10_000;
 
 const LibraryScreen = () => {
+  const { colors } = useTheme();
   const { width: windowWidth } = useWindowDimensions();
   const cardWidth = (windowWidth - H_PADDING * 2 - GRID_GAP * (COLUMNS - 1)) / COLUMNS;
   const [books, setBooks] = useState<BookRecord[]>([]);
@@ -185,10 +186,10 @@ const LibraryScreen = () => {
   }, [books, sort]);
 
   return (
-    <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: PAPER_BG }}>
+    <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: colors.paperBg }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', height: 44, paddingHorizontal: 16 }}>
-        <Text style={{ fontSize: 20, fontWeight: '600', color: INK_COLOR }}>
-          書櫃 <Text style={{ fontSize: 13, fontWeight: '400', color: INK3_COLOR }}>{books.length} 本</Text>
+        <Text style={{ fontSize: 20, fontWeight: '600', color: colors.ink }}>
+          書櫃 <Text style={{ fontSize: 13, fontWeight: '400', color: colors.ink3 }}>{books.length} 本</Text>
         </Text>
         <Pressable onPress={handleAddBook} hitSlop={12}>
           <Text style={{ fontSize: 16, color: '#2563eb' }}>+ 加入書籍</Text>
@@ -203,7 +204,7 @@ const LibraryScreen = () => {
 
       {!loading && books.length === 0 ? (
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-          <Text style={{ color: INK3_COLOR }}>尚未加入任何書籍</Text>
+          <Text style={{ color: colors.ink3 }}>尚未加入任何書籍</Text>
         </View>
       ) : (
         <FlatList

@@ -10,6 +10,61 @@ declare global {
 
 let book: Book | null = null;
 let rendition: Rendition | null = null;
+let darkMode = false;
+const contentDocs = new Set<Document>();
+
+// 比照 Electron 版 renderer/src/components/Reader/readerStyles.ts 的 applyDarkOverride：
+// CSS 注入蓋不過書本元素的 inline !important style，所以除了注入 <style> 還要逐一覆寫
+// 每個元素的 inline style（inline style 優先權比外部注入的 <style> 高）。
+const MEDIA_TAGS = new Set(['img', 'svg', 'canvas', 'video', 'picture']);
+
+const injectStyle = (doc: Document, id: string, css: string) => {
+  let el = doc.getElementById(id) as HTMLStyleElement | null;
+  if (!el) {
+    el = doc.createElement('style');
+    el.id = id;
+    doc.head?.appendChild(el);
+  }
+  el.textContent = css;
+};
+
+const applyDarkOverride = (doc: Document, isDark: boolean) => {
+  const bg = isDark ? '#1a1816' : '#f9f7f2';
+  const color = isDark ? '#e8e0d4' : '#2a2420';
+  injectStyle(
+    doc,
+    'tit-dark',
+    [
+      `html, body { background-color: ${bg} !important; color: ${color} !important; }`,
+      `* { color: ${color} !important; background-color: ${bg} !important; }`,
+      `img, svg, canvas, video, picture { background-color: transparent !important; }`,
+    ].join(' ')
+  );
+  doc.querySelectorAll('body, body *').forEach((el) => {
+    try {
+      const style = (el as HTMLElement).style;
+      if (!style) return;
+      if (!MEDIA_TAGS.has((el as HTMLElement).tagName?.toLowerCase())) {
+        style.setProperty('background-color', bg, 'important');
+      }
+      style.setProperty('color', color, 'important');
+    } catch {
+      /* SVG / MathML 等特殊元素略過 */
+    }
+  });
+};
+
+const applyDarkModeToOuterPage = (isDark: boolean) => {
+  const bg = isDark ? '#1a1816' : '#f9f7f2';
+  document.documentElement.style.backgroundColor = bg;
+  document.body.style.backgroundColor = bg;
+};
+
+const setDarkMode = (isDark: boolean) => {
+  darkMode = isDark;
+  applyDarkModeToOuterPage(isDark);
+  contentDocs.forEach((doc) => applyDarkOverride(doc, darkMode));
+};
 
 const post = (msg: OutboundMessage) => {
   window.ReactNativeWebView?.postMessage(JSON.stringify(msg));
@@ -140,6 +195,15 @@ const loadBook = async (base64: string, cfi: string | null) => {
       allowScriptedContent: true,
     });
 
+    // 每次章節內容渲染（換頁/換章節都會重新渲染 iframe 內容）時套用目前的深色模式狀態，
+    // 並記錄這份 document 供 setDarkMode 之後即時切換時重新套用（不必等下次換頁）。
+    rendition.hooks.content.register((contents: unknown) => {
+      const doc = (contents as { document: Document }).document;
+      if (!doc) return;
+      contentDocs.add(doc);
+      applyDarkOverride(doc, darkMode);
+    });
+
     rendition.on('relocated', (loc: unknown) => {
       unlockNavSoon();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -195,6 +259,7 @@ const handleMessage = (event: MessageEvent<string>) => {
   if (msg.type === 'prev') turnPage('prev');
   if (msg.type === 'next') turnPage('next');
   if (msg.type === 'extractMeta') extractMeta(msg.base64);
+  if (msg.type === 'setDarkMode') setDarkMode(msg.darkMode);
 };
 
 // RN WebView 在 Android 觸發 document 的 message 事件，iOS 觸發 window 的，兩者都要監聽

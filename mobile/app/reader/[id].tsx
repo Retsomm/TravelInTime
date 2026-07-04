@@ -1,5 +1,5 @@
 import { useLocalSearchParams, router } from 'expo-router';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Linking, Platform, Pressable, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
@@ -14,11 +14,14 @@ import {
 } from '../../lib/library';
 import { READER_HTML } from '../../lib/readerHtml.generated';
 import type { OutboundMessage } from '../../lib/readerMessages';
+import { useTheme } from '../../lib/theme';
 import { useFocusEffect } from 'expo-router';
 
 const ReaderScreen = () => {
+  const { darkMode, colors } = useTheme();
   const { id } = useLocalSearchParams<{ id: string }>();
   const webviewRef = useRef<WebView>(null);
+  const webviewReadyRef = useRef(false);
   const [record, setRecord] = useState<BookRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -58,6 +61,8 @@ const ReaderScreen = () => {
         return;
       }
       if (msg.type === 'ready') {
+        webviewReadyRef.current = true;
+        webviewRef.current?.postMessage(JSON.stringify({ type: 'setDarkMode', darkMode }));
         handleWebViewReady();
         return;
       }
@@ -77,8 +82,15 @@ const ReaderScreen = () => {
         console.log(`[reader-web debug][${Platform.OS}]`, msg.message);
       }
     },
-    [handleWebViewReady, id]
+    [handleWebViewReady, id, darkMode]
   );
+
+  // 深色模式切換時（例如使用者從設定頁切回閱讀頁），即時通知 WebView 內的 epub 內容套用新樣式，
+  // 不必等下一次換頁；WebView 尚未回報 ready 前先略過，ready 當下會用最新的 darkMode 補送一次。
+  useEffect(() => {
+    if (!webviewReadyRef.current) return;
+    webviewRef.current?.postMessage(JSON.stringify({ type: 'setDarkMode', darkMode }));
+  }, [darkMode]);
 
   const handleShouldStartLoadWithRequest = useCallback((request: { url: string }) => {
     const { url } = request;
@@ -99,7 +111,7 @@ const ReaderScreen = () => {
   };
 
   return (
-    <SafeAreaView edges={['top']} style={{ flex: 1 }}>
+    <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: colors.paperBg }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', height: 44, paddingHorizontal: 12 }}>
         <Pressable
           onPress={handleBack}
@@ -107,9 +119,9 @@ const ReaderScreen = () => {
           accessibilityRole="button"
           accessibilityLabel="返回書櫃"
         >
-          <Text style={{ fontSize: 24 }}>‹</Text>
+          <Text style={{ fontSize: 24, color: colors.ink }}>‹</Text>
         </Pressable>
-        <Text style={{ flex: 1, textAlign: 'center', fontSize: 16, marginRight: 24 }} numberOfLines={1}>
+        <Text style={{ flex: 1, textAlign: 'center', fontSize: 16, marginRight: 24, color: colors.ink }} numberOfLines={1}>
           {record?.title ?? '閱讀中'}
         </Text>
       </View>

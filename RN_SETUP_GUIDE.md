@@ -336,4 +336,21 @@ Monorepo 常見誤區：使用者回報「手機上」的問題，實際上可�
 - `book.spine` 的 TypeScript 型別定義（`node_modules/epubjs/types/spine.d.ts`）沒有列出 `length` 欄位（但執行期 `unpack()` 時確實有設定），只能用 `(book.spine as any).length` 繞過型別檢查。
 - **驗證狀態**：`tsc --noEmit`、`expo-doctor`（20/20）、`expo export --platform android` 皆通過。**尚未實機測試**：`book.locations.generate()` 對長篇小說可能要跑幾百毫秒到幾秒（視章節數與字數而定，這次沒有機會實測真實耗時），需要確認 (1) 這段背景運算會不會讓翻頁或介面卡頓、(2) 產生完成前後的百分比切換會不會讓進度條看起來跳動、(3) 大部頭 epub 是否會讓 `generate()` 耗時多到影響體驗（若真的太慢，可能要考慮改成第一次背景預先算好存起來，或用更粗的取樣粒度）。
 
+**第十輪：新增深色模式切換（對應重構任務第 6 項起點）**（2026-07-04）：
+- 新增 `mobile/lib/theme.ts` 的 `ThemeContext`/`useTheme()`（`createContext`+`useContext`），提供 `darkMode`/`toggleDarkMode`/`colors`；色票比照 `renderer/src/page/Library.tsx` 的 darkMode 色票，把 oklch 換成 RN 認得的 hex（`LIGHT_THEME`/`DARK_THEME`，欄位：`paperBg`/`paperBg2`/`borderColor`/`ink`/`ink3`/`progressTrack`/`progressFill`）。偏好值存 AsyncStorage（`settings:darkMode`），由新增的 `mobile/components/ThemeProvider.tsx`（含 `useEffect` 讀取＋`useState`）在 App 啟動時載入、`toggleDarkMode` 時寫回。
+- `mobile/app/_layout.tsx` 最外層包 `<ThemeProvider>`；`mobile/app/(tabs)/settings.tsx` 加上深色模式開關（自製 `Pressable` 假 Switch，非 RN 內建 `Switch` 元件，因為要讓滑塊顏色跟著 `colors.progressFill` 走，維持跟自繪 UI 一致的設計語言）。
+- 原本分散在 `lib/theme.ts`（`PAPER_BG`/`INK_COLOR`/`INK3_COLOR`/`BORDER_COLOR`，只有淺色一份、無 dark 對應）與 `lib/coverStyles.ts`（`PROGRESS_TRACK_COLOR`/`PROGRESS_FILL_COLOR`）的靜態色票常數已移除，改成畫面內 `const { colors } = useTheme()` 動態取色：`(tabs)/index.tsx`（書櫃頁背景/文字）、`(tabs)/_layout.tsx`（Tab bar 背景/選中色）、`components/SortControl.tsx`、`components/BookCard.tsx`（書名/作者/進度條文字與底色）、`app/reader/[id].tsx`（頂部返回列背景/文字）都已改用。書封無封面時的色卡（`coverStyleFor`，六組固定色）**沒有**跟著 darkMode 變化，這是刻意的（比照網頁版同一份色卡不分深淺色模式，卡片本身就是繽紛色塊）。
+- **尚未做**（下一步）：WebView 內的 epub 內容（`reader-web/index.ts` 渲染的書本文字/背景）目前完全不受深色模式影響，只有 RN 原生 UI（書櫃、設定、閱讀頁頂部列）套用了主題色——這對應「後續重構任務」第 6 項還沒完成的部分，需要仿照 Electron 版 `Reader.tsx` 的 `applyDarkOverride(doc, darkMode)`，在 `reader-web/index.ts` 新增接收 darkMode 狀態的訊息類型，注入/切換 iframe 內文件的深色樣式。
+- **驗證狀態**：`tsc --noEmit`、`expo export --platform android` 皆通過，純打包/型別驗證。**完全尚未實機/模擬器測試**：設定頁開關點擊後是否真的即時套用到書櫃/閱讀頁 UI、重開 App 後偏好是否有正確持久化、開關本身的觸控命中與視覺呈現，都需要你在模擬器上實測確認。
+
+**第十一輪：深色模式套用進 WebView 內的 epub 內容**（2026-07-04，使用者實測回報「深色模式切了，書本內文還是白底黑字」後）：
+- 上一輪只把主題色套進 RN 原生 UI（書櫃/設定/閱讀頁頂部列），epub.js 渲染在 WebView 內的書本內文完全沒接上，正是這次回報的現象。
+- 做法照抄 Electron 版 `renderer/src/components/Reader/readerStyles.ts` 的 `applyDarkOverride`：CSS 注入蓋不過書本內容元素的 inline `!important` style，所以除了注入一個 `<style id="tit-dark">` 外，還要逐一 `querySelectorAll('body, body *')` 覆寫每個元素的 inline style（`img`/`svg`/`canvas`/`video`/`picture` 這幾種媒體標籤只清背景色、不覆寫文字色）。這段邏輯搬進 `mobile/reader-web/index.ts`（`applyDarkOverride`/`injectStyle`/`setDarkMode`/`applyDarkModeToOuterPage`），因為 RN 端沒有 DOM，這段一定要在 WebView 這個有 DOM 的環境跑。
+- `rendition.hooks.content.register(...)` 掛上一個 hook：epub.js 每次渲染新的一頁/章節內容（都是重新產生一份 iframe document）都會觸發，把該次的 `contents.document` 存進 `contentDocs`（一個 `Set<Document>`）並套用目前的 `darkMode` 狀態；`setDarkMode()` 被呼叫時則對 `contentDocs` 內所有已記錄過的 document 全部重新套用一次——這樣「切換深色模式當下」不必等使用者翻頁，馬上就對目前這頁生效，之後翻到的新頁面也會因為 hook 而套用同一個 `darkMode` 值。
+- WebView 外層（非 epub 內容 iframe 的最外層 HTML/`#container`）背景色也要跟著切換，否則翻頁動畫或頁面邊緣會露出寫死在 `build-reader-html.js` 內 `<style>` 的淺色背景；`applyDarkModeToOuterPage()` 直接改 `document.documentElement.style.backgroundColor`/`document.body.style.backgroundColor`。
+- `mobile/lib/readerMessages.ts` 新增 inbound 訊息型別 `{ type: 'setDarkMode'; darkMode: boolean }`。
+- RN 端（`mobile/app/reader/[id].tsx`）：從 `useTheme()` 多取出 `darkMode`；WebView 回報 `ready` 時立即 `postMessage({ type: 'setDarkMode', darkMode })`（在呼叫 `handleWebViewReady()` 載入書籍之前送出，讓後續每次渲染的內容從第一頁開始就是正確色調）；另外加一個 `useEffect` 監聽 `darkMode` 變化，只要 WebView 已經 ready（`webviewReadyRef`）就即時補送同一則訊息——涵蓋「使用者在閱讀頁面開著的情況下跑去設定頁切換深色模式，再切回閱讀頁」這個情境。
+- **已知限制**：WebView 首次載入的極短暫瞬間，會先看到 `build-reader-html.js` 內寫死的淺色背景（`#f9f7f2`），等 JS 執行完 `ready`→收到 `setDarkMode` 訊息後才會轉成深色，深色模式下可能有一閃而過的白底閃爍；這次沒有處理這個小瑕疵（若要修，可以在 build-reader-html.js 用 query string 或某種方式讓 WebView 建立當下就知道 darkMode 初始值，但目前 `source={{ html: READER_HTML }}` 是靜態字串，要做到這件事需要額外改動，先不做）。
+- **驗證狀態**：`tsc --noEmit`、`yarn build:reader`、`expo export --platform android`、`expo export --platform ios` 皆通過，純打包/型別驗證。**完全尚未實機/模擬器測試**：切換深色模式後書本內文背景/文字顏色是否正確變化、翻頁後新頁面是否維持正確色調、閱讀頁開著時從設定頁切換是否即時生效、上述提到的短暫白底閃爍實際觀感如何，都需要你在 iOS/Android 模擬器重新測試「+ 加入書籍」後開書、翻頁、來回切換深色模式確認。
+
 **Why 記錄這段**：mobile/ 的建置細節分散在多次對話中，若不集中記錄，下次對話容易重複「已經做過的初始化」或忘記 epub.js 在 RN 上不能直接用這個關鍵限制。

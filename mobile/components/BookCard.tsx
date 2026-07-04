@@ -1,6 +1,7 @@
 import { Image, Pressable, Text, View } from 'react-native';
 import type { BookRecord } from '../lib/library';
-import { coverStyleFor, PROGRESS_FILL_COLOR, PROGRESS_TRACK_COLOR } from '../lib/coverStyles';
+import { coverStyleFor } from '../lib/coverStyles';
+import { useTheme } from '../lib/theme';
 
 interface Props {
   record: BookRecord;
@@ -13,6 +14,7 @@ interface Props {
 // 產生的欄寬去算，若 numColumns 沒套用成功（例如 Fast Refresh 沒有完整重新掛載），
 // flex:1 會讓卡片撐滿整列寬度變得超大；改成呼叫端算好固定寬度傳進來，就不會受這個影響。
 const BookCard = ({ record, width, onPress, onDelete }: Props) => {
+  const { colors } = useTheme();
   const pct = Math.round((record.progress ?? 0) * 100);
   const style = coverStyleFor(record.id);
   const coverHeight = Math.round(width * 1.5);
@@ -80,19 +82,19 @@ const BookCard = ({ record, width, onPress, onDelete }: Props) => {
       </Pressable>
 
       <View style={{ marginTop: 8 }}>
-        <Text numberOfLines={2} style={{ fontSize: 13, fontWeight: '500', color: '#2a2420', lineHeight: 17 }}>
+        <Text numberOfLines={2} style={{ fontSize: 13, fontWeight: '500', color: colors.ink, lineHeight: 17 }}>
           {record.title}
         </Text>
         {record.author ? (
-          <Text numberOfLines={1} style={{ fontSize: 11, color: '#9a8f80', marginTop: 3 }}>
+          <Text numberOfLines={1} style={{ fontSize: 11, color: colors.ink3, marginTop: 3 }}>
             {record.author}
           </Text>
         ) : null}
         <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6, gap: 6 }}>
-          <View style={{ flex: 1, height: 4, borderRadius: 2, backgroundColor: PROGRESS_TRACK_COLOR, overflow: 'hidden' }}>
-            <View style={{ width: `${pct}%`, height: '100%', backgroundColor: PROGRESS_FILL_COLOR }} />
+          <View style={{ flex: 1, height: 4, borderRadius: 2, backgroundColor: colors.progressTrack, overflow: 'hidden' }}>
+            <View style={{ width: `${pct}%`, height: '100%', backgroundColor: colors.progressFill }} />
           </View>
-          <Text style={{ fontSize: 10, color: '#9a8f80' }}>{pct === 100 ? '讀畢' : `${pct}%`}</Text>
+          <Text style={{ fontSize: 10, color: colors.ink3 }}>{pct === 100 ? '讀畢' : `${pct}%`}</Text>
         </View>
       </View>
     </View>

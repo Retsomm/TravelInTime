@@ -2,7 +2,8 @@ export type InboundMessage =
   | { type: 'load'; base64: string; cfi: string | null }
   | { type: 'prev' }
   | { type: 'next' }
-  | { type: 'extractMeta'; base64: string };
+  | { type: 'extractMeta'; base64: string }
+  | { type: 'setDarkMode'; darkMode: boolean };
 
 export type OutboundMessage =
   | { type: 'ready' }
