@@ -9,6 +9,7 @@ export interface BookRecord {
   addedAt: number;
   lastOpenedAt: number;
   progress?: number;
+  coverUri?: string;
 }
 
 export interface Bookmark {
@@ -33,8 +34,33 @@ const settingsKey = (id: string) => `tit:settings:${id}`;
 const bookmarksKey = (id: string) => `tit:bookmarks:${id}`;
 
 const booksDir = () => new Directory(Paths.document, 'books');
+const coversDir = () => new Directory(Paths.document, 'covers');
 
 const generateId = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+
+const coverExtension = (mediaType: string | null): string => {
+  if (mediaType?.includes('png')) return 'png';
+  if (mediaType?.includes('gif')) return 'gif';
+  if (mediaType?.includes('webp')) return 'webp';
+  return 'jpg';
+};
+
+const base64ToBytes = (base64: string): Uint8Array => {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  const clean = base64.replace(/[^A-Za-z0-9+/]/g, '');
+  const bytes = new Uint8Array(Math.floor((clean.length * 3) / 4));
+  let byteIndex = 0;
+  for (let i = 0; i < clean.length; i += 4) {
+    const e1 = chars.indexOf(clean[i]);
+    const e2 = chars.indexOf(clean[i + 1]);
+    const e3 = chars.indexOf(clean[i + 2]);
+    const e4 = chars.indexOf(clean[i + 3]);
+    bytes[byteIndex++] = (e1 << 2) | (e2 >> 4);
+    if (e3 !== -1) bytes[byteIndex++] = ((e2 & 15) << 4) | (e3 >> 2);
+    if (e4 !== -1) bytes[byteIndex++] = ((e3 & 3) << 6) | e4;
+  }
+  return bytes.slice(0, byteIndex);
+};
 
 const loadMeta = async (): Promise<BookRecord[]> => {
   try {
@@ -101,10 +127,34 @@ export const removeBook = (id: string) =>
     if (record) {
       const file = new File(booksDir(), record.filename);
       if (file.exists) file.delete();
+      if (record.coverUri) {
+        const cover = new File(record.coverUri);
+        if (cover.exists) cover.delete();
+      }
     }
     AsyncStorage.multiRemove([progressKey(id), settingsKey(id), bookmarksKey(id)]);
     return [records.filter((r) => r.id !== id), undefined];
   });
+
+export const updateBookMeta = (
+  id: string,
+  patch: Partial<Pick<BookRecord, 'title' | 'author' | 'coverUri'>>
+) =>
+  updateMeta((records) => [
+    records.map((r) => (r.id === id ? { ...r, ...patch } : r)),
+    undefined,
+  ]);
+
+// 封面圖檔存進沙盒目錄，AsyncStorage 只存檔案路徑（圖片轉 base64 存 AsyncStorage 太肥）。
+export const saveCoverImage = (id: string, base64: string, mediaType: string | null): string => {
+  const dir = coversDir();
+  if (!dir.exists) dir.create({ intermediates: true });
+  const file = new File(dir, `${id}.${coverExtension(mediaType)}`);
+  if (file.exists) file.delete();
+  file.create();
+  file.write(base64ToBytes(base64));
+  return file.uri;
+};
 
 export const touchBook = (id: string) =>
   updateMeta((records) => [records.map((r) => (r.id === id ? { ...r, lastOpenedAt: Date.now() } : r)), undefined]);

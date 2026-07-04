@@ -79,6 +79,48 @@ const registerTapZone = (id: string, direction: 'prev' | 'next') => {
   });
 };
 
+const blobToBase64 = (blob: Blob): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve((reader.result as string).split(',')[1] ?? '');
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+
+// 書名/作者/封面擷取：跟閱讀渲染共用同一份 epub.js bundle，但不呼叫 renderTo()，
+// 純粹讀 book.package.metadata 與 book.coverUrl()，不需要 #viewer 實際顯示內容，
+// 因此可以直接借用 reader 頁面既有的 WebView（RN 端隱藏顯示）跑，不用另外打包一份 HTML。
+const extractMeta = async (base64: string) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const metaBook = ePub(base64ToArrayBuffer(base64)) as any;
+  try {
+    await metaBook.ready;
+    const pkg = metaBook.package?.metadata;
+    const title = (pkg?.title as string | undefined)?.trim() || '';
+    const author = (pkg?.creator as string | undefined)?.trim() || '';
+
+    let coverBase64: string | null = null;
+    let coverMediaType: string | null = null;
+    try {
+      const coverUrl: string | null = await metaBook.coverUrl();
+      if (coverUrl) {
+        const blob: Blob = await fetch(coverUrl).then((r) => r.blob());
+        coverMediaType = blob.type || null;
+        coverBase64 = await blobToBase64(blob);
+        URL.revokeObjectURL(coverUrl);
+      }
+    } catch {
+      /* 無封面，忽略 */
+    }
+
+    post({ type: 'metaExtracted', title, author, coverBase64, coverMediaType });
+  } catch (err) {
+    post({ type: 'metaError', message: err instanceof Error ? err.message : String(err) });
+  } finally {
+    metaBook.destroy();
+  }
+};
+
 const loadBook = async (base64: string, cfi: string | null) => {
   const viewer = document.getElementById('viewer');
   if (!viewer) return;
@@ -103,12 +145,26 @@ const loadBook = async (base64: string, cfi: string | null) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const l = loc as any;
       const displayed = l?.start?.displayed as { page: number; total: number } | undefined;
-      if (!l?.start?.cfi || !displayed) return;
+      if (!l?.start?.cfi || !displayed || !book) return;
+
+      // l.start.displayed 的 page/total 只是「目前這個章節（spine item）」內部的頁碼，
+      // 不是全書頁碼——書快翻到某一章結尾時 page 就會等於 total，導致每章結尾都會被
+      // RN 端誤判成「整本書讀完」而顯示 100%／讀畢。epub.js 要拿到準確的全書百分比，
+      // 需要先跑過 book.locations.generate()（見下方 loadBook 內呼叫），跑完之前
+      // l.start.percentage 會是 undefined，這裡用「章節索引 + 章內頁碼比例」概算一個
+      // 過渡值，locations 產生完成後之後的 relocated 事件就會換成精確值。
+      // epubjs 的 Spine 型別定義沒有列出 length（實際上 unpack() 時有設定這個欄位），只能用 any 存取。
+      const spineLength = (book.spine as any).length as number;
+      const total = typeof l.start.percentage === 'number'
+        ? l.start.percentage
+        : (l.start.index + (displayed.page - 1) / Math.max(displayed.total, 1)) / Math.max(spineLength, 1);
+
       post({
         type: 'relocated',
         cfi: l.start.cfi,
         page: displayed.page,
         total: displayed.total,
+        percentage: Math.max(0, Math.min(1, total)),
         atStart: Boolean(l.atStart),
         atEnd: Boolean(l.atEnd),
       });
@@ -116,6 +172,12 @@ const loadBook = async (base64: string, cfi: string | null) => {
 
     await book.ready;
     await rendition.display(cfi ?? undefined);
+    // 全書頁面定位索引，跑完後 relocated 事件的 l.start.percentage 才會是精確的全書百分比
+    // （不是章節內比例）。放在 display() 之後、不 await，避免拖慢開書速度；期間的
+    // relocated 事件會先用上面的章節索引概算值頂著。
+    book.locations.generate(1024).catch(() => {
+      /* 定位索引產生失敗不影響閱讀本身，忽略即可，頂多進度概算比較粗略 */
+    });
   } catch (err) {
     unlockNav();
     post({ type: 'error', message: err instanceof Error ? err.message : String(err) });
@@ -132,6 +194,7 @@ const handleMessage = (event: MessageEvent<string>) => {
   if (msg.type === 'load') loadBook(msg.base64, msg.cfi);
   if (msg.type === 'prev') turnPage('prev');
   if (msg.type === 'next') turnPage('next');
+  if (msg.type === 'extractMeta') extractMeta(msg.base64);
 };
 
 // RN WebView 在 Android 觸發 document 的 message 事件，iOS 觸發 window 的，兩者都要監聽
