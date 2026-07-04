@@ -1,4 +1,5 @@
 import { Pressable, Text, View } from 'react-native';
+import { BORDER_COLOR, INK_COLOR, INK3_COLOR, PAPER_BG, PAPER_BG2 } from '../lib/theme';
 
 export type SortKey = 'recent' | 'title' | 'progress';
 
@@ -7,12 +8,6 @@ const LABELS: Record<SortKey, string> = {
   title: '書名',
   progress: '進度',
 };
-
-const PAPER_BG = '#f9f7f2';
-const PAPER_BG2 = '#f1ede4';
-const BORDER_COLOR = '#e4ddd0';
-const INK_COLOR = '#2a2420';
-const INK3_COLOR = '#9a8f80';
 
 interface Props {
   sort: SortKey;

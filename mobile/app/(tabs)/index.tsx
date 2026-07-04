@@ -16,8 +16,8 @@ import {
 } from '../../lib/library';
 import { READER_HTML } from '../../lib/readerHtml.generated';
 import type { OutboundMessage } from '../../lib/readerMessages';
+import { INK3_COLOR, INK_COLOR, PAPER_BG } from '../../lib/theme';
 
-const PAPER_BG = '#f9f7f2';
 const GRID_GAP = 16;
 const H_PADDING = 16;
 const COLUMNS = 2;
@@ -32,6 +32,7 @@ const LibraryScreen = () => {
   const [sort, setSort] = useState<SortKey>('recent');
   const extractorRef = useRef<WebView>(null);
   const extractorReadyRef = useRef(false);
+  const addingRef = useRef(false);
   const pendingExtractionRef = useRef<{
     id: string;
     resolve: () => void;
@@ -126,7 +127,9 @@ const LibraryScreen = () => {
           }
         }
         if (Object.keys(patch).length > 0) {
-          updateBookMeta(pending.id, patch).then(refresh);
+          updateBookMeta(pending.id, patch)
+            .then(refresh)
+            .catch((err) => console.warn('[library] updateBookMeta failed', err));
         }
         pending.resolve();
       } else if (msg.type === 'metaError') {
@@ -138,6 +141,10 @@ const LibraryScreen = () => {
   );
 
   const handleAddBook = async () => {
+    // 擷取 metadata 的 WebView 一次只能處理一本書（pendingExtractionRef 是單一插槽），
+    // 擋掉在前一次還沒跑完前重疊觸發，避免兩本書的擷取結果互相覆蓋、寫錯 metadata。
+    if (addingRef.current) return;
+    addingRef.current = true;
     try {
       const record = await addBook();
       if (!record) return;
@@ -146,6 +153,8 @@ const LibraryScreen = () => {
       refresh();
     } catch {
       Alert.alert('加入書籍失敗', '請稍後再試一次');
+    } finally {
+      addingRef.current = false;
     }
   };
 
@@ -178,8 +187,8 @@ const LibraryScreen = () => {
   return (
     <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: PAPER_BG }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', height: 44, paddingHorizontal: 16 }}>
-        <Text style={{ fontSize: 20, fontWeight: '600', color: '#2a2420' }}>
-          書櫃 <Text style={{ fontSize: 13, fontWeight: '400', color: '#9a8f80' }}>{books.length} 本</Text>
+        <Text style={{ fontSize: 20, fontWeight: '600', color: INK_COLOR }}>
+          書櫃 <Text style={{ fontSize: 13, fontWeight: '400', color: INK3_COLOR }}>{books.length} 本</Text>
         </Text>
         <Pressable onPress={handleAddBook} hitSlop={12}>
           <Text style={{ fontSize: 16, color: '#2563eb' }}>+ 加入書籍</Text>
@@ -194,7 +203,7 @@ const LibraryScreen = () => {
 
       {!loading && books.length === 0 ? (
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-          <Text style={{ color: '#9a8f80' }}>尚未加入任何書籍</Text>
+          <Text style={{ color: INK3_COLOR }}>尚未加入任何書籍</Text>
         </View>
       ) : (
         <FlatList

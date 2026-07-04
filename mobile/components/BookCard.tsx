@@ -19,7 +19,12 @@ const BookCard = ({ record, width, onPress, onDelete }: Props) => {
 
   return (
     <View style={{ width }}>
-      <Pressable onPress={onPress} onLongPress={onDelete}>
+      <Pressable
+        onPress={onPress}
+        onLongPress={onDelete}
+        accessibilityRole="button"
+        accessibilityLabel={record.author ? `開啟《${record.title}》，作者 ${record.author}` : `開啟《${record.title}》`}
+      >
         <View
           style={{
             width,
