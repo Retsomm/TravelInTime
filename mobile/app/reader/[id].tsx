@@ -65,7 +65,7 @@ const ReaderScreen = () => {
         setLoading(false);
         if (!id) return;
         saveReadingCfi(id, msg.cfi);
-        if (msg.total > 0) updateProgress(id, msg.page / msg.total);
+        updateProgress(id, msg.percentage);
         return;
       }
       if (msg.type === 'error') {

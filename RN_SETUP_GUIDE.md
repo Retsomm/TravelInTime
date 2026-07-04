@@ -291,8 +291,8 @@ Monorepo 常見誤區：使用者回報「手機上」的問題，實際上可�
 
 1. ~~**epub 渲染方案選型與實作**~~ **MVP 已完成**（2026-07-03）：`react-native-webview` + `mobile/reader-web/index.ts`（自帶 epub.js，esbuild 打包成 `mobile/lib/readerHtml.generated.ts`），已接上 `mobile/lib/library.ts` 的 `getBookBase64`/`saveReadingCfi`/`loadReadingCfi`/`updateProgress`。**尚未做**：翻頁手勢滑動（目前只有 tap zone）、深色模式/字體設定套用進 WebView 內容、精確全書頁碼（目前用單章節 page/total 概算）。**尚未實機測試**，下一步優先做這個。
    - 已放棄的候選：`@epubjs-react-native/core`（npm 最後發布 2025-01，與 RN 0.86 相容性未知，風險較高）。
-2. ~~**書籍儲存與檔案存取**~~ **已完成**：`mobile/lib/library.ts`，見上方「已完成」清單。epub metadata（書名/作者/封面）擷取仍未做，先用檔名當書名。
-3. ~~**書櫃頁（`(tabs)/index.tsx`）實作**~~ **已完成基本版，加入書籍流程已在 iOS/Android 模擬器實測成功**：清單、加入、長按刪除、點擊進入 `reader/[id]`。**未做**：封面縮圖（因尚無 metadata 擷取）、格狀版面（目前是清單）；刪除書籍、進度顯示尚未逐一實測。
+2. ~~**書籍儲存與檔案存取**~~ **已完成**：`mobile/lib/library.ts`，見上方「已完成」清單。~~epub metadata（書名/作者/封面）擷取仍未做~~ **已完成**（2026-07-04，見上方「第四輪」段落），借用 WebView 內的 epub.js 擷取，**尚未實機/模擬器測試**。
+3. ~~**書櫃頁（`(tabs)/index.tsx`）實作**~~ **已完成基本版，加入書籍流程已在 iOS/Android 模擬器實測成功**：清單、加入、長按刪除、點擊進入 `reader/[id]`。~~未做：封面縮圖（因尚無 metadata 擷取）~~ **封面縮圖已實作**（2026-07-04，尚未實機測試）；格狀版面仍未做（目前是清單）；刪除書籍、進度顯示尚未逐一實測。
 4. ~~**閱讀頁（`reader/[id].tsx`）實作**~~ **MVP 已完成**（併入第 1 點）：接上 epub 渲染方案、tap 翻頁、閱讀進度回存。**下一步待驗證**：實機/模擬器實測 → 再補翻頁滑動手勢、閱讀設定（字體/深色）套用進 WebView 內容。
 5. **TTS 朗讀功能**：評估 `expo-speech`（朗讀）+ 需自行實作高亮同步邏輯（web 版原本綁定 epub.js 的 CFI，RN 需視渲染方案重新設計事件橋接）。
 6. **主題/深色模式**：比照 Electron 版 `darkMode` 狀態，搬到設定頁骨架，需決定用 RN 的 `useColorScheme` 自動跟隨系統，或維持手動切換 + 持久化（`AsyncStorage`）。
@@ -300,5 +300,40 @@ Monorepo 常見誤區：使用者回報「手機上」的問題，實際上可�
 8. **鍵盤處理**：若任一頁面（例如新增筆記表單）需要文字輸入，套用第 6 節的 iOS/Android 分開處理原則。
 9. **iOS 26 原生 header 問題**：目前 `reader/[id].tsx` 已預先採用自繪 header，其餘頁面若未來改用原生 header 且有返回按鈕，需留意第 7 節的白色圓形背景問題。
 10. **實機/模擬器測試**：待功能有基本可視內容後，盡早進行 `expo run:android`／`expo run:ios` 或 Dev Client 實機測試，不要等到功能全部做完才測（累積的整合風險會變大）。
+
+**第四輪：epub metadata（書名/作者/封面）擷取**（2026-07-04）：
+- 對應「後續重構任務」第 2 項的未完成部分。做法：不引入 `jszip`/`fast-xml-parser` 額外解析 epub 內部結構，而是借用既有的 `reader-web/index.ts`（已含 `epubjs`，在 WebView 這個真的有 DOM 的環境跑）新增一個 `extractMeta` 訊息類型：用 `ePub(buffer)` + `book.ready` 讀 `book.package.metadata`（title/creator）、`book.coverUrl()` 取封面 blob 轉 base64，不呼叫 `renderTo()`，跑完後 `metaBook.destroy()`。做法邏輯照抄自 `pwa/src/utils/epubMetadata.ts` 的既有實作。
+- `mobile/app/(tabs)/index.tsx`（書櫃頁）新增一個**隱藏的 `WebView`**（`opacity:0`、移到畫面外、`pointerEvents="none"`），載入同一份 `READER_HTML`，專門用來收發 `extractMeta`/`metaExtracted` 訊息，不會顯示在畫面上。`handleAddBook` 流程：`addBook()` 建立好暫時記錄（檔名當書名）→ 立即 `refresh()` 讓使用者先看到書已加入 → 再 `postMessage` 送出 base64 給隱藏 WebView 擷取 metadata → 收到 `metaExtracted` 後用 `updateBookMeta()` 補上正確書名/作者，封面圖用新增的 `saveCoverImage()`（`mobile/lib/library.ts`）解碼 base64 寫進沙盒 `covers/{id}.<ext>` 檔案（不是存 base64 進 AsyncStorage，避免肥資料），存檔案路徑到 `BookRecord.coverUri`。有 10 秒逾時保險（`META_EXTRACT_TIMEOUT_MS`），逾時或擷取失敗就維持檔名當書名、無封面，不會卡住加入書籍流程。
+- 書櫃列表（`(tabs)/index.tsx`）改成有封面縮圖（40x56，無封面時顯示書名字首當佔位）＋書名＋作者。
+- `mobile/lib/library.ts` 新增 `updateBookMeta`、`saveCoverImage`、`base64ToBytes`（純 JS base64 解碼，Hermes 沒有全域 `atob` 所以自己寫，不引入額外套件）；`removeBook` 同步刪除封面檔案。
+- `mobile/lib/readerMessages.ts` 新增 `extractMeta`（inbound）與 `metaExtracted`/`metaError`（outbound）訊息型別。
+- **驗證狀態**：`tsc --noEmit`、`expo-doctor`（20/20）、`expo export --platform android` 皆通過，純打包/型別驗證。**尚未實機/模擬器測試**：加入書籍後書名/作者是否正確擷取、封面圖是否正確顯示、逾時保護是否真的不會卡住 UI，都需要你在模擬器上重新測「+ 加入書籍」流程確認。另外沒有處理沒有封面圖的 epub（純文字小說常見）以外的例外格式，理論上會落回檔名當書名，但沒有實際 epub 樣本測過涵蓋率。
+
+**第五輪：書櫃改格狀版面 + 修一個可能吃掉書名/作者更新的 bug**（2026-07-04，使用者實測回報「封面沒顯示、看不到作者」後）：
+- 使用者提供的模擬器截圖顯示：透過新加入書籍流程加入的書，書名有出現但**作者、封面完全沒有**；同時要求書櫃版面比照網頁版（`renderer/src/page/Library.tsx` + `BookCard.tsx`）改成格狀卡片＋封面圖＋書名＋作者＋進度條，而非目前的單欄清單。
+- **檢查程式碼發現一個真正的邏輯漏洞**（尚未實機驗證是否為唯一根因，但邏輯上確實會導致「有封面的書連書名/作者都不更新」）：`mobile/app/(tabs)/index.tsx` 的 `handleExtractorMessage` 原本依序執行「組 patch → 若有封面就呼叫 `saveCoverImage()` 寫檔 → 呼叫 `updateBookMeta()` 存檔 → `pending.resolve()`」。如果 `saveCoverImage()`（同步的檔案寫入）丟出例外，整個函式會直接中斷，導致**書名/作者的 patch 也一起沒被存到**（因為 `updateBookMeta` 呼叫在它後面），而且 `pending.resolve()` 也不會執行，變成要等滿 10 秒逾時才會恢復——症狀會是「有封面圖的書，書名/作者都沒更新到；沒封面圖的書，書名/作者才會正常更新」，跟回報的現象（書名有出現、作者跟封面都沒有）大致吻合，但因為沒辦法在這個環境重現 `saveCoverImage()` 實際丟出的錯誤訊息，**不能 100% 確定這就是唯一根因**。
+  - 修正：把 `saveCoverImage()` 包進獨立的 `try/catch`，封面寫檔失敗只跳過封面欄位、不影響書名/作者的 patch 照常套用；並加上 `if (__DEV__)` 的 `console.log('[library] metaExtracted', ...)` / `console.warn('[library] saveCoverImage failed', ...)` 診斷 log，方便下次測試時直接看 Metro terminal 輸出，不用再用猜的。
+- **格狀版面重構**：新增 `mobile/lib/coverStyles.ts`（仿照 `renderer/src/components/Library/coverStyles.ts` 用 id 雜湊出固定色卡的邏輯，但把網頁版的 `oklch()` 色彩字串換成 RN 認得的 hex 值——**RN 的樣式引擎不支援 `oklch()`/`hsl()` 等 CSS 色彩函式，只能吃 hex/rgb/具名色**，這是這次順帶學到的限制）與 `mobile/components/BookCard.tsx`（2:3 封面比例、無封面時顯示色卡＋書名＋作者當佔位、封面下方書名兩行截斷＋作者＋細進度條）。`(tabs)/index.tsx` 的 `FlatList` 改成 `numColumns={2}` 搭配 `columnWrapperStyle`/`contentContainerStyle` 的 `gap`。
+- **驗證狀態**：`tsc --noEmit`、`expo-doctor`（20/20）、`expo export --platform android` 皆通過。**這輪修正完全沒有實機/模擬器驗證**：格狀版面的視覺排版、`saveCoverImage` 的 try/catch 是否真的解決了封面/作者遺失的問題，都需要你重新測「+ 加入書籍」並貼一下 Metro terminal 印出的 `[library] metaExtracted` 那行 log 內容（`hasCover` 是 true 還是 false、`author` 是不是空字串），才能確認是不是真的是這個 bug，還是另有其他原因（例如 `book.package.metadata` 對某些 epub 本來就沒有 creator 欄位、或 `coverUrl()` 在 WebView 環境真的抓不到）。
+
+**第六輪：iOS 書櫃卡片過大，改用固定像素尺寸取代 flex + aspectRatio**（2026-07-04）：
+- 加了 `key="library-grid-2col"` 後，使用者回報「重新 build 後 iOS 模擬器書本卡片還是超大（幾乎全螢幕），Android 正常」。原本 `BookCard` 用 `flex: 1` + `aspectRatio: 2/3` 讓卡片寬度交給 `FlatList` 的 `numColumns`/`columnWrapperStyle` 去分配欄寬——這個做法**依賴 `numColumns` 真的有生效**，一旦 iOS 那個 JS instance 因為 Fast Refresh 沒有完整重新掛載（`numColumns` 停留在預設值 1），`flex:1` 就會讓卡片撐滿整列（=撐滿整個螢幕寬度），乘上 `aspectRatio 2/3` 後高度也跟著爆炸，正是回報看到的症狀。
+- **改法**：不再依賴 FlatList 分配欄寬，改成呼叫端（`(tabs)/index.tsx`）用 `useWindowDimensions()` 自己算出固定的卡片寬度 `cardWidth = (windowWidth - H_PADDING*2 - GRID_GAP*(COLUMNS-1)) / COLUMNS`，往下傳給 `BookCard` 當 `width` prop；`BookCard`（`mobile/components/BookCard.tsx`）內部封面容器改用明確的 `width`/`height`（`height = width * 1.5` 算出 2:3 比例）取代 `flex:1`/`aspectRatio`。這樣即使未來又遇到 `numColumns` 因為某種重新整理時機沒套用成功，卡片也只會維持固定尺寸、最多是排列變成一整欄堆疊（仍然是正常大小），不會再出現撐滿全螢幕的爆版問題。
+- **驗證狀態**：`tsc --noEmit`、`expo-doctor`（20/20）、`expo export --platform ios` 皆通過。**尚未實機/模擬器驗證**這次改法是否真的解決 iOS 卡片過大的問題，請重新完整關閉重開 App（不要只等 Fast Refresh）後再測一次。
+- 封面圖持續無法顯示的問題（見上一輪）**仍未確認根因**，還在等使用者提供 Metro 的 `[library] metaExtracted` log 內容（`hasCover`/`author` 的值），懷疑是來源 epub（檔名含「Z-Library」字樣）本身 metadata 不完整、非標準的封面標記造成 `book.coverUrl()` 正常回傳 `null`，但未證實。
+
+**第七輪：封面擷取確認修好 + 加上右上角刪除按鈕**（2026-07-04）：
+- 使用者實測確認：**新加入的書籍封面成功顯示**。回頭看，真正根因應該是第六輪提到的「隱藏 WebView 用 1x1 近乎歸零尺寸，iOS WKWebView 對這種視圖可能整個不執行內容 JS」，改成 100x100（仍用 `opacity:0` 隱藏）後解決；「來源 epub metadata 不完整」的猜測是錯的，不用再往那個方向查。舊資料（改動前就已加入的書）沒有封面是預期行為，MVP 目前只在加入當下觸發一次擷取，沒有針對既有書籍補跑的機制（如果之後要補，可以在書櫃畫面對缺封面的書自動或手動觸發一次 `extractMetaFor`）。
+- 新增書櫃卡片右上角的圓形 ✕ 刪除按鈕（比照 `renderer/src/components/Library/BookCard.tsx` 的設計），取代原本「只能長按刪除」在手機上不夠明顯的問題；長按仍保留當備援手勢。`mobile/components/BookCard.tsx` 的 `onLongPress` prop 改名為 `onDelete`，外層容器從 `Pressable` 改成 `View`（內部兩個獨立的 `Pressable`：一個包住封面＋觸發開啟閱讀器，另一個是絕對定位在右上角、疊在封面上層的刪除按鈕，靠 JSX 中宣告順序讓刪除按鈕在觸控命中判定上位於上層）。
+- **驗證狀態**：`tsc --noEmit`、`expo-doctor`（20/20）、`expo export --platform android` 皆通過。**刪除按鈕本身尚未實機測試**：需要確認點擊右上角 ✕ 是否正確觸發刪除確認框、且不會誤觸到底下的「開啟閱讀器」（兩個 Pressable 疊在一起的觸控命中判定，理論上 RN 會讓後宣告、疊在上層的那個接住觸控，但沒有實機驗證過）。
+
+**第八輪：書櫃排序控制項**（2026-07-04）：新增 `mobile/components/SortControl.tsx`，比照 `renderer/src/components/Library/SortControl.tsx` 的分段控制項設計（灰底圓角容器＋選中項目白底＋文字色深淺區分），提供「最近閱讀／書名／進度」三種排序，狀態放在 `(tabs)/index.tsx` 的 `sort` state，用 `useMemo` 排序後的 `shown` 陣列餵給 `FlatList`（`recent` 用 `lastOpenedAt` 遞減、`title` 用 `localeCompare('zh-Hant')`、`progress` 用 `progress` 遞減，邏輯照抄網頁版 `Library.tsx` 的 `shown` 計算）。`tsc`、`expo-doctor`、`expo export` 皆通過，**尚未實機測試**三種排序切換後的實際排序結果與畫面更新是否正確。
+
+**第九輪：修正進度百分比誤判「讀畢」**（2026-07-04，使用者回報 Android 書還沒看完就顯示「讀畢」後）：
+- **根因**：`reader-web/index.ts` 原本用 epub.js `relocated` 事件的 `l.start.displayed.page/total` 算進度，但這兩個數字**只是目前這一章（spine item）內部的頁碼**，不是全書頁碼。書翻到任何一章的結尾時 `page` 就會等於 `total`，於是每一章結尾都會被 RN 端誤判成「這本書讀完了」存成 100%，畫面就顯示「讀畢」——這是文件裡本來就記錄過的已知限制（第一輪「未做」清單提過「不是精確全書頁碼」），這次終於補上。
+- **修法**：改用 epub.js 內建的 `book.locations`：在 `rendition.display()` 之後（不 `await`，避免拖慢開書速度）背景呼叫 `book.locations.generate(1024)`，跑完後 `relocated` 事件的 `l.start.percentage` 才會是精確的全書百分比（原理：`book.locations.percentageFromLocation` 在 locations 沒產生前永遠回傳 `undefined`／不存在，這也是先前完全沒被用到的原因）。在 `book.locations.generate()` 完成前的過渡期，改用「章節索引 + 章內頁碼比例」概算一個粗略值（`(spineIndex + (page-1)/total) / book.spine.length`）頂著，避免完全沒有進度顯示；locations 產生完成後之後的 `relocated` 事件就會自動換成精確值，不需要額外通知。
+- `mobile/lib/readerMessages.ts` 的 `relocated` 訊息新增 `percentage: number` 欄位；`mobile/app/reader/[id].tsx` 改用 `updateProgress(id, msg.percentage)` 取代原本的 `msg.page / msg.total`。
+- `book.spine` 的 TypeScript 型別定義（`node_modules/epubjs/types/spine.d.ts`）沒有列出 `length` 欄位（但執行期 `unpack()` 時確實有設定），只能用 `(book.spine as any).length` 繞過型別檢查。
+- **驗證狀態**：`tsc --noEmit`、`expo-doctor`（20/20）、`expo export --platform android` 皆通過。**尚未實機測試**：`book.locations.generate()` 對長篇小說可能要跑幾百毫秒到幾秒（視章節數與字數而定，這次沒有機會實測真實耗時），需要確認 (1) 這段背景運算會不會讓翻頁或介面卡頓、(2) 產生完成前後的百分比切換會不會讓進度條看起來跳動、(3) 大部頭 epub 是否會讓 `generate()` 耗時多到影響體驗（若真的太慢，可能要考慮改成第一次背景預先算好存起來，或用更粗的取樣粒度）。
 
 **Why 記錄這段**：mobile/ 的建置細節分散在多次對話中，若不集中記錄，下次對話容易重複「已經做過的初始化」或忘記 epub.js 在 RN 上不能直接用這個關鍵限制。
