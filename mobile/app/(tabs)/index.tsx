@@ -20,8 +20,12 @@ const LibraryScreen = () => {
   );
 
   const handleAddBook = async () => {
-    const record = await addBook();
-    if (record) refresh();
+    try {
+      const record = await addBook();
+      if (record) refresh();
+    } catch {
+      Alert.alert('加入書籍失敗', '請稍後再試一次');
+    }
   };
 
   const handleDeleteBook = (record: BookRecord) => {
@@ -31,8 +35,12 @@ const LibraryScreen = () => {
         text: '刪除',
         style: 'destructive',
         onPress: async () => {
-          await removeBook(record.id);
-          refresh();
+          try {
+            await removeBook(record.id);
+            refresh();
+          } catch {
+            Alert.alert('刪除失敗', '請稍後再試一次');
+          }
         },
       },
     ]);

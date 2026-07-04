@@ -31,7 +31,7 @@ repo-root/
 
 ---
 
-## 2. 核心版本與套件（截至 2026-07，SelfMap 使用版本）
+## 2. 核心版本與套件（截至 2026-07，SelfMap 使用版本 — 舊版參考，TravelInTime 本身的 mobile/ 實際基準見第 11 節，是 Expo SDK 57 / RN 0.86）
 
 ```json
 {
@@ -64,7 +64,7 @@ repo-root/
 cd repo-root
 npx create-expo-app@latest mobile --template blank-typescript
 cd mobile
-npx expo install expo-router expo-dev-client react-native-safe-area-context react-native-screens
+npx expo install expo-router expo-dev-client expo-constants expo-linking react-native-safe-area-context react-native-screens
 ```
 
 `app.json` 最少要設定：

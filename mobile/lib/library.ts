@@ -47,6 +47,22 @@ const loadMeta = async (): Promise<BookRecord[]> => {
 
 const saveMeta = (records: BookRecord[]) => AsyncStorage.setItem(META_KEY, JSON.stringify(records));
 
+let metaQueue = Promise.resolve();
+
+const updateMeta = <T>(fn: (records: BookRecord[]) => [BookRecord[], T]): Promise<T> => {
+  const result = metaQueue.then(async () => {
+    const records = await loadMeta();
+    const [next, value] = fn(records);
+    await saveMeta(next);
+    return value;
+  });
+  metaQueue = result.then(
+    () => undefined,
+    () => undefined
+  );
+  return result;
+};
+
 export const listBooks = (): Promise<BookRecord[]> => loadMeta();
 
 export const addBook = async (): Promise<BookRecord | null> => {
@@ -60,7 +76,7 @@ export const addBook = async (): Promise<BookRecord | null> => {
   const id = generateId();
   const filename = `${id}.epub`;
   const destination = new File(dir, filename);
-  picked.copy(destination);
+  await picked.copy(destination);
 
   const record: BookRecord = {
     id,
@@ -71,10 +87,7 @@ export const addBook = async (): Promise<BookRecord | null> => {
     lastOpenedAt: Date.now(),
   };
 
-  const records = await loadMeta();
-  const next = [record, ...records];
-  await saveMeta(next);
-  return record;
+  return updateMeta((records) => [[record, ...records], record]);
 };
 
 export const getBookFileUri = (record: BookRecord): string => new File(booksDir(), record.filename).uri;
@@ -82,26 +95,25 @@ export const getBookFileUri = (record: BookRecord): string => new File(booksDir(
 export const getBookBase64 = (record: BookRecord): Promise<string> =>
   new File(booksDir(), record.filename).base64();
 
-export const removeBook = async (id: string) => {
-  const records = await loadMeta();
-  const record = records.find((r) => r.id === id);
-  if (record) {
-    const file = new File(booksDir(), record.filename);
-    if (file.exists) file.delete();
-  }
-  await AsyncStorage.multiRemove([progressKey(id), settingsKey(id), bookmarksKey(id)]);
-  await saveMeta(records.filter((r) => r.id !== id));
-};
+export const removeBook = (id: string) =>
+  updateMeta((records) => {
+    const record = records.find((r) => r.id === id);
+    if (record) {
+      const file = new File(booksDir(), record.filename);
+      if (file.exists) file.delete();
+    }
+    AsyncStorage.multiRemove([progressKey(id), settingsKey(id), bookmarksKey(id)]);
+    return [records.filter((r) => r.id !== id), undefined];
+  });
 
-export const touchBook = async (id: string) => {
-  const records = await loadMeta();
-  await saveMeta(records.map((r) => (r.id === id ? { ...r, lastOpenedAt: Date.now() } : r)));
-};
+export const touchBook = (id: string) =>
+  updateMeta((records) => [records.map((r) => (r.id === id ? { ...r, lastOpenedAt: Date.now() } : r)), undefined]);
 
-export const updateProgress = async (id: string, pct: number) => {
-  const records = await loadMeta();
-  await saveMeta(records.map((r) => (r.id === id ? { ...r, progress: Math.max(0, Math.min(1, pct)) } : r)));
-};
+export const updateProgress = (id: string, pct: number) =>
+  updateMeta((records) => [
+    records.map((r) => (r.id === id ? { ...r, progress: Math.max(0, Math.min(1, pct)) } : r)),
+    undefined,
+  ]);
 
 export const saveReadingCfi = (id: string, cfi: string) => AsyncStorage.setItem(progressKey(id), cfi);
 

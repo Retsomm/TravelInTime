@@ -1,6 +1,6 @@
 import { useLocalSearchParams, router } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, Text, View } from 'react-native';
+import { ActivityIndicator, Linking, Platform, Pressable, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import {
@@ -13,13 +13,8 @@ import {
   updateProgress,
 } from '../../lib/library';
 import { READER_HTML } from '../../lib/readerHtml.generated';
+import type { OutboundMessage } from '../../lib/readerMessages';
 import { useFocusEffect } from 'expo-router';
-
-type OutboundMessage =
-  | { type: 'ready' }
-  | { type: 'relocated'; cfi: string; page: number; total: number; atStart: boolean; atEnd: boolean }
-  | { type: 'error'; message: string }
-  | { type: 'debug'; message: string };
 
 const ReaderScreen = () => {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -85,6 +80,16 @@ const ReaderScreen = () => {
     [handleWebViewReady, id]
   );
 
+  const handleShouldStartLoadWithRequest = useCallback((request: { url: string }) => {
+    const { url } = request;
+    if (url.startsWith('about:') || url.startsWith('data:') || url.startsWith('blob:')) return true;
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      Linking.openURL(url);
+      return false;
+    }
+    return true;
+  }, []);
+
   const handleBack = () => {
     if (router.canGoBack()) {
       router.back();
@@ -96,7 +101,12 @@ const ReaderScreen = () => {
   return (
     <SafeAreaView edges={['top']} style={{ flex: 1 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', height: 44, paddingHorizontal: 12 }}>
-        <Pressable onPress={handleBack} hitSlop={12}>
+        <Pressable
+          onPress={handleBack}
+          hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel="返回書櫃"
+        >
           <Text style={{ fontSize: 24 }}>‹</Text>
         </Pressable>
         <Text style={{ flex: 1, textAlign: 'center', fontSize: 16, marginRight: 24 }} numberOfLines={1}>
@@ -109,6 +119,7 @@ const ReaderScreen = () => {
           originWhitelist={['*']}
           source={{ html: READER_HTML }}
           onMessage={handleMessage}
+          onShouldStartLoadWithRequest={handleShouldStartLoadWithRequest}
           javaScriptEnabled
           webviewDebuggingEnabled={__DEV__}
           bounces={false}

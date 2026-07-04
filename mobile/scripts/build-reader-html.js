@@ -15,7 +15,7 @@ async function build() {
     minify: true,
   });
 
-  const bundleJs = result.outputFiles[0].text;
+  const bundleJs = result.outputFiles[0].text.replace(/<\/script/gi, '<\\/script');
 
   const html = `<!DOCTYPE html>
 <html>

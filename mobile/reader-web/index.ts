@@ -1,16 +1,6 @@
 import ePub from 'epubjs';
 import type { Book, Rendition } from 'epubjs';
-
-type InboundMessage =
-  | { type: 'load'; base64: string; cfi: string | null }
-  | { type: 'prev' }
-  | { type: 'next' };
-
-type OutboundMessage =
-  | { type: 'ready' }
-  | { type: 'relocated'; cfi: string; page: number; total: number; atStart: boolean; atEnd: boolean }
-  | { type: 'error'; message: string }
-  | { type: 'debug'; message: string };
+import type { InboundMessage, OutboundMessage } from '../lib/readerMessages';
 
 declare global {
   interface Window {
@@ -65,9 +55,9 @@ const turnPage = (direction: 'prev' | 'next') => {
   if (navBusy || !rendition) return;
   lockNav();
   const action = direction === 'prev' ? rendition.prev() : rendition.next();
-  Promise.resolve(action).catch(() => {
-    unlockNav();
-  });
+  Promise.resolve(action)
+    .then(() => unlockNavSoon())
+    .catch(() => unlockNav());
 };
 
 // 翻頁手勢：點擊畫面最外層（非 epub.js 內容 iframe）的左三分之一／右三分之一區塊翻頁，
