@@ -11,7 +11,9 @@ const ThemeProvider = ({ children }: { children: ReactNode }) => {
   const [darkMode, setDarkMode] = useState(false);
 
   useEffect(() => {
-    loadDarkModePreference().then(setDarkMode);
+    loadDarkModePreference().then(setDarkMode).catch(() => {
+      /* 讀取偏好失敗，維持預設淺色模式 */
+    });
   }, []);
 
   const toggleDarkMode = useCallback(() => {

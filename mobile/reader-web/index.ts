@@ -125,8 +125,19 @@ const applyTypographyToDoc = (doc: Document) => {
   applyScriptToDoc(doc);
 };
 
+// contentDocs 只在 rendition.hooks.content 觸發時新增，epub.js 目前版本的 view manager
+// 從不 emit MANAGERS.REMOVED，hooks.unloaded 永遠不會觸發，所以無法用官方的卸載事件清掉
+// 舊 iframe 的 document；改成每次套用樣式前順手清掉已經卸載的 iframe（doc.defaultView 會
+// 在 iframe 從 DOM 移除後變成 null）。
+const pruneStaleContentDocs = () => {
+  contentDocs.forEach((doc) => {
+    if (!doc.defaultView) contentDocs.delete(doc);
+  });
+};
+
 const setTypography = (next: TypographySettings) => {
   typography = next;
+  pruneStaleContentDocs();
   contentDocs.forEach((doc) => applyTypographyToDoc(doc));
 };
 
@@ -180,6 +191,7 @@ const applyDarkModeToOuterPage = (isDark: boolean) => {
 const setDarkMode = (isDark: boolean) => {
   darkMode = isDark;
   applyDarkModeToOuterPage(isDark);
+  pruneStaleContentDocs();
   contentDocs.forEach((doc) => applyDarkOverride(doc, darkMode));
 };
 

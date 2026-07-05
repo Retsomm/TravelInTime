@@ -90,6 +90,9 @@ const SettingsPanel = ({
                 <Pressable
                   key={f.value}
                   onPress={() => onFontFamilyChange(f.value)}
+                  accessibilityRole="radio"
+                  accessibilityLabel={`字體：${f.label}`}
+                  accessibilityState={{ selected: active }}
                   style={{
                     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
                     paddingVertical: 9, paddingHorizontal: 12, borderRadius: 8,
@@ -105,18 +108,42 @@ const SettingsPanel = ({
 
           <View style={{ flexDirection: 'row', gap: 8, marginBottom: 16 }}>
             <View style={[segWrap, { flex: 1 }]}>
-              <Pressable style={segBtn(script === 'tc')} onPress={() => onScriptChange('tc')}>
+              <Pressable
+                style={segBtn(script === 'tc')}
+                onPress={() => onScriptChange('tc')}
+                accessibilityRole="radio"
+                accessibilityLabel="顯示繁體"
+                accessibilityState={{ selected: script === 'tc' }}
+              >
                 <Text style={segLabel(script === 'tc')}>繁體</Text>
               </Pressable>
-              <Pressable style={segBtn(script === 'sc')} onPress={() => onScriptChange('sc')}>
+              <Pressable
+                style={segBtn(script === 'sc')}
+                onPress={() => onScriptChange('sc')}
+                accessibilityRole="radio"
+                accessibilityLabel="顯示簡體"
+                accessibilityState={{ selected: script === 'sc' }}
+              >
                 <Text style={segLabel(script === 'sc')}>簡體</Text>
               </Pressable>
             </View>
             <View style={[segWrap, { flex: 1 }]}>
-              <Pressable style={segBtn(readingDirection === 'ltr')} onPress={() => onReadingDirectionChange('ltr')}>
+              <Pressable
+                style={segBtn(readingDirection === 'ltr')}
+                onPress={() => onReadingDirectionChange('ltr')}
+                accessibilityRole="radio"
+                accessibilityLabel="由左向右閱讀"
+                accessibilityState={{ selected: readingDirection === 'ltr' }}
+              >
                 <Text style={segLabel(readingDirection === 'ltr')}>左→右</Text>
               </Pressable>
-              <Pressable style={segBtn(readingDirection === 'rtl')} onPress={() => onReadingDirectionChange('rtl')}>
+              <Pressable
+                style={segBtn(readingDirection === 'rtl')}
+                onPress={() => onReadingDirectionChange('rtl')}
+                accessibilityRole="radio"
+                accessibilityLabel="由右向左閱讀"
+                accessibilityState={{ selected: readingDirection === 'rtl' }}
+              >
                 <Text style={segLabel(readingDirection === 'rtl')}>右→左</Text>
               </Pressable>
             </View>
@@ -156,6 +183,9 @@ const SettingsPanel = ({
                   <Pressable
                     key={v.identifier}
                     onPress={() => onTTSVoiceChange(v)}
+                    accessibilityRole="radio"
+                    accessibilityLabel={`語音：${voiceLabel(v)}`}
+                    accessibilityState={{ selected: active }}
                     style={{
                       paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8,
                       borderWidth: 1, borderColor: colors.borderColor,
@@ -220,7 +250,14 @@ const SettingsPanel = ({
             </View>
             <View style={[segWrap, { justifyContent: 'space-between' }]}>
               {([0, 15, 30, 45, 60] as const).map((m) => (
-                <Pressable key={m} style={[segBtn(ttsSleepMinutes === m), { flex: 1 }]} onPress={() => onTTSSleepChange(m)}>
+                <Pressable
+                  key={m}
+                  style={[segBtn(ttsSleepMinutes === m), { flex: 1 }]}
+                  onPress={() => onTTSSleepChange(m)}
+                  accessibilityRole="radio"
+                  accessibilityLabel={m === 0 ? '睡眠計時：關閉' : `睡眠計時：${m} 分鐘`}
+                  accessibilityState={{ selected: ttsSleepMinutes === m }}
+                >
                   <Text style={segLabel(ttsSleepMinutes === m)}>{m === 0 ? '關' : String(m)}</Text>
                 </Pressable>
               ))}

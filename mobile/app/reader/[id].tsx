@@ -36,6 +36,8 @@ const ReaderScreen = () => {
   const settingsLoadedRef = useRef(false);
   const hadSavedSettingsRef = useRef(false);
   const chapterTextResolverRef = useRef<((text: string) => void) | null>(null);
+  const chapterTextTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const relocatedResolverRef = useRef<(() => void) | null>(null);
   const tts = useTTS();
 
   useFocusEffect(
@@ -105,12 +107,18 @@ const ReaderScreen = () => {
       if (msg.type === 'ready') {
         webviewReadyRef.current = true;
         webviewRef.current?.postMessage(JSON.stringify({ type: 'setDarkMode', darkMode }));
-        webviewRef.current?.postMessage(JSON.stringify({ type: 'setTypography', ...typography }));
+        // settingsLoadedRef 還沒完成前先不送 setTypography，避免蓋成預設值；等
+        // loadBookSettings 完成後，下面監聽 typography 變化的 effect 會補送一次真正的設定。
+        if (settingsLoadedRef.current) {
+          webviewRef.current?.postMessage(JSON.stringify({ type: 'setTypography', ...typography }));
+        }
         handleWebViewReady();
         return;
       }
       if (msg.type === 'relocated') {
         setLoading(false);
+        relocatedResolverRef.current?.();
+        relocatedResolverRef.current = null;
         if (!id) return;
         saveReadingCfi(id, msg.cfi);
         updateProgress(id, msg.percentage);
@@ -122,6 +130,10 @@ const ReaderScreen = () => {
         return;
       }
       if (msg.type === 'chapterText') {
+        if (chapterTextTimeoutRef.current) {
+          clearTimeout(chapterTextTimeoutRef.current);
+          chapterTextTimeoutRef.current = null;
+        }
         chapterTextResolverRef.current?.(msg.text);
         chapterTextResolverRef.current = null;
         return;
@@ -155,14 +167,35 @@ const ReaderScreen = () => {
     webviewRef.current?.postMessage(JSON.stringify({ type: 'setTypography', ...typography }));
   }, [typography]);
 
-  const requestChapterText = useCallback(
-    (): Promise<string> =>
-      new Promise((resolve) => {
-        chapterTextResolverRef.current = resolve;
-        webviewRef.current?.postMessage(JSON.stringify({ type: 'getChapterText' }));
-      }),
-    []
-  );
+  // 若已有一個 getChapterText 請求在飛行中，新請求直接回空字串，避免蓋掉前一個
+  // resolver 導致前一個呼叫永遠 resolve 不到正確結果；並用逾時保護 WebView 沒回應時
+  // 呼叫端不會卡死。
+  const requestChapterText = useCallback((): Promise<string> => {
+    if (chapterTextResolverRef.current) return Promise.resolve('');
+    return new Promise((resolve) => {
+      chapterTextResolverRef.current = resolve;
+      chapterTextTimeoutRef.current = setTimeout(() => {
+        chapterTextResolverRef.current = null;
+        chapterTextTimeoutRef.current = null;
+        resolve('');
+      }, 5000);
+      webviewRef.current?.postMessage(JSON.stringify({ type: 'getChapterText' }));
+    });
+  }, []);
+
+  // 等待下一次 relocated 事件（換頁完成）；逾時保護避免 WebView 端因故沒有觸發
+  // relocated（例如已在書尾）時卡住整個自動朗讀流程。
+  const waitForRelocated = useCallback((): Promise<void> => {
+    return new Promise((resolve) => {
+      relocatedResolverRef.current = resolve;
+      setTimeout(() => {
+        if (relocatedResolverRef.current === resolve) {
+          relocatedResolverRef.current = null;
+          resolve();
+        }
+      }, 1500);
+    });
+  }, []);
 
   // 朗讀完目前章節後，翻到下一頁／章節再繼續朗讀；已翻到書尾（抓不到文字）就自然停止。
   // 這是簡化版的自動接續章節，沒有網頁版 useTTS.ts 那套精確字元位移與高亮同步（見
@@ -170,11 +203,11 @@ const ReaderScreen = () => {
   const continueReadingRef = useRef<() => void>(() => {});
   const readNextAndContinue = useCallback(async () => {
     webviewRef.current?.postMessage(JSON.stringify({ type: 'next' }));
-    await new Promise((r) => setTimeout(r, 400));
+    await waitForRelocated();
     const text = await requestChapterText();
     if (!text.trim()) return;
     tts.speak(text, () => continueReadingRef.current());
-  }, [requestChapterText, tts]);
+  }, [requestChapterText, tts, waitForRelocated]);
   useEffect(() => { continueReadingRef.current = readNextAndContinue; }, [readNextAndContinue]);
 
   const handleTTSPlay = useCallback(async () => {

@@ -134,6 +134,22 @@ export const useTTS = () => {
     onAllDoneRef.current = undefined;
   }, [stop, clearSleepTimer]);
 
+  const startSleepTimer = useCallback((minutes: number) => {
+    clearSleepTimer();
+    if (minutes <= 0) return;
+    let remaining = minutes * 60;
+    setSleepRemaining(remaining);
+    sleepTimerRef.current = setInterval(() => {
+      remaining -= 1;
+      if (remaining <= 0) {
+        clearSleepTimer();
+        stop();
+        return;
+      }
+      setSleepRemaining(remaining);
+    }, 1000);
+  }, [clearSleepTimer, stop]);
+
   const speakChunk = useCallback((generation: number) => {
     const chunk = chunksRef.current[chunkIndexRef.current];
     if (chunk === undefined) {
@@ -170,8 +186,10 @@ export const useTTS = () => {
     onAllDoneRef.current = onAllDone;
     setPlaying(true);
     setPaused(false);
+    // 使用者可能在按下播放前就先選好睡眠計時，這裡補上啟動，避免預先選的分鐘數被忽略。
+    if (sleepMinutes > 0) startSleepTimer(sleepMinutes);
     speakChunk(generation);
-  }, [speakChunk]);
+  }, [speakChunk, sleepMinutes, startSleepTimer]);
 
   const pause = useCallback(() => {
     if (!playing) return;
@@ -188,22 +206,6 @@ export const useTTS = () => {
     setPaused(false);
     speakChunk(generation);
   }, [paused, speakChunk]);
-
-  const startSleepTimer = useCallback((minutes: number) => {
-    clearSleepTimer();
-    if (minutes <= 0) return;
-    let remaining = minutes * 60;
-    setSleepRemaining(remaining);
-    sleepTimerRef.current = setInterval(() => {
-      remaining -= 1;
-      if (remaining <= 0) {
-        clearSleepTimer();
-        stop();
-        return;
-      }
-      setSleepRemaining(remaining);
-    }, 1000);
-  }, [clearSleepTimer, stop]);
 
   const handleSleepChange = useCallback((minutes: number) => {
     setSleepMinutes(minutes);
