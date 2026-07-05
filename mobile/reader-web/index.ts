@@ -1,7 +1,7 @@
-import ePub from 'epubjs';
+import ePub, { EpubCFI } from 'epubjs';
 import type { Book, Rendition } from 'epubjs';
 import * as OpenCC from 'opencc-js';
-import type { InboundMessage, OutboundMessage, TocItem } from '../lib/readerMessages';
+import type { AnnotationMark, InboundMessage, OutboundMessage, TocItem } from '../lib/readerMessages';
 import { DEFAULT_TYPOGRAPHY, normalizeFontFamily, type TypographySettings } from '../lib/readerSettings';
 
 declare global {
@@ -291,6 +291,15 @@ const post = (msg: OutboundMessage) => {
   window.ReactNativeWebView?.postMessage(JSON.stringify(msg));
 };
 
+// 暫時性診斷用（比照先前翻頁/目錄跳轉除錯時的做法，見 RN_SETUP_GUIDE.md 第十四／十七輪），
+// 確認穩定後應該移除。這份 bundle 沒有區分 dev/production 建置，預設關閉避免觸控座標／
+// 選取文字內容經由 RN bridge 外流；需要除錯時手動改成 true 再跑 `yarn build:reader`。
+const DEBUG_BRIDGE = false;
+const debugLog = (...args: unknown[]) => {
+  if (!DEBUG_BRIDGE) return;
+  post({ type: 'debug', message: args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ') });
+};
+
 const base64ToArrayBuffer = (base64: string): ArrayBuffer => {
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
@@ -403,15 +412,185 @@ const gotoTarget = async (rawTarget: string) => {
 // 不會經過 iframe 內部那套失準的座標系，兩平台都可靠。
 // 右→左（RTL）閱讀方向下，畫面左側該觸發下一頁、右側觸發上一頁，跟 LTR 相反
 // （比照網頁版 Reader.tsx 的翻頁箭頭在 rtl 時互換 prevPage/nextPage 的邏輯）。
+// 劃線模式：使用者實測回報「畫面中間三分之一窄帶長按選字仍然沒有反應」，log 顯示內容 iframe
+// 有收到 touchstart，但完全沒有進入 selectionchange／rendition 的 selected 事件，研判長按手勢
+// 常常會在按住/微調過程中位移超出中間那條窄帶（滑進左右 tap-zone 範圍），這兩塊 tap-zone 是
+// 蓋在最上層、不透明地攔截觸控的 div（見 registerTapZone 上方註解），只要手勢途中掃到那塊區域
+// 就會被攔截、選字手勢跟著中斷。與其要求使用者精準壓在窄帶不動，改成使用者可以主動切換「劃線
+// 模式」：開啟時把左右兩塊 tap-zone 的 pointer-events 關掉，讓觸控整個穿透到底下的 epub 內容
+// iframe（等於畫面全寬都能長按選字），代價是這段期間點擊畫面左右兩側不會翻頁，需要使用者自己
+// 切回一般模式才能繼續用點擊翻頁——這是刻意的取捨，避免翻頁跟選字手勢互搶同一塊觸控區域。
+const setAnnotationMode = (enabled: boolean) => {
+  debugLog('[setAnnotationMode]', enabled);
+  ['tap-zone-prev', 'tap-zone-next'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.style.pointerEvents = enabled ? 'none' : 'auto';
+  });
+};
+
 const registerTapZone = (id: string, baseDirection: 'prev' | 'next') => {
   const el = document.getElementById(id);
   if (!el) return;
   el.addEventListener('click', () => {
+    debugLog('[tap-zone]', id, '被點擊，觸發翻頁（提醒：這塊區域會整個擋掉底下的文字選取手勢）');
     const direction = typography.readingDirection === 'rtl'
       ? (baseDirection === 'prev' ? 'next' : 'prev')
       : baseDirection;
     turnPage(direction);
   });
+};
+
+// 劃線註記：用 epub.js 內建的 annotations API（'underline' 型別，SVG 標記，不修改 DOM 文字節點）。
+// RN 端才是唯一的資料來源（annotations 陣列存在 AsyncStorage），這裡只負責「把目前這份清單
+// 渲染成畫面上的標記」——每次收到 setAnnotations（或換書時 load 訊息附帶的初始清單）都整批
+// 比對一次：清單裡消失的 id 移除標記、新出現的 id 新增標記、顏色變了的先移除再重新加上
+// （epub.js 的 annotations.add 沒有提供改色 API，只能整個換掉）。
+// rendition.annotations 內部會在 hooks.render 自動把已加入的標記重新套用到每個新渲染的
+// 章節/頁面 iframe，不需要在換頁時手動重掛。
+let renderedAnnotations = new Map<string, AnnotationMark>();
+
+// 比照網頁版 Reader.tsx 的 addEpubAnnotation：epub.js 的 Annotations 類別是在
+// `rendition.hooks.render.register(this.inject.bind(this))` 掛上去的（見
+// node_modules/epubjs/src/annotations.js），而 hooks.render 有時候會比 iframe 的 contents
+// （真正的 document/尺寸）就緒得早，導致 marks-pane 拿到的量測基準還沒準備好，SVG 標記
+// 因此可能「呼叫沒有拋例外，但畫面上什麼都沒畫出來」。網頁版原本就用「呼叫完成後延遲檢查
+// DOM 裡有沒有真的生出這個標記的元素，沒有就強制 clear()+inject() 重新掛一次」這招頂著，
+// 這裡照抄同一個保險機制，順便加 log 記錄 SVG 標記實際的量測結果，方便下次如果還是沒畫出來時
+// 判斷是「完全沒生成標記元素」還是「元素生成了但位置/尺寸算錯變成看不到」兩種不同情況。
+const logMarkGeometry = (id: string, label: string) => {
+  const markEl = document.querySelector(`.ann-${id}`);
+  if (!markEl) {
+    debugLog(`[markGeometry:${label}]`, id, '在最外層 document 找不到 .ann-<id> 元素');
+    return;
+  }
+  const svg = markEl.closest('svg');
+  const markRect = markEl.getBoundingClientRect();
+  const svgRect = svg?.getBoundingClientRect();
+  const iframe = document.querySelector('#viewer iframe') as HTMLIFrameElement | null;
+  const iframeRect = iframe?.getBoundingClientRect();
+  debugLog(
+    `[markGeometry:${label}]`, id,
+    'mark=', { w: Math.round(markRect.width), h: Math.round(markRect.height), x: Math.round(markRect.x), y: Math.round(markRect.y) },
+    'svg=', svgRect ? { w: Math.round(svgRect.width), h: Math.round(svgRect.height) } : 'no-svg',
+    'iframe=', iframeRect ? { w: Math.round(iframeRect.width), h: Math.round(iframeRect.height), x: Math.round(iframeRect.x), y: Math.round(iframeRect.y) } : 'no-iframe',
+    'iframeScroll=', { w: iframe?.contentWindow?.innerWidth, scrollW: iframe?.contentDocument?.documentElement?.scrollWidth }
+  );
+};
+
+// 強制重新掛所有目前的 annotation（clear + inject），共用給「新增標記後檢查」跟「每次新內容
+// 渲染後檢查」兩個呼叫點。
+const reinjectAllAnnotations = (label: string) => {
+  if (!rendition) return;
+  debugLog('[reinjectAllAnnotations]', label);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const annApi = rendition.annotations as any;
+  rendition.views().forEach((view: unknown) => {
+    annApi.clear(view);
+    annApi.inject(view);
+  });
+};
+
+// 檢查目前應該顯示的標記，DOM 裡是不是真的都有對應的 <line> 元素；缺漏就整批強制重掛一次。
+// renderedAnnotations 是整本書的標記清單，但畫面上（DOM）任何時刻只會有目前顯示中章節的
+// 標記被實際掛出來——只比對「目前可見章節」涵蓋到的標記，避免把其他章節本來就不該出現在
+// DOM 裡的標記誤判成「缺漏」，觸發不必要的 reinjectAllAnnotations。
+const verifyAnnotationsRendered = (label: string) => {
+  if (renderedAnnotations.size === 0 || !rendition) return;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const contents = ((rendition as any).getContents?.() ?? []) as { sectionIndex: number }[];
+  const visibleSections = new Set(contents.map((c) => c.sectionIndex));
+  if (visibleSections.size === 0) return;
+  const expected = [...renderedAnnotations.values()].filter((ann) => {
+    try {
+      return visibleSections.has(new EpubCFI(ann.cfi).spinePos);
+    } catch {
+      return false;
+    }
+  });
+  if (expected.length === 0) return;
+  const missing = expected.filter((ann) => !document.querySelector(`.ann-${ann.id} line`));
+  debugLog('[verifyAnnotationsRendered]', label, '目前章節應顯示', expected.length, '筆，缺少', missing.length, '筆', missing.map((a) => a.id));
+  if (missing.length > 0) reinjectAllAnnotations(`verify:${label}`);
+};
+
+const addAnnotationMark = (ann: AnnotationMark): boolean => {
+  if (!rendition) {
+    debugLog('[addAnnotationMark] 略過：rendition 尚未就緒', ann.id);
+    return false;
+  }
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = (rendition.annotations as any).underline(
+      ann.cfi,
+      {},
+      () => {
+        debugLog('[annotationTapped]', ann.id);
+        post({ type: 'annotationTapped', id: ann.id });
+      },
+      `ann-${ann.id}`,
+      { stroke: ann.color, 'stroke-opacity': '1', 'stroke-width': '3', fill: 'none' }
+    );
+    debugLog('[addAnnotationMark] underline() 呼叫完成', ann.id, 'cfi=', ann.cfi.slice(0, 40), 'result=', result ? 'ok' : 'undefined/null');
+    logMarkGeometry(ann.id, 'immediately-after-call');
+    setTimeout(() => {
+      logMarkGeometry(ann.id, '300ms-later');
+      const line = document.querySelector(`.ann-${ann.id} line`);
+      if (!line) {
+        debugLog('[addAnnotationMark] 300ms 後仍找不到 <line> 元素，強制 clear+inject 重新掛一次', ann.id);
+        reinjectAllAnnotations(`create:${ann.id}`);
+        setTimeout(() => logMarkGeometry(ann.id, 'after-reinject'), 100);
+      }
+    }, 300);
+    return true;
+  } catch (err) {
+    debugLog('[addAnnotationMark] underline() 拋出例外', ann.id, err instanceof Error ? err.message : String(err));
+    return false;
+  }
+};
+
+const removeAnnotationMark = (ann: AnnotationMark) => {
+  if (!rendition) return;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (rendition.annotations as any).remove(ann.cfi, 'underline');
+    debugLog('[removeAnnotationMark] 已移除', ann.id);
+  } catch (err) {
+    debugLog('[removeAnnotationMark] 拋出例外', ann.id, err instanceof Error ? err.message : String(err));
+  }
+};
+
+const applyAnnotations = (list: AnnotationMark[]) => {
+  debugLog('[applyAnnotations] 收到清單，共', list.length, '筆，目前畫面上有', renderedAnnotations.size, '筆');
+  if (!rendition) {
+    debugLog('[applyAnnotations] 略過：rendition 尚未就緒');
+    return;
+  }
+  const nextIds = new Set(list.map((a) => a.id));
+  renderedAnnotations.forEach((prev, id) => {
+    if (!nextIds.has(id)) removeAnnotationMark(prev);
+  });
+  // 只有 addAnnotationMark 回報成功（underline() 沒有拋例外）的標記才記進
+  // renderedAnnotations；underline() 失敗時若仍記成「已渲染」，下次 applyAnnotations 收到
+  // 同一份未變更的標記會誤判成「已存在且沒變」而完全跳過重試，永遠補不回來。
+  const failedIds = new Set<string>();
+  list.forEach((ann) => {
+    const prev = renderedAnnotations.get(ann.id);
+    if (!prev) {
+      if (!addAnnotationMark(ann)) failedIds.add(ann.id);
+    } else if (prev.color !== ann.color || prev.cfi !== ann.cfi) {
+      removeAnnotationMark(prev);
+      if (!addAnnotationMark(ann)) failedIds.add(ann.id);
+    }
+  });
+  renderedAnnotations = new Map(list.filter((a) => !failedIds.has(a.id)).map((a) => [a.id, a]));
+};
+
+// 使用者點空白處/開始劃下一段選取時，清掉目前顯示中章節 iframe 的原生選取範圍，
+// 讓畫面上的藍色選取反白消失（劃線動作完成後改由 addAnnotationMark 畫出的底線標記接手）。
+const clearNativeSelection = () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const contents = (rendition as any)?.getContents?.() as { window: Window }[] | undefined;
+  contents?.forEach((c) => c.window?.getSelection()?.removeAllRanges());
 };
 
 const blobToBase64 = (blob: Blob): Promise<string> =>
@@ -557,7 +736,7 @@ const scanAllChapterPages = async (generation: number, targetBook: Book) => {
   locationsReady = true;
 };
 
-const loadBook = async (base64: string, cfi: string | null) => {
+const loadBook = async (base64: string, cfi: string | null, initialAnnotations: AnnotationMark[]) => {
   const viewer = document.getElementById('viewer');
   if (!viewer) return;
 
@@ -566,6 +745,7 @@ const loadBook = async (base64: string, cfi: string | null) => {
   locationsReady = false;
   lastRelocatedLoc = null;
   lastLinearSpineIndex = null;
+  renderedAnnotations = new Map();
 
   try {
     book = ePub(base64ToArrayBuffer(base64));
@@ -591,6 +771,27 @@ const loadBook = async (base64: string, cfi: string | null) => {
       contentDocs.add(doc);
       applyDarkOverride(doc, darkMode);
       applyTypographyToDoc(doc);
+      // epub.js 的 Contents 類別本身只在「選取範圍非空」時才會 emit 'selected'（見
+      // node_modules/epubjs/src/contents.js 的 triggerSelectedEvent），使用者點掉選取／
+      // 選取範圍收合完全沒有對應事件可以監聽，因此另外自己掛一個 selectionchange，
+      // 只在偵測到「收合」時回報給 RN 端關閉選取操作列，不跟 epub.js 內建的 250ms
+      // debounce 邏輯衝突（各自關注不同的狀態轉換）。
+      doc.addEventListener('selectionchange', () => {
+        const sel = doc.defaultView?.getSelection();
+        debugLog('[selectionchange]', 'collapsed=', sel?.isCollapsed ?? 'no-selection', 'text=', sel?.toString().slice(0, 20) ?? '');
+        if (!sel || sel.isCollapsed) post({ type: 'selectionCleared' });
+      });
+      // 確認觸控事件本身有沒有傳到這份 content document（排除 tap-zone 疊在上層整個
+      // 擋掉觸控、或 iframe sandbox 權限問題導致內容 iframe 根本收不到觸控的可能性）。
+      doc.addEventListener('touchstart', (e: TouchEvent) => {
+        const t = e.touches[0];
+        debugLog('[content touchstart]', 'x=', Math.round(t?.clientX ?? -1), 'y=', Math.round(t?.clientY ?? -1));
+      });
+      // 每次新章節/頁面內容渲染完，順便確認這一頁該顯示的標記是不是真的有畫出來——
+      // epub.js 的 Annotations 類別本身也是掛在 hooks.render 自動重掛標記，但跟這裡的
+      // hooks.content 一樣可能有「render 觸發時 contents 還沒完全就緒」的競態，見
+      // addAnnotationMark 上方的說明，這裡用同一套 verify+reinject 補一次保險。
+      setTimeout(() => verifyAnnotationsRendered('content-rendered'), 300);
     });
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -668,6 +869,28 @@ const loadBook = async (base64: string, cfi: string | null) => {
       postRelocated(loc, previousCfi);
     });
 
+    // 文字選取 → 劃線註記的第一步：epub.js 已經幫忙把選取範圍換算成 CFI 字串，
+    // 不需要自己手動用 range.getBoundingClientRect() 去換算螢幕座標——epub.js 內容
+    // iframe 在部分手機瀏覽器（尤其先前踩過的 iOS WKWebView）匯報的內部座標系不可靠
+    // （見 registerTapZone 上方註解），選取彈出操作列改用畫面底部固定列（見 RN 端
+    // SelectionBar），完全不需要精確定位在選取文字旁邊，順便避開這整類座標問題。
+    rendition.on('selected', (cfiRange: string, contents: unknown) => {
+      debugLog('[rendition selected]', 'cfiRange=', cfiRange.slice(0, 40));
+      const c = contents as { window: Window };
+      const selection = c.window?.getSelection();
+      if (!selection || selection.isCollapsed) {
+        debugLog('[rendition selected] 略過：selection 為空或已收合');
+        return;
+      }
+      const text = selection.toString().trim();
+      if (!text) {
+        debugLog('[rendition selected] 略過：selection.toString() 是空字串');
+        return;
+      }
+      debugLog('[rendition selected] 送出 textSelected，text=', text.slice(0, 20));
+      post({ type: 'textSelected', cfi: cfiRange, text });
+    });
+
     await book.ready;
     // 簡體判斷比照網頁版 Reader.tsx：zh-CN / zh-Hans / zh-SG，或單獨的 "zh"（不帶 region code）。
     // 一定要在 rendition.display() 之前判斷完成，因為 display() 會觸發 content hook 套用 script。
@@ -684,6 +907,7 @@ const loadBook = async (base64: string, cfi: string | null) => {
     post({ type: 'tocLoaded', toc: tocCache });
 
     await rendition.display(cfi ?? undefined);
+    applyAnnotations(initialAnnotations);
     // 全書精確頁數／進度百分比：背景跑 scanAllChapterPages()（見上方定義）。延後幾秒才開始，
     // 避開使用者開書後最常見的「馬上連續翻頁測試」這段時間，減少背景渲染跟使用者操作互搶
     // 主執行緒的機會；不 await，維持「不拖慢開書速度」的行為，期間的 relocated 事件會先用
@@ -727,7 +951,7 @@ const handleMessage = (event: MessageEvent<string>) => {
   } catch {
     return;
   }
-  if (msg.type === 'load') loadBook(msg.base64, msg.cfi);
+  if (msg.type === 'load') loadBook(msg.base64, msg.cfi, msg.annotations);
   if (msg.type === 'prev') turnPage('prev');
   if (msg.type === 'next') turnPage('next');
   if (msg.type === 'goto') gotoTarget(msg.target);
@@ -738,6 +962,12 @@ const handleMessage = (event: MessageEvent<string>) => {
     setTypography(settings);
   }
   if (msg.type === 'getChapterText') post({ type: 'chapterText', text: getChapterText() });
+  if (msg.type === 'setAnnotations') applyAnnotations(msg.annotations);
+  if (msg.type === 'clearSelection') {
+    debugLog('[clearSelection] 收到訊息');
+    clearNativeSelection();
+  }
+  if (msg.type === 'setAnnotationMode') setAnnotationMode(msg.enabled);
 };
 
 // RN WebView 在 Android 觸發 document 的 message 事件，iOS 觸發 window 的，兩者都要監聽
