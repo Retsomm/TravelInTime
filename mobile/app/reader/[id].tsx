@@ -106,6 +106,7 @@ const ReaderScreen = () => {
     setSelection(null);
     setEditingAnnotationId(null);
     setAnnotationMode(false);
+    webviewRef.current?.postMessage(JSON.stringify({ type: 'clearSelection' }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
@@ -200,7 +201,7 @@ const ReaderScreen = () => {
         return;
       }
       if (msg.type === 'textSelected') {
-        console.log('[reader] textSelected 收到', msg.text.slice(0, 20));
+        if (__DEV__) console.log('[reader] textSelected 收到', msg.text.slice(0, 20));
         setEditingAnnotationId(null);
         setSelection({ cfi: msg.cfi, text: msg.text });
         return;
@@ -362,7 +363,7 @@ const ReaderScreen = () => {
       console.log('[reader] handleCreateAnnotation 略過：id 或 selection 為空', { hasId: Boolean(id), hasSelection: Boolean(selection) });
       return;
     }
-    console.log('[reader] handleCreateAnnotation', color, selection.text.slice(0, 20));
+    if (__DEV__) console.log('[reader] handleCreateAnnotation', color, selection.text.slice(0, 20));
     const ann: Annotation = {
       id: generateId(),
       cfi: selection.cfi,
@@ -373,7 +374,7 @@ const ReaderScreen = () => {
     };
     const next = [...annotations, ann];
     setAnnotations(next);
-    saveAnnotations(id, next);
+    saveAnnotations(id, next).catch((err) => console.error('[reader] saveAnnotations 失敗', err));
     syncAnnotationsToWebView(next);
     setSelection(null);
     webviewRef.current?.postMessage(JSON.stringify({ type: 'clearSelection' }));
@@ -383,7 +384,7 @@ const ReaderScreen = () => {
     if (!id) return;
     const next = annotations.map((a) => (a.id === annotationId ? { ...a, color } : a));
     setAnnotations(next);
-    saveAnnotations(id, next);
+    saveAnnotations(id, next).catch((err) => console.error('[reader] saveAnnotations 失敗', err));
     syncAnnotationsToWebView(next);
   };
 
@@ -391,7 +392,7 @@ const ReaderScreen = () => {
     if (!id) return;
     const next = annotations.filter((a) => a.id !== annotationId);
     setAnnotations(next);
-    saveAnnotations(id, next);
+    saveAnnotations(id, next).catch((err) => console.error('[reader] saveAnnotations 失敗', err));
     syncAnnotationsToWebView(next);
     setEditingAnnotationId(null);
   };
@@ -400,7 +401,7 @@ const ReaderScreen = () => {
     if (!id) return;
     const next = annotations.map((a) => (a.id === annotationId ? { ...a, note: note.trim() || undefined } : a));
     setAnnotations(next);
-    saveAnnotations(id, next);
+    saveAnnotations(id, next).catch((err) => console.error('[reader] saveAnnotations 失敗', err));
   };
 
   const handleNavigateToAnnotation = (cfi: string) => {
@@ -418,20 +419,26 @@ const ReaderScreen = () => {
     Linking.openURL(`https://www.google.com/search?q=${encodeURIComponent(selection.text)}`);
   };
 
+  // 清掉 RN 端的選取狀態同時，也要通知 WebView 清掉內容 iframe 裡實際的原生選取範圍
+  // （瀏覽器藍色反白），否則只清 RN state 只會讓底部操作列消失，畫面上的選取反白仍留著。
+  const clearSelectionState = () => {
+    setSelection(null);
+    setEditingAnnotationId(null);
+    webviewRef.current?.postMessage(JSON.stringify({ type: 'clearSelection' }));
+  };
+
   // 設定面板／清單面板共用同一個畫面區域，一次只會顯示其中一個：開啟其中一個時
   // 要順便關掉另一個，否則兩個 overlay 疊在一起，關掉上層那個又會露出底下還開著的另一個。
   // 兩顆按鈕都是開關型：再按一次目前開著的那顆就直接關閉，不需要額外的關閉鈕/麵包屑列。
   const toggleSettings = () => {
     setListPanelTab(null);
-    setSelection(null);
-    setEditingAnnotationId(null);
+    clearSelectionState();
     setSettingsVisible((prev) => !prev);
   };
 
   const toggleListPanel = () => {
     setSettingsVisible(false);
-    setSelection(null);
-    setEditingAnnotationId(null);
+    clearSelectionState();
     setListPanelTab((prev) => (prev ? null : 'bookmarks'));
   };
 
@@ -442,12 +449,10 @@ const ReaderScreen = () => {
   const toggleAnnotationMode = () => {
     setSettingsVisible(false);
     setListPanelTab(null);
-    setSelection(null);
-    setEditingAnnotationId(null);
+    clearSelectionState();
     setAnnotationMode((prev) => {
       const next = !prev;
       webviewRef.current?.postMessage(JSON.stringify({ type: 'setAnnotationMode', enabled: next }));
-      if (!next) webviewRef.current?.postMessage(JSON.stringify({ type: 'clearSelection' }));
       return next;
     });
   };

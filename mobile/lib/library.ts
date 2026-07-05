@@ -137,8 +137,9 @@ export const getBookBase64 = (record: BookRecord): Promise<string> =>
 const resolveCoverFilename = (record: BookRecord): string | undefined =>
   record.coverFilename ?? record.coverUri?.split('/').pop();
 
-export const removeBook = (id: string) =>
-  updateMeta((records) => {
+export const removeBook = async (id: string) => {
+  await AsyncStorage.multiRemove([progressKey(id), settingsKey(id), bookmarksKey(id), annotationsKey(id)]);
+  return updateMeta((records) => {
     const record = records.find((r) => r.id === id);
     if (record) {
       const file = new File(booksDir(), record.filename);
@@ -149,9 +150,9 @@ export const removeBook = (id: string) =>
         if (cover.exists) cover.delete();
       }
     }
-    AsyncStorage.multiRemove([progressKey(id), settingsKey(id), bookmarksKey(id), annotationsKey(id)]);
     return [records.filter((r) => r.id !== id), undefined];
   });
+};
 
 export const updateBookMeta = (
   id: string,

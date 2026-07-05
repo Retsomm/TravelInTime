@@ -1,4 +1,4 @@
-import ePub from 'epubjs';
+import ePub, { EpubCFI } from 'epubjs';
 import type { Book, Rendition } from 'epubjs';
 import * as OpenCC from 'opencc-js';
 import type { AnnotationMark, InboundMessage, OutboundMessage, TocItem } from '../lib/readerMessages';
@@ -292,8 +292,11 @@ const post = (msg: OutboundMessage) => {
 };
 
 // 暫時性診斷用（比照先前翻頁/目錄跳轉除錯時的做法，見 RN_SETUP_GUIDE.md 第十四／十七輪），
-// 確認穩定後應該移除。
+// 確認穩定後應該移除。這份 bundle 沒有區分 dev/production 建置，預設關閉避免觸控座標／
+// 選取文字內容經由 RN bridge 外流；需要除錯時手動改成 true 再跑 `yarn build:reader`。
+const DEBUG_BRIDGE = false;
 const debugLog = (...args: unknown[]) => {
+  if (!DEBUG_BRIDGE) return;
   post({ type: 'debug', message: args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ') });
 };
 
@@ -488,17 +491,32 @@ const reinjectAllAnnotations = (label: string) => {
 };
 
 // 檢查目前應該顯示的標記，DOM 裡是不是真的都有對應的 <line> 元素；缺漏就整批強制重掛一次。
+// renderedAnnotations 是整本書的標記清單，但畫面上（DOM）任何時刻只會有目前顯示中章節的
+// 標記被實際掛出來——只比對「目前可見章節」涵蓋到的標記，避免把其他章節本來就不該出現在
+// DOM 裡的標記誤判成「缺漏」，觸發不必要的 reinjectAllAnnotations。
 const verifyAnnotationsRendered = (label: string) => {
-  if (renderedAnnotations.size === 0) return;
-  const missing = [...renderedAnnotations.keys()].filter((id) => !document.querySelector(`.ann-${id} line`));
-  debugLog('[verifyAnnotationsRendered]', label, '應顯示', renderedAnnotations.size, '筆，缺少', missing.length, '筆', missing);
+  if (renderedAnnotations.size === 0 || !rendition) return;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const contents = ((rendition as any).getContents?.() ?? []) as { sectionIndex: number }[];
+  const visibleSections = new Set(contents.map((c) => c.sectionIndex));
+  if (visibleSections.size === 0) return;
+  const expected = [...renderedAnnotations.values()].filter((ann) => {
+    try {
+      return visibleSections.has(new EpubCFI(ann.cfi).spinePos);
+    } catch {
+      return false;
+    }
+  });
+  if (expected.length === 0) return;
+  const missing = expected.filter((ann) => !document.querySelector(`.ann-${ann.id} line`));
+  debugLog('[verifyAnnotationsRendered]', label, '目前章節應顯示', expected.length, '筆，缺少', missing.length, '筆', missing.map((a) => a.id));
   if (missing.length > 0) reinjectAllAnnotations(`verify:${label}`);
 };
 
-const addAnnotationMark = (ann: AnnotationMark) => {
+const addAnnotationMark = (ann: AnnotationMark): boolean => {
   if (!rendition) {
     debugLog('[addAnnotationMark] 略過：rendition 尚未就緒', ann.id);
-    return;
+    return false;
   }
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -523,8 +541,10 @@ const addAnnotationMark = (ann: AnnotationMark) => {
         setTimeout(() => logMarkGeometry(ann.id, 'after-reinject'), 100);
       }
     }, 300);
+    return true;
   } catch (err) {
     debugLog('[addAnnotationMark] underline() 拋出例外', ann.id, err instanceof Error ? err.message : String(err));
+    return false;
   }
 };
 
@@ -549,16 +569,20 @@ const applyAnnotations = (list: AnnotationMark[]) => {
   renderedAnnotations.forEach((prev, id) => {
     if (!nextIds.has(id)) removeAnnotationMark(prev);
   });
+  // 只有 addAnnotationMark 回報成功（underline() 沒有拋例外）的標記才記進
+  // renderedAnnotations；underline() 失敗時若仍記成「已渲染」，下次 applyAnnotations 收到
+  // 同一份未變更的標記會誤判成「已存在且沒變」而完全跳過重試，永遠補不回來。
+  const failedIds = new Set<string>();
   list.forEach((ann) => {
     const prev = renderedAnnotations.get(ann.id);
     if (!prev) {
-      addAnnotationMark(ann);
+      if (!addAnnotationMark(ann)) failedIds.add(ann.id);
     } else if (prev.color !== ann.color || prev.cfi !== ann.cfi) {
       removeAnnotationMark(prev);
-      addAnnotationMark(ann);
+      if (!addAnnotationMark(ann)) failedIds.add(ann.id);
     }
   });
-  renderedAnnotations = new Map(list.map((a) => [a.id, a]));
+  renderedAnnotations = new Map(list.filter((a) => !failedIds.has(a.id)).map((a) => [a.id, a]));
 };
 
 // 使用者點空白處/開始劃下一段選取時，清掉目前顯示中章節 iframe 的原生選取範圍，
