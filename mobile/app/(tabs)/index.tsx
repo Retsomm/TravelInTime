@@ -116,13 +116,13 @@ const LibraryScreen = () => {
             hasCover: Boolean(msg.coverBase64),
           });
         }
-        const patch: Partial<Pick<BookRecord, 'title' | 'author' | 'coverUri'>> = {};
+        const patch: Partial<Pick<BookRecord, 'title' | 'author' | 'coverFilename'>> = {};
         if (msg.title) patch.title = msg.title;
         if (msg.author) patch.author = msg.author;
         // 封面寫檔失敗（例如解碼異常）不應該連帶丟掉已經擷取到的書名/作者，兩者分開處理。
         if (msg.coverBase64) {
           try {
-            patch.coverUri = saveCoverImage(pending.id, msg.coverBase64, msg.coverMediaType);
+            patch.coverFilename = saveCoverImage(pending.id, msg.coverBase64, msg.coverMediaType);
           } catch (err) {
             console.warn('[library] saveCoverImage failed', err);
           }

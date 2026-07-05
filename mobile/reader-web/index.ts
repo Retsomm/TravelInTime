@@ -1,7 +1,7 @@
 import ePub from 'epubjs';
 import type { Book, Rendition } from 'epubjs';
 import * as OpenCC from 'opencc-js';
-import type { InboundMessage, OutboundMessage } from '../lib/readerMessages';
+import type { InboundMessage, OutboundMessage, TocItem } from '../lib/readerMessages';
 import { DEFAULT_TYPOGRAPHY, normalizeFontFamily, type TypographySettings } from '../lib/readerSettings';
 
 declare global {
@@ -20,6 +20,69 @@ let typography: TypographySettings = DEFAULT_TYPOGRAPHY;
 // 還原成書本原本的簡體文字，並不會真的轉換成繁體。
 let baseScript: TypographySettings['script'] = 'tc';
 const contentDocs = new Set<Document>();
+
+// 章節目錄快取（目錄面板顯示用）與 spine href 順序（比照網頁版 Reader.tsx 的
+// getChapterTitle／getBookmarkLabel，用來把目前位置換算成章節標題）。
+let tocCache: TocItem[] = [];
+let spineHrefs: string[] = [];
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const buildToc = (items: any[]): TocItem[] =>
+  items.map((item) => ({
+    id: (item.href as string) || (item.label as string) || Math.random().toString(36).slice(2),
+    href: (item.href as string) ?? '',
+    label: (item.label as string)?.trim() ?? '',
+    subitems: item.subitems?.length ? buildToc(item.subitems) : undefined,
+  }));
+
+const hrefToSpineIndex = (href: string): number => {
+  const file = href.split('#')[0];
+  return spineHrefs.findIndex(
+    (h) => h === file || h === href || (Boolean(file) && (h.endsWith(`/${file}`) || file.endsWith(`/${h}`)))
+  );
+};
+
+// 同檔案完全相符、深度越深（越靠近葉節點）優先，比照網頁版 getChapterTitle。
+const findExactChapterLabel = (curFile: string): string => {
+  let bestLabel = '';
+  let bestDepth = -1;
+  const search = (items: TocItem[], depth: number) => {
+    for (const item of items) {
+      const itemFile = item.href.split('#')[0];
+      if (itemFile === curFile && depth > bestDepth) {
+        bestLabel = item.label;
+        bestDepth = depth;
+      }
+      if (item.subitems?.length) search(item.subitems, depth + 1);
+    }
+  };
+  search(tocCache, 0);
+  return bestLabel;
+};
+
+// 找不到精確相符時，退而求其次找 spine 索引最接近（但不超過）目前章節的目錄項目，
+// 比照網頁版 getBookmarkLabel 的 fallback 邏輯。
+const findNearestChapterLabel = (curSpineIdx: number): string => {
+  let bestLabel = '';
+  let bestIdx = -1;
+  const search = (items: TocItem[]) => {
+    for (const item of items) {
+      const si = hrefToSpineIndex(item.href);
+      if (si !== -1 && si <= curSpineIdx && si > bestIdx) {
+        bestLabel = item.label;
+        bestIdx = si;
+      }
+      if (item.subitems?.length) search(item.subitems);
+    }
+  };
+  search(tocCache);
+  return bestLabel;
+};
+
+const getChapterLabel = (href: string, spineIdx: number): string => {
+  const curFile = (href ?? '').split('#')[0];
+  return findExactChapterLabel(curFile) || findNearestChapterLabel(spineIdx) || '書籤';
+};
 
 // 比照 renderer/src/components/Reader/scriptConversion.ts：opencc-js 轉換器延遲建立，
 // originalTexts 記住轉換前的原始文字，切回原始 script 時可以還原（不必重新解析文件）。
@@ -361,11 +424,13 @@ const loadBook = async (base64: string, cfi: string | null) => {
       post({
         type: 'relocated',
         cfi: l.start.cfi,
+        href: l.start.href ?? '',
         page: displayed.page,
         total: displayed.total,
         percentage: Math.max(0, Math.min(1, total)),
         atStart: Boolean(l.atStart),
         atEnd: Boolean(l.atEnd),
+        chapterTitle: getChapterLabel(l.start.href ?? '', l.start.index),
       });
     });
 
@@ -376,6 +441,14 @@ const loadBook = async (base64: string, cfi: string | null) => {
     const lang = ((book as any).package?.metadata?.language as string | undefined) ?? '';
     baseScript = /^zh$|zh[-_]?(cn|hans|sg)/i.test(lang) ? 'sc' : 'tc';
     post({ type: 'bookLanguageDetected', baseScript });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const navToc: any[] = (book.navigation as any)?.toc ?? [];
+    tocCache = buildToc(navToc);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    spineHrefs = ((book.spine as any)?.items ?? []).map((item: any) => item.href as string);
+    post({ type: 'tocLoaded', toc: tocCache });
+
     await rendition.display(cfi ?? undefined);
     // 全書頁面定位索引，跑完後 relocated 事件的 l.start.percentage 才會是精確的全書百分比
     // （不是章節內比例）。放在 display() 之後、不 await，避免拖慢開書速度；期間的
@@ -413,6 +486,9 @@ const handleMessage = (event: MessageEvent<string>) => {
   if (msg.type === 'load') loadBook(msg.base64, msg.cfi);
   if (msg.type === 'prev') turnPage('prev');
   if (msg.type === 'next') turnPage('next');
+  if (msg.type === 'goto') rendition?.display(msg.target).catch(() => {
+    /* 目標 CFI／href 已失效（例如書籍內容變動），忽略即可 */
+  });
   if (msg.type === 'extractMeta') extractMeta(msg.base64);
   if (msg.type === 'setDarkMode') setDarkMode(msg.darkMode);
   if (msg.type === 'setTypography') {

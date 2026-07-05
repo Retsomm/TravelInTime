@@ -1,10 +1,10 @@
 import { Pressable, ScrollView, Text, View } from 'react-native';
+import { IconPause, IconPlay, IconReset } from './icons';
 import { FONT_OPTIONS, type ReadingDirection, type Script } from '../lib/readerSettings';
 import { useTheme } from '../lib/theme';
 import type { TTSVoice } from '../lib/tts';
 
 interface Props {
-  onClose: () => void;
   fontSize: number;
   onFontSizeChange: (v: number) => void;
   fontFamily: string;
@@ -36,7 +36,6 @@ interface Props {
 const SECT_TITLE_STYLE = { fontSize: 11, letterSpacing: 1, textTransform: 'uppercase' as const, marginBottom: 10 };
 
 const SettingsPanel = ({
-  onClose,
   fontSize, onFontSizeChange, fontFamily, onFontFamilyChange,
   script, onScriptChange, readingDirection, onReadingDirectionChange,
   lineHeight, onLineHeightChange, letterSpacing, onLetterSpacingChange, onReset,
@@ -71,10 +70,7 @@ const SettingsPanel = ({
 
   return (
     <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: colors.paperBg, zIndex: 20 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', height: 48, paddingHorizontal: 12, borderBottomWidth: 1, borderColor: colors.borderColor }}>
-        <Pressable onPress={onClose} hitSlop={12} accessibilityRole="button" accessibilityLabel="關閉排版與語音設定">
-          <Text style={{ fontSize: 24, color: colors.ink, width: 32 }}>‹</Text>
-        </Pressable>
+      <View style={{ flexDirection: 'row', alignItems: 'center', height: 48, paddingHorizontal: 20, borderBottomWidth: 1, borderColor: colors.borderColor }}>
         <Text style={{ fontSize: 16, fontWeight: '500', color: colors.ink }}>排版與語音</Text>
       </View>
 
@@ -218,7 +214,7 @@ const SettingsPanel = ({
                   }}
                   accessibilityLabel="重置朗讀進度"
                 >
-                  <Text style={{ color: colors.ink2, fontSize: 15 }}>↺</Text>
+                  <IconReset color={colors.ink2} />
                 </Pressable>
                 <Pressable
                   onPress={ttsPlaying ? onTTSPause : onTTSPlay}
@@ -228,7 +224,7 @@ const SettingsPanel = ({
                   }}
                   accessibilityLabel={ttsPlaying ? '暫停朗讀' : '開始朗讀'}
                 >
-                  <Text style={{ color: colors.paperBg, fontSize: 16 }}>{ttsPlaying ? '❚❚' : '▶'}</Text>
+                  {ttsPlaying ? <IconPause color={colors.paperBg} /> : <IconPlay color={colors.paperBg} />}
                 </Pressable>
               </View>
             </View>

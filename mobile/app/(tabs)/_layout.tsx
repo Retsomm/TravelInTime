@@ -1,4 +1,5 @@
 import { Tabs } from 'expo-router';
+import { IconBook, IconSettings } from '../../components/icons';
 import { useTheme } from '../../lib/theme';
 
 export default function TabsLayout() {
@@ -12,8 +13,14 @@ export default function TabsLayout() {
         tabBarInactiveTintColor: colors.ink3,
       }}
     >
-      <Tabs.Screen name="index" options={{ title: '書櫃' }} />
-      <Tabs.Screen name="settings" options={{ title: '設定' }} />
+      <Tabs.Screen
+        name="index"
+        options={{ title: '書櫃', tabBarIcon: ({ color }) => <IconBook color={color as string} /> }}
+      />
+      <Tabs.Screen
+        name="settings"
+        options={{ title: '設定', tabBarIcon: ({ color }) => <IconSettings color={color as string} /> }}
+      />
     </Tabs>
   );
 }

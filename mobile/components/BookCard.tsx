@@ -1,5 +1,6 @@
+import { useMemo } from 'react';
 import { Image, Pressable, Text, View } from 'react-native';
-import type { BookRecord } from '../lib/library';
+import { getCoverUri, type BookRecord } from '../lib/library';
 import { coverStyleFor } from '../lib/coverStyles';
 import { useTheme } from '../lib/theme';
 
@@ -18,6 +19,7 @@ const BookCard = ({ record, width, onPress, onDelete }: Props) => {
   const pct = Math.round((record.progress ?? 0) * 100);
   const style = coverStyleFor(record.id);
   const coverHeight = Math.round(width * 1.5);
+  const coverUri = useMemo(() => getCoverUri(record), [record.coverFilename, record.coverUri]);
 
   return (
     <View style={{ width }}>
@@ -36,8 +38,8 @@ const BookCard = ({ record, width, onPress, onDelete }: Props) => {
             backgroundColor: style.bg,
           }}
         >
-          {record.coverUri ? (
-            <Image source={{ uri: record.coverUri }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+          {coverUri ? (
+            <Image source={{ uri: coverUri }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
           ) : (
             <View style={{ flex: 1, justifyContent: 'space-between', padding: 14 }}>
               <View>

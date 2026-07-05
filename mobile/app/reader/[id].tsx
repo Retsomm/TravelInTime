@@ -3,21 +3,27 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Linking, Platform, Pressable, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
+import { IconBack, IconBookmarkFill, IconBookmarkOutline, IconChapters, IconSettings } from '../../components/icons';
+import ListPanel from '../../components/ListPanel';
 import SettingsPanel from '../../components/SettingsPanel';
 import {
   type BookRecord,
   type BookSettings,
+  type Bookmark,
+  generateId,
   getBookBase64,
   listBooks,
   loadBookSettings,
+  loadBookmarks,
   loadReadingCfi,
   saveBookSettings,
+  saveBookmarks,
   saveReadingCfi,
   touchBook,
   updateProgress,
 } from '../../lib/library';
 import { READER_HTML } from '../../lib/readerHtml.generated';
-import type { OutboundMessage } from '../../lib/readerMessages';
+import type { OutboundMessage, TocItem } from '../../lib/readerMessages';
 import { DEFAULT_TYPOGRAPHY } from '../../lib/readerSettings';
 import { useTheme } from '../../lib/theme';
 import { useTTS } from '../../lib/tts';
@@ -33,6 +39,12 @@ const ReaderScreen = () => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [settingsVisible, setSettingsVisible] = useState(false);
   const [typography, setTypography] = useState<BookSettings>(DEFAULT_TYPOGRAPHY);
+  const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
+  const [toc, setToc] = useState<TocItem[]>([]);
+  const [currentCfi, setCurrentCfi] = useState('');
+  const [currentHref, setCurrentHref] = useState('');
+  const [currentChapterTitle, setCurrentChapterTitle] = useState('');
+  const [listPanelTab, setListPanelTab] = useState<'bookmarks' | 'chapters' | 'bookinfo' | 'notes' | null>(null);
   const settingsLoadedRef = useRef(false);
   const hadSavedSettingsRef = useRef(false);
   const chapterTextResolverRef = useRef<((text: string) => void) | null>(null);
@@ -74,7 +86,21 @@ const ReaderScreen = () => {
 
   useEffect(() => {
     tts.reset();
+    setToc([]);
+    setCurrentCfi('');
+    setCurrentHref('');
+    setCurrentChapterTitle('');
+    setListPanelTab(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    loadBookmarks(id).then((saved) => {
+      if (!cancelled) setBookmarks(saved);
+    });
+    return () => { cancelled = true; };
   }, [id]);
 
   const handleWebViewReady = useCallback(async () => {
@@ -117,11 +143,18 @@ const ReaderScreen = () => {
       }
       if (msg.type === 'relocated') {
         setLoading(false);
+        setCurrentCfi(msg.cfi);
+        setCurrentHref(msg.href);
+        setCurrentChapterTitle(msg.chapterTitle);
         relocatedResolverRef.current?.();
         relocatedResolverRef.current = null;
         if (!id) return;
         saveReadingCfi(id, msg.cfi);
         updateProgress(id, msg.percentage);
+        return;
+      }
+      if (msg.type === 'tocLoaded') {
+        setToc(msg.toc);
         return;
       }
       if (msg.type === 'error') {
@@ -242,6 +275,46 @@ const ReaderScreen = () => {
     setTypography((prev) => ({ ...prev, fontSize: 16, lineHeight: 1.8, letterSpacing: 0 }));
   };
 
+  const isBookmarked = bookmarks.some((b) => b.cfi === currentCfi);
+
+  const handleToggleBookmark = () => {
+    if (!id || !currentCfi) return;
+    setBookmarks((prev) => {
+      const next = prev.some((b) => b.cfi === currentCfi)
+        ? prev.filter((b) => b.cfi !== currentCfi)
+        : [...prev, { id: generateId(), cfi: currentCfi, label: currentChapterTitle || '書籤', addedAt: Date.now() }];
+      saveBookmarks(id, next);
+      return next;
+    });
+  };
+
+  const handleDeleteBookmark = (bookmarkId: string) => {
+    if (!id) return;
+    setBookmarks((prev) => {
+      const next = prev.filter((b) => b.id !== bookmarkId);
+      saveBookmarks(id, next);
+      return next;
+    });
+  };
+
+  const handleNavigateToTarget = (target: string) => {
+    webviewRef.current?.postMessage(JSON.stringify({ type: 'goto', target }));
+    setListPanelTab(null);
+  };
+
+  // 設定面板／清單面板共用同一個畫面區域，一次只會顯示其中一個：開啟其中一個時
+  // 要順便關掉另一個，否則兩個 overlay 疊在一起，關掉上層那個又會露出底下還開著的另一個。
+  // 兩顆按鈕都是開關型：再按一次目前開著的那顆就直接關閉，不需要額外的關閉鈕/麵包屑列。
+  const toggleSettings = () => {
+    setListPanelTab(null);
+    setSettingsVisible((prev) => !prev);
+  };
+
+  const toggleListPanel = () => {
+    setSettingsVisible(false);
+    setListPanelTab((prev) => (prev ? null : 'bookmarks'));
+  };
+
   return (
     <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: colors.paperBg }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', height: 44, paddingHorizontal: 12 }}>
@@ -251,19 +324,47 @@ const ReaderScreen = () => {
           accessibilityRole="button"
           accessibilityLabel="返回書櫃"
         >
-          <Text style={{ fontSize: 24, color: colors.ink }}>‹</Text>
+          <IconBack color={colors.ink} />
         </Pressable>
-        <Text style={{ flex: 1, textAlign: 'center', fontSize: 16, marginRight: 24, color: colors.ink }} numberOfLines={1}>
+        <Text style={{ flex: 1, textAlign: 'center', fontSize: 16, color: colors.ink }} numberOfLines={1}>
           {record?.title ?? '閱讀中'}
         </Text>
-        <Pressable
-          onPress={() => setSettingsVisible(true)}
-          hitSlop={12}
-          accessibilityRole="button"
-          accessibilityLabel="排版與語音設定"
-        >
-          <Text style={{ fontSize: 18, color: colors.ink }}>⚙</Text>
-        </Pressable>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+          <Pressable
+            onPress={handleToggleBookmark}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel={isBookmarked ? '移除書籤' : '加入書籤'}
+          >
+            {isBookmarked ? <IconBookmarkFill color={colors.progressFill} /> : <IconBookmarkOutline color={colors.ink} />}
+          </Pressable>
+          <Pressable
+            onPress={toggleListPanel}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="書籤／目錄／資訊"
+            accessibilityState={{ selected: listPanelTab !== null }}
+            style={{
+              width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center',
+              backgroundColor: listPanelTab !== null ? colors.paperBg2 : 'transparent',
+            }}
+          >
+            <IconChapters color={listPanelTab !== null ? colors.progressFill : colors.ink} />
+          </Pressable>
+          <Pressable
+            onPress={toggleSettings}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="排版與語音設定"
+            accessibilityState={{ selected: settingsVisible }}
+            style={{
+              width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center',
+              backgroundColor: settingsVisible ? colors.paperBg2 : 'transparent',
+            }}
+          >
+            <IconSettings color={settingsVisible ? colors.progressFill : colors.ink} />
+          </Pressable>
+        </View>
       </View>
       <View style={{ flex: 1 }}>
         <WebView
@@ -290,7 +391,6 @@ const ReaderScreen = () => {
         ) : null}
         {settingsVisible && (
           <SettingsPanel
-            onClose={() => setSettingsVisible(false)}
             fontSize={typography.fontSize}
             onFontSizeChange={(v) => setTypography((prev) => ({ ...prev, fontSize: v }))}
             fontFamily={typography.fontFamily}
@@ -317,6 +417,18 @@ const ReaderScreen = () => {
             ttsSleepMinutes={tts.sleepMinutes}
             onTTSSleepChange={tts.onSleepChange}
             ttsSleepRemaining={tts.sleepRemaining}
+          />
+        )}
+        {listPanelTab && (
+          <ListPanel
+            initialTab={listPanelTab}
+            bookmarks={bookmarks}
+            onNavigateBookmark={(bm) => handleNavigateToTarget(bm.cfi)}
+            onDeleteBookmark={handleDeleteBookmark}
+            toc={toc}
+            currentHref={currentHref}
+            onNavigateChapter={handleNavigateToTarget}
+            record={record}
           />
         )}
       </View>
