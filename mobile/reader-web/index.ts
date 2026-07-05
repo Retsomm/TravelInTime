@@ -1,6 +1,8 @@
 import ePub from 'epubjs';
 import type { Book, Rendition } from 'epubjs';
+import * as OpenCC from 'opencc-js';
 import type { InboundMessage, OutboundMessage } from '../lib/readerMessages';
+import { DEFAULT_TYPOGRAPHY, normalizeFontFamily, type TypographySettings } from '../lib/readerSettings';
 
 declare global {
   interface Window {
@@ -11,7 +13,122 @@ declare global {
 let book: Book | null = null;
 let rendition: Rendition | null = null;
 let darkMode = false;
+let typography: TypographySettings = DEFAULT_TYPOGRAPHY;
+// 書本本身原始使用的文字（依 epub metadata 的 language 判斷，比照網頁版 Reader.tsx 的
+// baseScriptRef）。轉換/還原都要拿這個當基準，不能寫死假設書本原始文字一定是繁體——
+// 上一版沒有偵測這個值，導致「書本原本就是簡體」時，切成「繁體」只會呼叫 restoreDoc()
+// 還原成書本原本的簡體文字，並不會真的轉換成繁體。
+let baseScript: TypographySettings['script'] = 'tc';
 const contentDocs = new Set<Document>();
+
+// 比照 renderer/src/components/Reader/scriptConversion.ts：opencc-js 轉換器延遲建立，
+// originalTexts 記住轉換前的原始文字，切回原始 script 時可以還原（不必重新解析文件）。
+let toSC: ((s: string) => string) | null = null;
+let toTC: ((s: string) => string) | null = null;
+const getToSC = () => { if (!toSC) toSC = OpenCC.Converter({ from: 'tw', to: 'cn' }); return toSC; };
+const getToTC = () => { if (!toTC) toTC = OpenCC.Converter({ from: 'cn', to: 'tw' }); return toTC; };
+const originalTexts = new WeakMap<Node, string>();
+
+const convertDoc = (doc: Document, convert: (s: string) => string) => {
+  const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+  let node: Node | null;
+  while ((node = walker.nextNode())) {
+    if (node.nodeValue && !originalTexts.has(node)) {
+      originalTexts.set(node, node.nodeValue);
+      node.nodeValue = convert(node.nodeValue);
+    }
+  }
+};
+
+const restoreDoc = (doc: Document) => {
+  const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+  let node: Node | null;
+  while ((node = walker.nextNode())) {
+    const original = originalTexts.get(node);
+    if (original !== undefined) {
+      node.nodeValue = original;
+      originalTexts.delete(node);
+    }
+  }
+};
+
+// 只有「顯示腳本」跟「書本原始腳本」不同時才需要轉換；相同就還原成書本原文，
+// 比照網頁版 Reader.tsx 的 `if (scriptRef.current !== baseScriptRef.current)` 判斷。
+const applyScriptToDoc = (doc: Document) => {
+  if (!doc.body) return;
+  if (typography.script === baseScript) {
+    restoreDoc(doc);
+  } else {
+    convertDoc(doc, typography.script === 'sc' ? getToSC() : getToTC());
+  }
+};
+
+// 比照 renderer/src/components/Reader/readerStyles.ts 的字體/行距/字距覆寫邏輯，
+// 這幾個功能各自用獨立的 <style> id，互不干擾，也都要额外覆寫 inline style 才蓋得過書本內容。
+const WEB_FONT_URLS: Record<string, string> = {
+  Huninn: 'https://fonts.googleapis.com/css2?family=Huninn&display=swap',
+  'Noto Serif TC': 'https://fonts.googleapis.com/css2?family=Noto+Serif+TC&display=swap',
+  'Noto Sans TC': 'https://fonts.googleapis.com/css2?family=Noto+Sans+TC&display=swap',
+  'LXGW WenKai TC': 'https://fonts.googleapis.com/css2?family=LXGW+WenKai+TC&display=swap',
+};
+
+const injectWebFontLink = (doc: Document, href: string | null) => {
+  const id = 'tit-webfont-link';
+  let el = doc.getElementById(id) as HTMLLinkElement | null;
+  if (!href) { el?.remove(); return; }
+  if (!el) {
+    el = doc.createElement('link');
+    el.id = id;
+    el.rel = 'stylesheet';
+    doc.head?.appendChild(el);
+  }
+  el.href = href;
+};
+
+const applyFontFamilyOverride = (doc: Document, family: string) => {
+  const normalized = normalizeFontFamily(family);
+  injectStyle(doc, 'tit-font', `:root * { font-family: ${normalized} !important; }`);
+  const fontKey = Object.keys(WEB_FONT_URLS).find((k) => normalized.includes(k));
+  injectWebFontLink(doc, fontKey ? WEB_FONT_URLS[fontKey] : null);
+};
+
+const applyLineHeightOverride = (doc: Document, lh: number) => {
+  injectStyle(doc, 'tit-lh', `:root * { line-height: ${lh} !important; }`);
+};
+
+const applyLetterSpacingOverride = (doc: Document, ls: number) => {
+  injectStyle(doc, 'tit-ls', `:root * { letter-spacing: ${ls}em !important; }`);
+};
+
+const setInlineFontSize = (doc: Document, size: number) => {
+  doc.querySelectorAll('body, body *').forEach((el) => {
+    try {
+      const style = (el as HTMLElement).style;
+      if (style) style.setProperty('font-size', `${size}px`, 'important');
+    } catch {
+      /* SVG / MathML 等特殊元素略過 */
+    }
+  });
+};
+
+const applyFontSizeOverride = (doc: Document, size: number) => {
+  injectStyle(doc, 'tit-fs', `:root * { font-size: ${size}px !important; }`);
+  setInlineFontSize(doc, size);
+  setTimeout(() => setInlineFontSize(doc, size), 150);
+};
+
+const applyTypographyToDoc = (doc: Document) => {
+  applyFontFamilyOverride(doc, typography.fontFamily);
+  applyFontSizeOverride(doc, typography.fontSize);
+  applyLineHeightOverride(doc, typography.lineHeight);
+  applyLetterSpacingOverride(doc, typography.letterSpacing);
+  applyScriptToDoc(doc);
+};
+
+const setTypography = (next: TypographySettings) => {
+  typography = next;
+  contentDocs.forEach((doc) => applyTypographyToDoc(doc));
+};
 
 // 比照 Electron 版 renderer/src/components/Reader/readerStyles.ts 的 applyDarkOverride：
 // CSS 注入蓋不過書本元素的 inline !important style，所以除了注入 <style> 還要逐一覆寫
@@ -125,10 +242,15 @@ const turnPage = (direction: 'prev' | 'next') => {
 // 右 30%」完全不可靠。這次改把點擊區塊做成蓋在 #viewer 最上層、屬於最外層文件的透明 div
 // （見 build-reader-html.js 的 #tap-zone-prev / #tap-zone-next），點擊事件直接發生在最外層文件，
 // 不會經過 iframe 內部那套失準的座標系，兩平台都可靠。
-const registerTapZone = (id: string, direction: 'prev' | 'next') => {
+// 右→左（RTL）閱讀方向下，畫面左側該觸發下一頁、右側觸發上一頁，跟 LTR 相反
+// （比照網頁版 Reader.tsx 的翻頁箭頭在 rtl 時互換 prevPage/nextPage 的邏輯）。
+const registerTapZone = (id: string, baseDirection: 'prev' | 'next') => {
   const el = document.getElementById(id);
   if (!el) return;
   el.addEventListener('click', () => {
+    const direction = typography.readingDirection === 'rtl'
+      ? (baseDirection === 'prev' ? 'next' : 'prev')
+      : baseDirection;
     debugLog(`[tap-zone] ${direction}`);
     turnPage(direction);
   });
@@ -202,6 +324,7 @@ const loadBook = async (base64: string, cfi: string | null) => {
       if (!doc) return;
       contentDocs.add(doc);
       applyDarkOverride(doc, darkMode);
+      applyTypographyToDoc(doc);
     });
 
     rendition.on('relocated', (loc: unknown) => {
@@ -235,6 +358,12 @@ const loadBook = async (base64: string, cfi: string | null) => {
     });
 
     await book.ready;
+    // 簡體判斷比照網頁版 Reader.tsx：zh-CN / zh-Hans / zh-SG，或單獨的 "zh"（不帶 region code）。
+    // 一定要在 rendition.display() 之前判斷完成，因為 display() 會觸發 content hook 套用 script。
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const lang = ((book as any).package?.metadata?.language as string | undefined) ?? '';
+    baseScript = /^zh$|zh[-_]?(cn|hans|sg)/i.test(lang) ? 'sc' : 'tc';
+    post({ type: 'bookLanguageDetected', baseScript });
     await rendition.display(cfi ?? undefined);
     // 全書頁面定位索引，跑完後 relocated 事件的 l.start.percentage 才會是精確的全書百分比
     // （不是章節內比例）。放在 display() 之後、不 await，避免拖慢開書速度；期間的
@@ -246,6 +375,20 @@ const loadBook = async (base64: string, cfi: string | null) => {
     unlockNav();
     post({ type: 'error', message: err instanceof Error ? err.message : String(err) });
   }
+};
+
+// TTS 朗讀文字來源：目前顯示中章節的 iframe document.body 全文（paginated 模式下，
+// 一個章節的完整內容是渲染在同一份 document 裡用 CSS 分欄呈現，body.textContent 涵蓋整章，
+// 不只是目前可見的那一頁）。這是簡化版實作，不像網頁版那樣從目前頁面的精確字元位移開始，
+// 一律從章節開頭朗讀；也還沒有 CFI/高亮同步，僅供 mobile 第一版朗讀功能使用。
+const getChapterText = (): string => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const contents = (rendition as any)?.getContents?.() as { document: Document }[] | undefined;
+  const doc = contents?.[0]?.document;
+  if (!doc?.body) return '';
+  const clone = doc.body.cloneNode(true) as HTMLElement;
+  clone.querySelectorAll('script, style').forEach((el) => el.remove());
+  return (clone.textContent ?? '').replace(/\s+/g, ' ').trim();
 };
 
 const handleMessage = (event: MessageEvent<string>) => {
@@ -260,6 +403,11 @@ const handleMessage = (event: MessageEvent<string>) => {
   if (msg.type === 'next') turnPage('next');
   if (msg.type === 'extractMeta') extractMeta(msg.base64);
   if (msg.type === 'setDarkMode') setDarkMode(msg.darkMode);
+  if (msg.type === 'setTypography') {
+    const { type: _type, ...settings } = msg;
+    setTypography(settings);
+  }
+  if (msg.type === 'getChapterText') post({ type: 'chapterText', text: getChapterText() });
 };
 
 // RN WebView 在 Android 觸發 document 的 message 事件，iOS 觸發 window 的，兩者都要監聽

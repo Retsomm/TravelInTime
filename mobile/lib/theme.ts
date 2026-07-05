@@ -6,17 +6,19 @@ export interface ThemeColors {
   paperBg2: string;
   borderColor: string;
   ink: string;
+  ink2: string;
   ink3: string;
   progressTrack: string;
   progressFill: string;
 }
 
-// 比照 renderer/src/page/Library.tsx 的 darkMode 色票（oklch 換成 RN 認得的 hex）。
+// 比照 renderer/src/hooks/useThemeColors.ts 的 darkMode 色票（oklch 換成 RN 認得的 hex）。
 export const LIGHT_THEME: ThemeColors = {
   paperBg: '#f9f7f2',
   paperBg2: '#f1ede4',
   borderColor: '#e4ddd0',
   ink: '#2a2420',
+  ink2: '#5a4e44',
   ink3: '#9a8f80',
   progressTrack: '#e4ddd0',
   progressFill: '#c17a4a',
@@ -27,6 +29,7 @@ export const DARK_THEME: ThemeColors = {
   paperBg2: '#231f1c',
   borderColor: '#3a3430',
   ink: '#e8e0d4',
+  ink2: '#b8afa4',
   ink3: '#8a7f74',
   progressTrack: '#3a3430',
   progressFill: '#c17a4a',

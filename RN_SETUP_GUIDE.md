@@ -353,4 +353,63 @@ Monorepo 常見誤區：使用者回報「手機上」的問題，實際上可�
 - **已知限制**：WebView 首次載入的極短暫瞬間，會先看到 `build-reader-html.js` 內寫死的淺色背景（`#f9f7f2`），等 JS 執行完 `ready`→收到 `setDarkMode` 訊息後才會轉成深色，深色模式下可能有一閃而過的白底閃爍；這次沒有處理這個小瑕疵（若要修，可以在 build-reader-html.js 用 query string 或某種方式讓 WebView 建立當下就知道 darkMode 初始值，但目前 `source={{ html: READER_HTML }}` 是靜態字串，要做到這件事需要額外改動，先不做）。
 - **驗證狀態**：`tsc --noEmit`、`yarn build:reader`、`expo export --platform android`、`expo export --platform ios` 皆通過，純打包/型別驗證。**完全尚未實機/模擬器測試**：切換深色模式後書本內文背景/文字顏色是否正確變化、翻頁後新頁面是否維持正確色調、閱讀頁開著時從設定頁切換是否即時生效、上述提到的短暫白底閃爍實際觀感如何，都需要你在 iOS/Android 模擬器重新測試「+ 加入書籍」後開書、翻頁、來回切換深色模式確認。
 
+**第十二輪：閱讀頁頂部功能列重構——三顆按鈕任務拆解（2026-07-04）**：
+- 使用者要求把閱讀頁頂部功能列比照網頁版 `renderer/src/components/Toolbar.tsx` 補齊，右側共三顆按鈕（比照網頁版 7 顆圖示簡化為手機版最關鍵的 3 類）：
+  1. **設定**（`renderer/src/components/SettingsPanel.tsx`）：字體排版（字體家族／繁簡切換／左右閱讀方向／字體大小／行距／字距／重設預設值）＋語音朗讀（TTS：語音選擇／播放暫停／重置／語速／睡眠計時）。
+  2. **書籤按鈕**：點擊將目前頁面加入／移出書籤清單（比照網頁版 `handleToggleBookmark`／`isBookmarked`）。
+  3. **清單總按鈕**：開啟一個分頁面板，內含「書籤清單／目錄清單／書籍資訊／註記清單」四個分頁（比照網頁版 `activePanel` 的 `bookmarks`／`chapters`／`bookinfo`／`notes` 四種面板）。
+- 執行順序：先完成第 1 項（本輪），第 2、3 項留待後續對話繼續（狀態見下方清單）。
+
+**本輪已完成（第 1 項：設定面板＋TTS，尚未實機測試）**：
+- 新增 `mobile/lib/readerSettings.ts`：搬移網頁版 `useReaderStore.ts` 的 `FONT_OPTIONS`（字型 CSS 字串必須跟網頁版完全一致，因為 `reader-web` 用同一組字串比對要不要注入對應的 Google Fonts 連結）、`TypographySettings` 型別、`DEFAULT_TYPOGRAPHY`、`normalizeFontFamily`。
+- `mobile/lib/readerMessages.ts` 新增 inbound `setTypography`（帶完整 `TypographySettings`）與 `getChapterText`，outbound 新增 `chapterText`。
+- `mobile/reader-web/index.ts` 搬移網頁版 `renderer/src/components/Reader/readerStyles.ts` 的 `applyFontFamilyOverride`／`applyFontSizeOverride`／`applyLineHeightOverride`／`applyLetterSpacingOverride`（含 Google Fonts `<link>` 注入邏輯），以及 `renderer/src/components/Reader/scriptConversion.ts` 的簡繁轉換（改用 `opencc-js`，`convertDoc`/`restoreDoc` 用 `WeakMap` 記住原始文字以便切換回來）。這幾個排版覆寫函式都跟已有的 `applyDarkOverride` 一樣掛在 `rendition.hooks.content.register(...)`，換頁/換章節時自動套用，並在 `setTypography()` 被呼叫時對 `contentDocs` 內所有已知 document 重新套用一次（跟深色模式那套機制共用同一個 pattern）。
+  - **右→左（RTL）閱讀方向**：網頁版其實只是把翻頁箭頭的 prev/next 語意互換，不是真的改 epub.js 內部分頁方向；mobile 版比照，`registerTapZone` 在 `readingDirection === 'rtl'` 時把左右點擊區的 prev/next 對調。
+  - **新增 `getChapterText` 訊息**：TTS 朗讀文字來源。實作方式是拿 `rendition.getContents()` 目前顯示中 iframe 的 `document.body.textContent`（paginated 模式下一個章節的完整內容渲染在同一份 document、只是用 CSS 分欄呈現，所以 `body.textContent` 涵蓋整章，不只目前可見那一頁）。
+- 新增 `mobile/lib/tts.ts`（`useTTS` hook）：用 `expo-speech`（新安裝的原生模組，**需要重新 `expo run:android`／`expo run:ios` 才會生效**，純 JS reload 不夠）取代網頁版 `useTTS.ts` 用的瀏覽器 Web Speech API。**這是簡化版**，只做 play/pause/resume/reset、語速、語音選擇（`Speech.getAvailableVoicesAsync()` 過濾 `zh` 開頭語言）、睡眠計時倒數；**沒有**網頁版那套逐字元 boundary 追蹤、跨章節背景預先載入、CFI 高亮同步（`ttsHighlight.ts`／`continueFromSpine` 那整套），這些留給後續「TTS 朗讀功能」任務項（見下方「後續重構任務」第 5 項）再視需要補上。
+  - 朗讀流程：`mobile/app/reader/[id].tsx` 的 `handleTTSPlay` 呼叫 `requestChapterText()`（用 pending-resolver pattern 包裝 WebView 的 `getChapterText`/`chapterText` 一來一回訊息成 Promise）拿到目前章節全文（**從章節開頭開始朗讀，不是從目前頁面精確位置開始**，這點跟網頁版不同，是簡化取捨），朗讀完一個章節後（`tts.speak` 的 `onAllDone` 回呼）自動送出 `next` 訊息翻頁、延遲 400ms 等 epub.js relocate 完成、再次 `getChapterText` 並繼續朗讀，直到翻到書尾抓不到文字為止才自然停止。
+- `mobile/components/SettingsPanel.tsx`：RN 版設定面板，比照網頁版 `SettingsPanel.tsx` 版面（字體清單／繁簡+方向兩組分段控制／字體大小·行距·字距三個數值 stepper／重設按鈕／語音清單橫向捲動 chips／播放卡片／睡眠計時分段控制），全螢幕 overlay（不是網頁版側邊欄，因為手機螢幕窄），沒有用任何圖示套件（沿用 app 既有「純 Text/Unicode 符號」風格，例如 `‹`、`⚙`、`▶`、`❚❚`、`↺`），沒有裝 slider 套件（語速改用跟字體大小同款的 +/- stepper，避免多裝一個原生依賴）。
+- `mobile/app/reader/[id].tsx`：頂部列右側新增齒輪 `⚙` 按鈕開啟 `SettingsPanel`；排版設定存在既有的 `mobile/lib/library.ts` 的 `BookSettings`/`saveBookSettings`/`loadBookSettings`（這幾個函式其實更早的回合就寫好了，只是這輪才第一次真正被用到）；用 `settingsLoadedRef` 避免載入設定完成前的初始 state 被自動存檔 effect 誤存成預設值蓋掉。
+- `mobile/lib/theme.ts` 新增 `ink2` 色票欄位（比照網頁版 `useThemeColors.ts` 的 `ink2Col`，設定面板次要文字要用）。
+- **依賴變更**：新增 `expo-speech`（用 `npx expo install` 裝，原生模組，SDK 57 對應版本 `~57.0.0`）、`opencc-js`（純 JS，`yarn add` 即可，只在 `reader-web` bundle 內使用，不進 RN 主 bundle，不需要原生重編）。`opencc-js` 的簡繁字典資料讓 `mobile/lib/readerHtml.generated.ts` 從原本數百 KB 暴增到 **2.5MB**（`yarn build:reader` 輸出可看到確切數字），純打包驗證沒有失敗，但沒有實測過這個尺寸對 WebView 初次載入速度的實際影響。
+- **驗證狀態**：`tsc --noEmit`、`expo-doctor`（20/20）、`expo export --platform android`、`expo export --platform ios` 皆通過，純打包/型別驗證。**完全尚未實機/模擬器測試**，而且這次有一個额外前提：加了 `expo-speech` 這個原生模組後，**必須先重新跑一次 `expo run:android`／`expo run:ios` 重新編譯 Dev Client**才能讓 TTS 生效（純 JS reload 或 `yarn start` 連原本的 Dev Client 不會有新原生模組）。測試時請至少確認：(1) 設定面板開關與版面在手機螢幕上是否正常顯示、(2) 字體/字級/行距/字距/繁簡/左右方向切換後書本內文是否即時套用、(3) TTS 播放/暫停/重置/語速/睡眠計時是否正常運作、翻頁後是否真的接續朗讀下一頁、(4) 語音清單是否有列出裝置上的中文語音（模擬器可能語音選項很少甚至沒有，屬預期情況）。
+
+**第十二輪追加修正：簡體轉繁體失敗（2026-07-04，使用者實測回報）**：
+- 使用者重新編譯（`expo run:android`/`expo run:ios`）後，`Cannot find native module 'ExpoSpeech'` 已解決，但接著測「簡體轉繁體」失敗。
+- **根因**：`mobile/reader-web/index.ts` 的 `applyScriptToDoc` 上一版寫死假設「書本原始文字一定是繁體」——選『繁體』就呼叫 `restoreDoc()` 還原成書本原文、選『簡體』才呼叫 `convertDoc(getToSC())` 轉換。如果書本原本就是簡體（例如 epub metadata `language` 是 `zh-CN`/`zh-Hans`/`zh`），選『繁體』只會把文字還原成「書本原本的簡體」，並不會真的轉成繁體，因為程式從沒把「簡體→繁體」這個方向的轉換函式 `getToTC()` 接進來過。網頁版 `Reader.tsx`／`scriptConversion.ts` 其實是靠 `baseScriptRef`（依 epub metadata 的 `language` 判斷書本原始語言）判斷該用哪個方向轉換，這次移植時漏掉了這個判斷。
+- **修正**：`reader-web/index.ts` 新增 `baseScript` 模組變數，在 `loadBook()` 內 `book.ready` 之後、`rendition.display()` 之前，用跟網頁版一致的規則判斷（`/^zh$|zh[-_]?(cn|hans|sg)/i` 比對 `book.package.metadata.language`）設定 `baseScript`，並透過新增的 outbound 訊息 `bookLanguageDetected` 回報給 RN。`applyScriptToDoc` 改成比較 `typography.script` 是否等於 `baseScript`：相等就 `restoreDoc()`（顯示書本原文），不相等才轉換，且轉換方向依目標腳本決定（`sc` 用 `getToSC()`、`tc` 用 `getToTC()`）——這才是完整雙向轉換，不再只支援「原文繁體轉簡體」單一方向。
+- `mobile/app/reader/[id].tsx` 新增 `hadSavedSettingsRef`（記錄這本書是否原本就有存過排版偏好）；收到 `bookLanguageDetected` 時，只有在**這本書從沒存過設定**的情況下才自動把 `script` 設成偵測到的 `baseScript`（比照網頁版「簡體書第一次開啟預設顯示簡體」的行為），使用者若已手動存過偏好則不覆蓋。
+- `mobile/lib/readerMessages.ts` 新增 `bookLanguageDetected` outbound 訊息型別。
+- **驗證狀態**：`yarn build:reader`、`tsc --noEmit`、`expo-doctor`（20/20）皆通過，純打包/型別驗證。**尚未實機測試**：麻煩重新 `yarn build:reader`（`yarn start`/`yarn android`/`yarn ios` 都會自動先跑，不需要重新原生編譯，這次改動不涉及原生模組）後，分別用「原本是繁體的書」「原本是簡體的書」測試繁簡切換兩個方向是否都正確轉換，以及沒存過設定的簡體書打開時是否自動顯示簡體。
+
+**第十二輪再追加：語音清單只顯示美佳/婷婷**（2026-07-04）：
+- `mobile/lib/tts.ts` 補上網頁版 `useTTS.ts` 的 `ALLOWED = /Meijia|Tingting|美佳|婷婷/i` 過濾邏輯：先篩出 `zh` 語言的語音，再只留名稱含「婷婷」「美佳」的，各取清單中最後一筆同名變體（避免同時列出多個版本），依「婷婷、美佳」順序排列。
+- **裝置差異提醒**：「婷婷」「美佳」是 iOS 系統內建的 Siri 中文語音名稱，Android 上通常不存在。若裝置/模擬器上這兩個語音都找不到，會 fallback 顯示所有 `zh` 開頭的語音（避免清單整個空掉沒得選），這點跟網頁版行為一致。實測時請留意 Android 上的語音清單內容可能跟 iOS 不同，屬預期情況，不是 bug。
+- 這次改動純 JS，不涉及原生模組，不需要重新原生編譯，重新整理/reload 即可生效。`tsc --noEmit` 已通過，**尚未實機測試**過濾後的清單內容是否符合預期。
+
+**第十二輪再追加：Android 語音清單顯示技術代號 + 完全沒聲音**（2026-07-04，使用者附 iOS/Android 截圖回報）：
+- iOS 實測確認「婷婷/美佳」過濾已生效（截圖正確只顯示這兩個）。Android 上 expo-speech 回傳的語音本來就沒有人類可讀名稱（`name` 欄位常常直接等於技術性 identifier，例如 `zh-TW-language`、`cmn-cn-x-cce-local`），這兩個 iOS 專屬語音在 Android 上不存在，會落到 fallback 分支「顯示所有 zh 語音」，於是清單顯示一堆英文技術代號。跟使用者確認後決定：**Android 全部保留、但換成友善標籤**，不砍成固定 2 個。
+  - `mobile/lib/tts.ts` 新增 `friendlyLabelForLanguage`／`withFriendlyLabels`：依語音的 `language` 欄位（`zh-TW`/`zh-CN`/`zh-HK`/`zh-SG`/裸 `zh`）組出「中文（台灣）」之類的標籤，同語言有多個變體時加編號（「中文（中國） 1」「中文（中國） 2」）區分；只套用在 fallback（非 iOS 婷婷/美佳）清單，不影響 iOS 那組已經是友善名稱的清單。`identifier` 欄位不變，選擇/朗讀邏輯不受影響。
+- 同一輪使用者接著回報「安卓版語音朗讀沒有聽到聲音」。**尚未確認根因**，但查了 `node_modules/expo-speech/android/.../SpeechModule.kt` 原生實作，發現一個可疑點：Android 的中文語音清單常包含「network」（需連網即時合成）與「-local」（內建離線）兩種變體，之前預設是選清單第一筆（`list[0]`），可能剛好選到需要連網合成、且模擬器/裝置沒有下載對應語音資料的那種，這種情況原生端經常「悄悄失敗」（連 `onError` 都不會觸發，不是我們攔截錯誤的邏輯漏掉）。
+  - **暫時處理**（非確定修復，因為沒辦法在這個環境重現）：`mobile/lib/tts.ts` 語音清單改成把 identifier 含 `-local`（離線語音，不依賴網路/雲端資料）的排到前面，讓預設選到的語音優先是離線的；另外在 `speakChunk` 加上 `onStart`／`onDone`／`onError` 的 `__DEV__` 診斷 log（含呼叫時用的 `voice` identifier 與文字長度），確認穩定後應移除。
+  - **麻煩你重新測試後回報 Metro terminal 印出的 `[tts]` 那幾行 log**：如果連 `onStart` 都沒印出來，代表引擎根本沒開始講（比較像我們哪裡傳錯參數，或原生端真的悄悄失敗）；如果 `onStart`/`onDone` 都有印出但還是沒聲音，比較像模擬器音訊路由或裝置本身靜音/音量問題，不是程式邏輯的 bug——這種情況建議直接去 Android 系統設定「協助工具 → 文字轉語音輸出 → 播放範例」測看看裝置本身的 TTS 引擎是否真的能發聲，排除是不是环境問題而不是我們程式的問題。
+- **驗證狀態**：`tsc --noEmit` 通過，純型別驗證。這次改動不涉及原生模組，不需要重新原生編譯，`yarn build:reader` 也不需要跑（`tts.ts` 是 RN 主 bundle 的一部分，不是 reader-web bundle）。**完全尚未實機驗證修復是否有效**，需要你提供上述診斷 log 才能進一步判斷根因。
+
+**第十二輪再追加：移除語音標籤的地區用字＋朗讀仍無聲音，補更多診斷 log**（2026-07-04）：
+- `mobile/lib/tts.ts` 的 `withFriendlyLabels` 拿掉依語言代碼標「中國／台灣／香港」的做法（原本的 `CHINESE_REGION_LABELS`），改成一律用通用標籤「中文語音」＋編號（有多筆才加編號，例如「中文語音 1」「中文語音 2」），不含任何地區字樣。
+- 使用者回報朗讀功能仍然沒有聲音（尚未回報上一輪加的 `[tts]`／`onStart`/`onDone`/`onError` log 內容，還無法判斷是「引擎沒開始講」還是「開始了但發不出聲音」）。這輪額外在 `mobile/app/reader/[id].tsx` 的 `handleTTSPlay` 加了 `[reader] chapterText length` 診斷 log，用來排除另一種可能：如果 `getChapterText` 從 WebView 抓回來的文字長度是 0（例如 `rendition.getContents()` 在目前 epub.js 狀態下抓不到內容），`tts.speak()` 根本不會被呼叫，症狀也會是「完全沒聲音」，但這種情況下 `[tts] speakChunk`/`onStart` 這些 log 完全不會出現——所以這兩組 log 合起來看才能判斷問題出在「抓文字」還是「語音引擎」這兩個環節的哪一個。
+- **這輪沒有能力進一步確認根因**，需要使用者提供 Metro terminal 印出的 `[reader] chapterText length` 與 `[tts]` 開頭那幾行 log 內容才能繼續往下查。
+- **驗證狀態**：`tsc --noEmit` 通過。純 JS 改動，不需要重新原生編譯。
+
+**第十二輪再追加：語音清單縮到每種語言 1 筆＋朗讀無聲音的診斷結論**（2026-07-04，使用者提供 log）：
+- 使用者貼出的語音清單顯示 Android 裝置上光是中文相關語音就有 16 筆（`cmn-cn-x-ccc/ccd/cce/ssa`、`cmn-tw-x-ctc/ctd/cte` 各自都有 `-local`／`-network` 兩份，加上 `zh-TW-language`／`zh-CN-language`），選項多到不知道選哪個。`mobile/lib/tts.ts` 新增 `dedupeByLanguage`：每個 `language`（例如 `zh-TW`／`zh-CN`）只保留一筆代表（因為排序已經把 `-local` 排到前面，保留下來的會是離線版本），比照 iOS 只留「婷婷／美佳」兩個選項的精神，把清單從 16 筆左右砍到跟裝置實際支援的語言數一致（通常 2 筆）。
+- **朗讀無聲音的診斷結論**：使用者提供的 log 顯示 `[reader] chapterText length 3140`（章節文字有正確抓到）、`[tts] speakChunk` 有正確帶 `voice` 參數、且 **`[tts] onStart` 確實有觸發**（觸發了兩次，用的是不同語音 `cmn-cn-x-cce-local` 與 `cmn-cn-x-ssa-local`，研判是測試時切換了不同語音選項各按了一次播放，不是程式邏輯重複呼叫的 bug）。`onStart` 是原生 `TextToSpeech` 的 `UtteranceProgressListener.onStart` 回呼，會觸發代表 Android 系統的語音引擎確實收到並「開始」這個 utterance——**代表我們這邊的程式邏輯（抓文字→呼叫 speak→引擎接受請求）是正常運作的**，問題比較可能出在裝置/模擬器本身的音訊環境（音量、音訊路由、或宣稱是離線但實際語音資料未完整下載），而不是這幾輪改的程式碼。
+  - 建議使用者直接去 Android 系統設定「協助工具（或設定裡的『語言與輸入』）→ 文字轉語音輸出 → 播放範例」測看看，脫離我們的 App，確認裝置本身的 TTS 引擎是否真的能發出聲音；如果系統內建測試也沒聲音，就能確定是裝置/模擬器環境問題，需要另外處理（例如模擬器音訊路由設定、確認語音資料包真的下載完成），不是這個 App 的程式碼問題。
+- **後續確認（2026-07-04）**：使用者用 adb 開啟 Android 系統「文字轉語音輸出」設定頁（`android.settings.TTS_SETTINGS` 這個 intent 在使用者的 AVD 系統映像檔上無法解析，改用 `android.settings.ACCESSIBILITY_SETTINGS`／`android.settings.SETTINGS` 開啟主設定畫面，再手動搜尋進去），按「播放範例」確認裝置本身 TTS 引擎正常發聲，回到 App 內測試朗讀功能**也確認有聲音了**——證實先前判斷正確，問題出在裝置/模擬器環境（很可能是先前某個語音資料尚未真正就緒／裝置音訊狀態問題），不是程式邏輯的 bug。診斷用的 `[reader] chapterText length`／`[tts]` 系列 `console.log` 已移除（`mobile/lib/tts.ts`、`mobile/app/reader/[id].tsx`）。
+- **驗證狀態**：`tsc --noEmit` 通過，純 JS 改動不需要重新原生編譯。**TTS 播放功能本輪已由使用者在 Android 模擬器實測確認有聲音**。
+
+**待辦（第 2、3 項，下一輪繼續）**：
+- [ ] 頂部列書籤按鈕：加入/移出目前頁面書籤，比照網頁版 `handleToggleBookmark`／`getBookmarkLabel`（用當前 CFI 對應的章節標題當書籤標籤）；`mobile/lib/library.ts` 的 `Bookmark` 型別與 `loadBookmarks`/`saveBookmarks` 已存在，這次尚未使用。
+- [ ] 清單總按鈕＋四分頁面板：書籤清單（比照 `renderer/src/components/Reader/BookmarkPanel.tsx`）、目錄清單（比照 `ChapterPanel`，需要從 epub.js 的 `book.navigation.toc` 取得目錄資料，目前 mobile 端完全沒有這段邏輯）、書籍資訊（比照 `BookInfoPanel`，可用既有的 `BookRecord`/封面資料）、註記清單（比照 `renderer/src/components/NotePanel.tsx`，這對應到更後面「註記筆記功能」那個更大的任務項，目前 mobile 完全沒有註記/劃線功能，這個分頁這輪只能先做空殼或延後）。
+
 **Why 記錄這段**：mobile/ 的建置細節分散在多次對話中，若不集中記錄，下次對話容易重複「已經做過的初始化」或忘記 epub.js 在 RN 上不能直接用這個關鍵限制。
