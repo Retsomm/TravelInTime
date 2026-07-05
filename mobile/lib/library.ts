@@ -21,6 +21,16 @@ export interface Bookmark {
   addedAt: number;
 }
 
+export interface Annotation {
+  id: string;
+  cfi: string;
+  text: string;
+  color: string;
+  chapter: string;
+  createdAt: number;
+  note?: string;
+}
+
 export interface BookSettings {
   fontSize: number;
   fontFamily: string;
@@ -34,6 +44,7 @@ const META_KEY = 'tit:library:meta';
 const progressKey = (id: string) => `tit:progress:${id}`;
 const settingsKey = (id: string) => `tit:settings:${id}`;
 const bookmarksKey = (id: string) => `tit:bookmarks:${id}`;
+const annotationsKey = (id: string) => `tit:annotations:${id}`;
 
 const booksDir = () => new Directory(Paths.document, 'books');
 const coversDir = () => new Directory(Paths.document, 'covers');
@@ -138,7 +149,7 @@ export const removeBook = (id: string) =>
         if (cover.exists) cover.delete();
       }
     }
-    AsyncStorage.multiRemove([progressKey(id), settingsKey(id), bookmarksKey(id)]);
+    AsyncStorage.multiRemove([progressKey(id), settingsKey(id), bookmarksKey(id), annotationsKey(id)]);
     return [records.filter((r) => r.id !== id), undefined];
   });
 
@@ -215,3 +226,15 @@ export const loadBookmarks = async (id: string): Promise<Bookmark[]> => {
 
 export const saveBookmarks = (id: string, bookmarks: Bookmark[]) =>
   AsyncStorage.setItem(bookmarksKey(id), JSON.stringify(bookmarks));
+
+export const loadAnnotations = async (id: string): Promise<Annotation[]> => {
+  try {
+    const raw = await AsyncStorage.getItem(annotationsKey(id));
+    return raw ? (JSON.parse(raw) as Annotation[]) : [];
+  } catch {
+    return [];
+  }
+};
+
+export const saveAnnotations = (id: string, annotations: Annotation[]) =>
+  AsyncStorage.setItem(annotationsKey(id), JSON.stringify(annotations));

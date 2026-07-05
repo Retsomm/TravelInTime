@@ -296,7 +296,7 @@ Monorepo 常見誤區：使用者回報「手機上」的問題，實際上可�
 4. ~~**閱讀頁（`reader/[id].tsx`）實作**~~ **MVP 已完成**（併入第 1 點）：接上 epub 渲染方案、tap 翻頁、閱讀進度回存。**下一步待驗證**：實機/模擬器實測 → 再補翻頁滑動手勢、閱讀設定（字體/深色）套用進 WebView 內容。
 5. **TTS 朗讀功能**：評估 `expo-speech`（朗讀）+ 需自行實作高亮同步邏輯（web 版原本綁定 epub.js 的 CFI，RN 需視渲染方案重新設計事件橋接）。
 6. **主題/深色模式**：比照 Electron 版 `darkMode` 狀態，搬到設定頁骨架，需決定用 RN 的 `useColorScheme` 自動跟隨系統，或維持手動切換 + 持久化（`AsyncStorage`）。
-7. **註記筆記功能**：搬移「感想筆記」邏輯（見 `408b1eb` commit），儲存方式同第 2 點的本地儲存策略。
+7. ~~**註記筆記功能**~~ **第一版已完成**（2026-07-05，見上方「第十八輪」）：劃線＋顏色＋感想筆記＋清單管理＋匯出（`Share.share`）皆已實作，儲存方式同第 2 點的本地儲存策略。**尚未實機測試**，且劃線操作列刻意改成底部固定列而非網頁版的浮動泡泡（避開已知的 iframe 座標系問題）。
 8. **鍵盤處理**：若任一頁面（例如新增筆記表單）需要文字輸入，套用第 6 節的 iOS/Android 分開處理原則。
 9. **iOS 26 原生 header 問題**：目前 `reader/[id].tsx` 已預先採用自繪 header，其餘頁面若未來改用原生 header 且有返回按鈕，需留意第 7 節的白色圓形背景問題。
 10. **實機/模擬器測試**：待功能有基本可視內容後，盡早進行 `expo run:android`／`expo run:ios` 或 Dev Client 實機測試，不要等到功能全部做完才測（累積的整合風險會變大）。
@@ -561,5 +561,47 @@ Monorepo 常見誤區：使用者回報「手機上」的問題，實際上可�
   - `mobile/lib/readerMessages.ts`：`OutboundMessage` 移除 `{ type: 'debug'; message: string }` 這個變體。
   - `mobile/app/reader/[id].tsx`：`handleMessage` 移除 `msg.type === 'debug'` 的分支（原本會 `console.log('[reader-web debug][...]', ...)`）；`handleNavigateToTarget` 移除上一輪新增的純 RN 端診斷 `console.log`；連帶移除已經沒用到的 `Platform` import。
 - **驗證狀態**：`tsc --noEmit`、`yarn build:reader`、`expo-doctor`（20/20）皆通過，純移除診斷程式碼，不涉及任何功能邏輯改動，理論上不需要使用者額外測試，但如果之後這幾個功能（翻頁頁碼、目錄跳轉）又出現問題，會需要重新加回類似的 log 才能除錯。
+
+**第十八輪：註記筆記功能第一版（對應重構任務第 7 項起點，2026-07-05）**：
+- 對應「後續重構任務」第 7 項：搬移網頁版「劃線＋感想筆記」邏輯（`renderer/src/store/useAnnotationStore.ts`／`NotePanel.tsx`／`HighlightPopup.tsx`／`annotationUtils.ts`／`annotationExport.ts`，見 `408b1eb` commit）。mobile 這是第一次動這個功能，之前都只有 `ListPanel.tsx` 的「註記」分頁空殼文字。
+- **資料模型**：`mobile/lib/library.ts` 新增 `Annotation` 介面（`id`/`cfi`/`text`/`color`/`chapter`/`createdAt`/`note?`，欄位跟網頁版 `useAnnotationStore.ts` 的 `Annotation` 一致）與 `loadAnnotations`/`saveAnnotations`（存 AsyncStorage，key 比照書籤模式 `tit:annotations:<id>`），`removeBook()` 一併清除。新增 `mobile/lib/annotationColors.ts` 的 `HIGHLIGHT_COLORS`（5 色，數值跟網頁版 `annotationUtils.ts` 保持一致）。
+- **重要設計決定：劃線操作列改用「畫面底部固定列」，不是網頁版那種浮在選取文字旁邊的懸浮泡泡**：網頁版 `HighlightPopup.tsx` 靠滑鼠位置精確定位，但 mobile 這邊選取文字發生在 epub.js 內容 iframe 裡，這個 iframe 在 iOS WKWebView 上的內部座標系統這幾輪已經反覆證實不可靠（見第十四輪「iOS WKWebView 裡...window.innerWidth 跟觸控 clientX 座標數值高達數千 px」那個坑，翻頁點擊區也是因為同一個問題才改成蓋在最外層的 tap-zone）。與其冒同樣的風險去算選取文字的精確螢幕座標，這次刻意選擇跳過這整類座標數學：選取文字或點擊既有標記時，一律在畫面底部彈出固定操作列（`mobile/components/SelectionBar.tsx`，`mode: 'selection' | 'edit'`），完全不需要計算文字在螢幕上的位置。這是刻意的簡化取捨，不是漏做。
+- **`mobile/reader-web/index.ts`**：
+  - 劃線標記渲染／點擊：`applyAnnotations(list)` 整批比對目前畫面上的標記跟 RN 端傳來的最新清單（新增/顏色變更就 `rendition.annotations.underline()` 重畫、清單裡消失的就 `rendition.annotations.remove()`），照抄網頁版 `addEpubAnnotation` 用的 `'underline'` 型別＋`stroke`/`stroke-width` 樣式；epub.js 的 `Annotations` 類別本身會在 `hooks.render` 自動把已加入的標記套用到每個新渲染的章節 iframe（見 `node_modules/epubjs/src/annotations.js` 建構子），換頁/換章節不需要手動重掛。
+  - 文字選取：改用 `rendition.on('selected', (cfiRange, contents) => ...)`——epub.js 的 `Contents` 類別本身已經監聽 `selectionchange`（`node_modules/epubjs/src/contents.js`）並幫忙把選取範圍換算成 CFI 字串，不需要自己手動算 CFI 或碰觸選取範圍的螢幕座標。但這個事件**只在選取範圍非空時**才會 emit，使用者點掉選取／收合選取範圍完全沒有對應事件，因此另外在既有的 `hooks.content.register` 內加一個自己的 `selectionchange` 監聽，只在偵測到「收合」時 post `selectionCleared` 關閉操作列，兩者互不干擾（各自關注不同的狀態轉換）。
+  - 新增 inbound 訊息 `setAnnotations`（RN 每次新增/改色/刪除註記都送一次完整清單）、`clearSelection`（劃線動作完成後，清掉目前顯示中 iframe 的原生選取反白，讓畫面改由新畫的底線標記接手）；`load` 訊息新增 `annotations` 欄位，開書時連同 cfi 一起帶入，`rendition.display()` 完成後立即 `applyAnnotations(initialAnnotations)` 畫出這本書已存的所有標記。新增 outbound 訊息 `textSelected`（cfi + 選取文字）、`selectionCleared`、`annotationTapped`（使用者點了既有標記，只帶 id，不帶座標——沿用上面「不算座標」的設計決定）。
+- **`mobile/app/reader/[id].tsx`**：新增 `annotations`/`selection`/`editingAnnotationId` state；`handleWebViewReady` 的 `Promise.all` 一併 `loadAnnotations(id)`，跟 base64/cfi 一起送進 `load` 訊息。新增 `handleCreateAnnotation`（用 `selection.cfi`/`.text` + 使用者選的顏色 + 目前 `currentChapterTitle` 組成新記錄，存檔並整批同步給 WebView，同時送 `clearSelection` 清掉原生選取反白）、`handleChangeAnnotationColor`、`handleDeleteAnnotation`、`handleUpdateAnnotationNote`（筆記純粹是 RN 端資料，不影響標記顏色，不需要通知 WebView）、`handleNavigateToAnnotation`（複用既有的 `goto` 訊息）、`handleCopySelection`（`expo-clipboard`，已是既有依賴）、`handleSearchSelection`（`Linking.openURL` 開 Google 搜尋，比照網頁版 `HighlightPopup` 的 G 按鈕）。`toggleSettings`/`toggleListPanel` 也一併清掉 `selection`/`editingAnnotationId`，避免底部操作列跟設定/清單面板同時疊在畫面上。
+- **`mobile/components/ListPanel.tsx` 的「註記」分頁**：從原本的「尚未支援」空殼文字，改成完整清單：每筆顯示選取文字（左側色條標示顏色，`numberOfLines=4`）＋章節＋日期，可勾選（全選／個別）、點顏色圓點展開色票更換顏色、點 ✕ 兩段式確認刪除、感想筆記可新增/編輯/清空（`TextInput` 多行，儲存/取消/刪除筆記三個按鈕，比照網頁版 `NotePanel.tsx` 的 `editingNoteId`/`editingNoteText` 狀態機）、點文字本身跳轉到該段落（複用 `goto`）。**匯出改用 RN 內建的 `Share.share()`**，不是網頁版的「產生 .txt 檔案下載」：mobile 沒有「下載資料夾」這個概念，`Share` 更貼近手機使用情境（可以分享到訊息、筆記、其他 App），不需要額外裝 `expo-sharing`；匯出文字格式（依章節分組、`• 文字` + `筆記：...`）照抄網頁版 `annotationExport.ts`。
+- **依賴變更**：無新增套件，全部沿用既有的 `expo-clipboard`（`ListPanel.tsx` 已裝）與 RN 內建 `Share`/`Linking`。
+- **驗證狀態**：`yarn build:reader`、`tsc --noEmit`、`expo-doctor`（20/20）、`expo export --platform android`、`expo export --platform ios` 皆通過，純打包/型別驗證，這次沒有新增原生模組，不需要重新編譯 Dev Client，reload 即可生效。**完全尚未實機/模擬器測試**，這是全新功能的第一版，風險比之前的小修正高很多，麻煩重點確認：
+  1. 在書本內文中間三分之一區域（`build-reader-html.js` 的 tap-zone 只蓋左右各 33%，中間留給選字）長按選取一段文字，畫面底部是否會跳出顏色選取列；點任一色是否會在該段文字下方畫出對應顏色的底線標記。
+  2. 點擊已經畫好的底線標記，底部是否改成「換色／刪除」操作列；換色是否即時反映在畫面上的標記顏色；刪除是否會讓底線標記消失。
+  3. 翻頁/回到同一頁後，先前劃的線是否還在（驗證 epub.js 標記有沒有正確跨頁重掛）；離開書本再重新打開這本書，標記是否還原（驗證 AsyncStorage 存讀）。
+  4. 清單／設定面板打開時，底部操作列是否有正確一併關閉，不會疊在一起。
+  5. 「清單」按鈕→「註記」分頁：新增的標記是否出現在清單、點文字是否正確跳轉、更換顏色/刪除/新增感想筆記是否正常運作、全選＋匯出是否會跳出系統分享選單且內容格式正確。
+  6. iOS 這邊的選取手勢（長按出現選取控點、拖曳調整範圍）在 epub.js iframe 內是否運作正常——這是這次唯一沒有迴避掉、必須依賴系統原生選字手勢的部分，如果 iOS 這裡本身就有已知的 WKWebView 選字限制，可能需要另外處理，但目前沒有機制可以在這個環境驗證。
+  這次没有事先預告哪一步最可能出問題，因為是全新功能沒有既有的踩坑紀錄可以參考，麻煩實測後把出問題的那個步驟明確告訴我（例如「第 1 步完全沒反應」或「第 3 步翻頁後標記消失」），才能對應到正確的環節排查，不要籠統說「註記功能怪怪的」。
+
+**第十九輪：劃線完全無反應，加除錯 log 後新增「劃線模式」切換按鈕（2026-07-05，使用者兩種模擬器實測回報）**：
+- 使用者回報：在畫面中間三分之一窄帶（tap-zone 沒蓋到的區域）長按嘗試選字，兩種模擬器都完全無效，沒有反白也沒有畫出標記。
+- 依上一輪加的 log 排查：`[content touchstart]` 有正常印出（代表觸控確實有送達 epub 內容 iframe，原本懷疑的「tap-zone 整個擋掉觸控」不是唯一問題），但 `[selectionchange]`／`[rendition selected]` 完全沒有出現——代表長按手勢從頭到尾沒有真正進入「文字選取模式」，問題發生在觸控送達之後、原生選字手勢啟動之前的環節。
+- **判斷**：使用者的長按操作，手指在按住/微調的過程中很可能會有些微位移，一旦位移掃出中間那條窄帶、碰到左右兩側不透明的 tap-zone div，長按手勢就會被中斷（tap-zone 蓋在最上層攔截觸控，見第十八輪／`registerTapZone` 的說明）。中間窄帶只有螢幕寬度的 33%，要求使用者精準壓在這麼窄的範圍內完全不移動並不實際。**這是推測，不是確認過的根因**——log 只能證明「送達了 touchstart 但選字沒有啟動」，無法區分是「手勢位移出窄帶被攔截」還是「模擬器的滑鼠模擬觸控本身就無法正確觸發長按選字手勢」（後者是模擬器環境的已知限制，跟程式碼無關，這個環境沒有辦法驗證是不是這個原因）。
+- **應對方式（使用者提議，已採納）**：與其要求使用者精準操作，新增一個「劃線模式」切換按鈕（頂部工具列書籤圖示右側，`IconNotes`），讓使用者可以主動把畫面切到「整個寬度都能長按選字」的狀態：
+  - `mobile/lib/readerMessages.ts` 新增 inbound 訊息 `setAnnotationMode`。
+  - `mobile/reader-web/index.ts` 新增 `setAnnotationMode(enabled)`：開啟時把 `#tap-zone-prev`/`#tap-zone-next` 兩個 div 的 `style.pointerEvents` 設成 `'none'`，讓觸控直接穿透到底下的 epub 內容 iframe（等於畫面全寬都能長按選字），關閉時恢復 `'auto'`。
+  - `mobile/app/reader/[id].tsx` 新增 `annotationMode` state 與 `toggleAnnotationMode()`：切換時送出 `setAnnotationMode` 訊息，關閉時額外送 `clearSelection` 清掉可能殘留的選取；跟既有的設定/清單面板互斥邏輯一致（開啟其中一個要順便關掉其他覆蓋層）；換書時（`[id]` reset effect）一併重置成 `false`。畫面上方新增一條提示橫幅（劃線模式開啟時顯示「劃線模式中：長按文字選取即可標記，點擊畫面翻頁已暫停」），提醒使用者這段期間點擊畫面兩側不會翻頁——這是刻意的取捨，翻頁跟選字兩種手勢原本就會搶同一塊觸控區域，不用「模式切換」很難兩全。
+- **誠實說明限制**：這個修法解決的是「中間窄帶太窄、長按容易滑出去被攔截」這個已知可能成因；但log 沒辦法排除「模擬器的觸控模擬本身就不會觸發原生長按選字」這個可能性，這種情況下就算切到劃線模式（畫面全寬可選字），可能還是選不到，需要使用者這輪實測後回報結果才能確認。如果切到劃線模式後選字仍然完全沒反應，下一步應該優先懷疑是模擬器環境限制，可能需要在實機上才能真正驗證這個功能是否可用。
+- **驗證狀態**：`yarn build:reader`、`tsc --noEmit`、`expo-doctor`（20/20）、`expo export --platform android` 皆通過，純打包/型別驗證，純 JS/TSX 改動不涉及原生模組，不需要重新編譯 Dev Client。**尚未實機/模擬器驗證**：麻煩點擊書籤圖示右側新增的圖示進入劃線模式（頂部會出現提示橫幅），再嘗試長按選字（這次畫面任何位置都可以，不限中間窄帶），確認是否出現反白/選取控點；不管有沒有選到，都請把這次的 `[reader-web debug]`／`[reader]` log 貼給我。
+
+**第二十輪：iOS 模擬器選字/建立註記已成功，但畫面上完全看不到底線標記（2026-07-05，使用者截圖回報）**：
+- 好消息：使用者這輪截圖證實「劃線模式」按鈕跟長按選字都正常運作——選取文字、挑色、存成註記、出現在清單、點清單項目正確跳轉，這幾步（上一輪懷疑的選字手勢問題）**都已解決**。
+- 新問題：跳轉到某筆註記所在的段落後，畫面上完全看不到對應顏色的底線標記，即使文字內容跟清單裡的註記完全吻合。
+- **判斷（尚未證實，找到一個已知、合理的候選機制）**：epub.js 的 `Annotations` 類別是掛在 `rendition.hooks.render` 自動把已存在的標記重新掛到每個新渲染的頁面/章節（`node_modules/epubjs/src/annotations.js` 建構子），但 `hooks.render` 觸發的時間點有時候會比這一頁 iframe 的內容/尺寸真正準備好還早，導致標記用來畫線的 `marks-pane` SVG 函式庫算出來的位置/尺寸基準還沒就緒，呼叫本身不會拋例外，但畫面上什麼都畫不出來——這正是網頁版 `Reader.tsx` 的 `addEpubAnnotation` 當初就踩過、也已經修過的同一顆坑（該處註解：「hooks.render 比 contents 就緒早，部分 annotation inject 可能失敗」），mobile 這次第一版漏搬這段保險機制。這個解釋能同時說明「建立當下沒看到、跳轉過去也沠看到」，但**還沒有實機證據能 100% 確認就是這個原因**，也不能排除是 mobile 特有的 iframe 座標問題（第十四輪記錄過 iOS WKWebView 的內容 iframe 內部座標系統跟畫面實際尺寸對不上的先例）。
+- **這輪的修法（照抄網頁版保險機制 + 加大量診斷 log，而不是盲猜著改）**：
+  - `mobile/reader-web/index.ts` 新增 `verifyAnnotationsRendered()`／`reinjectAllAnnotations()`：`underline()` 呼叫完成後 300ms，檢查 DOM 裡是不是真的生出對應的 `.ann-<id> line` 元素，沒有的話呼叫 `rendition.annotations` 的 `clear(view)`/`inject(view)` 對目前所有 view 強制重新掛一次（跟網頁版 `addEpubAnnotation` 的 300ms 後備援邏輯同一招）。
+  - 同一套 verify 也掛進既有的 `rendition.hooks.content.register(...)`（每次新頁面/章節內容渲染完都跑一次，300ms 後檢查目前 `renderedAnnotations` 清單裡的每一筆是不是都找得到對應的 DOM 元素），涵蓋「點清單跳轉到別的章節後，那一頁本來就該有標記卻沒被正確掛上」這個情境，不只是「剛建立當下」這一種情況。
+  - 新增 `logMarkGeometry()` 診斷函式：印出標記 SVG 元素本身的量測結果（寬高/座標）、其所在 `<svg>` pane 的量測結果、目前內容 iframe 的 `getBoundingClientRect()` 與 `contentWindow.innerWidth`/`scrollWidth`——這幾個數字能直接判斷是「完全沒有生成標記元素」還是「元素生成了、但因為座標系統跟第十四輪那個已知的 iframe 座標坑一樣算錯了位置變成跑到看不到的地方」，這兩種情況修法完全不同，這次先蒐證不瞎猜。呼叫時機：`underline()` 呼叫完成當下、300ms 後（reinject 判斷前）、如果有觸發 reinject 則再追加一次 reinject 後的量測。
+  - 標記線條 `stroke-width` 從 `2` 調成 `3`，順手排除「其實有畫出來，只是線太細在深色模式下不明顯」這個更單純的可能性（不影響前面的診斷邏輯，即使真正根因是別的，這個改動本身也無害）。
+- **驗證狀態**：`yarn build:reader`、`tsc --noEmit`、`expo-doctor`（20/20）、`expo export --platform ios` 皆通過，純打包/型別驗證，純 JS 改動不涉及原生模組，不需要重新編譯 Dev Client。**尚未實機/模擬器驗證這次的 verify+reinject 是否真的解決問題**：麻煩重新整理後再測一次「跳轉到某筆註記」，並把這次新增的 `[markGeometry:*]`／`[verifyAnnotationsRendered]`／`[reinjectAllAnnotations]` 這幾行 log 完整貼給我——特別留意 `mark=` 那組數字是 `no-svg`／寬高是 0，還是有正常的寬高但位置座標看起來異常（例如負值或遠超過螢幕尺寸），這能直接判斷是「完全沒生成」還是「生成了但位置算錯」，才能決定下一步往哪個方向修，不要只回報「還是看不到」。
 
 **Why 記錄這段**：mobile/ 的建置細節分散在多次對話中，若不集中記錄，下次對話容易重複「已經做過的初始化」或忘記 epub.js 在 RN 上不能直接用這個關鍵限制。

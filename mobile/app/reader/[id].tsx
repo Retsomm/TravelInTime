@@ -1,21 +1,26 @@
+import * as Clipboard from 'expo-clipboard';
 import { useLocalSearchParams, router } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Linking, Pressable, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
-import { IconBack, IconBookmarkFill, IconBookmarkOutline, IconChapters, IconSettings } from '../../components/icons';
+import { IconBack, IconBookmarkFill, IconBookmarkOutline, IconChapters, IconNotes, IconSettings } from '../../components/icons';
 import ListPanel from '../../components/ListPanel';
+import SelectionBar from '../../components/SelectionBar';
 import SettingsPanel from '../../components/SettingsPanel';
 import {
+  type Annotation,
   type BookRecord,
   type BookSettings,
   type Bookmark,
   generateId,
   getBookBase64,
   listBooks,
+  loadAnnotations,
   loadBookSettings,
   loadBookmarks,
   loadReadingCfi,
+  saveAnnotations,
   saveBookSettings,
   saveBookmarks,
   saveReadingCfi,
@@ -40,6 +45,10 @@ const ReaderScreen = () => {
   const [settingsVisible, setSettingsVisible] = useState(false);
   const [typography, setTypography] = useState<BookSettings>(DEFAULT_TYPOGRAPHY);
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
+  const [annotations, setAnnotations] = useState<Annotation[]>([]);
+  const [selection, setSelection] = useState<{ cfi: string; text: string } | null>(null);
+  const [editingAnnotationId, setEditingAnnotationId] = useState<string | null>(null);
+  const [annotationMode, setAnnotationMode] = useState(false);
   const [toc, setToc] = useState<TocItem[]>([]);
   const [currentCfi, setCurrentCfi] = useState('');
   const [currentHref, setCurrentHref] = useState('');
@@ -93,6 +102,10 @@ const ReaderScreen = () => {
     setCurrentChapterTitle('');
     setPageInfo(null);
     setListPanelTab(null);
+    setAnnotations([]);
+    setSelection(null);
+    setEditingAnnotationId(null);
+    setAnnotationMode(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
@@ -116,8 +129,20 @@ const ReaderScreen = () => {
       return;
     }
     try {
-      const [base64, cfi] = await Promise.all([getBookBase64(found), loadReadingCfi(id)]);
-      webviewRef.current?.postMessage(JSON.stringify({ type: 'load', base64, cfi }));
+      const [base64, cfi, savedAnnotations] = await Promise.all([
+        getBookBase64(found),
+        loadReadingCfi(id),
+        loadAnnotations(id),
+      ]);
+      setAnnotations(savedAnnotations);
+      webviewRef.current?.postMessage(
+        JSON.stringify({
+          type: 'load',
+          base64,
+          cfi,
+          annotations: savedAnnotations.map((a) => ({ id: a.id, cfi: a.cfi, color: a.color })),
+        })
+      );
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : String(err));
       setLoading(false);
@@ -172,6 +197,27 @@ const ReaderScreen = () => {
         }
         chapterTextResolverRef.current?.(msg.text);
         chapterTextResolverRef.current = null;
+        return;
+      }
+      if (msg.type === 'textSelected') {
+        console.log('[reader] textSelected 收到', msg.text.slice(0, 20));
+        setEditingAnnotationId(null);
+        setSelection({ cfi: msg.cfi, text: msg.text });
+        return;
+      }
+      if (msg.type === 'selectionCleared') {
+        console.log('[reader] selectionCleared 收到');
+        setSelection(null);
+        return;
+      }
+      if (msg.type === 'annotationTapped') {
+        console.log('[reader] annotationTapped 收到', msg.id);
+        setSelection(null);
+        setEditingAnnotationId(msg.id);
+        return;
+      }
+      if (msg.type === 'debug') {
+        console.log('[reader-web debug]', msg.message);
         return;
       }
       if (msg.type === 'bookLanguageDetected') {
@@ -301,17 +347,109 @@ const ReaderScreen = () => {
     setListPanelTab(null);
   };
 
+  // WebView 端只負責「畫出目前這份清單長什麼樣子」，annotations 陣列本身以 RN 端／
+  // AsyncStorage 為唯一資料來源；每次新增/改色/刪除都整批送一次目前完整清單，
+  // 讓 reader-web 的 applyAnnotations() 自己比對差異決定要新增/移除哪些標記。
+  const syncAnnotationsToWebView = (next: Annotation[]) => {
+    console.log('[reader] syncAnnotationsToWebView 送出', next.length, '筆');
+    webviewRef.current?.postMessage(
+      JSON.stringify({ type: 'setAnnotations', annotations: next.map((a) => ({ id: a.id, cfi: a.cfi, color: a.color })) })
+    );
+  };
+
+  const handleCreateAnnotation = (color: string) => {
+    if (!id || !selection) {
+      console.log('[reader] handleCreateAnnotation 略過：id 或 selection 為空', { hasId: Boolean(id), hasSelection: Boolean(selection) });
+      return;
+    }
+    console.log('[reader] handleCreateAnnotation', color, selection.text.slice(0, 20));
+    const ann: Annotation = {
+      id: generateId(),
+      cfi: selection.cfi,
+      text: selection.text,
+      color,
+      chapter: currentChapterTitle,
+      createdAt: Date.now(),
+    };
+    const next = [...annotations, ann];
+    setAnnotations(next);
+    saveAnnotations(id, next);
+    syncAnnotationsToWebView(next);
+    setSelection(null);
+    webviewRef.current?.postMessage(JSON.stringify({ type: 'clearSelection' }));
+  };
+
+  const handleChangeAnnotationColor = (annotationId: string, color: string) => {
+    if (!id) return;
+    const next = annotations.map((a) => (a.id === annotationId ? { ...a, color } : a));
+    setAnnotations(next);
+    saveAnnotations(id, next);
+    syncAnnotationsToWebView(next);
+  };
+
+  const handleDeleteAnnotation = (annotationId: string) => {
+    if (!id) return;
+    const next = annotations.filter((a) => a.id !== annotationId);
+    setAnnotations(next);
+    saveAnnotations(id, next);
+    syncAnnotationsToWebView(next);
+    setEditingAnnotationId(null);
+  };
+
+  const handleUpdateAnnotationNote = (annotationId: string, note: string) => {
+    if (!id) return;
+    const next = annotations.map((a) => (a.id === annotationId ? { ...a, note: note.trim() || undefined } : a));
+    setAnnotations(next);
+    saveAnnotations(id, next);
+  };
+
+  const handleNavigateToAnnotation = (cfi: string) => {
+    webviewRef.current?.postMessage(JSON.stringify({ type: 'goto', target: cfi }));
+    setListPanelTab(null);
+  };
+
+  const handleCopySelection = () => {
+    if (!selection) return;
+    Clipboard.setStringAsync(selection.text);
+  };
+
+  const handleSearchSelection = () => {
+    if (!selection) return;
+    Linking.openURL(`https://www.google.com/search?q=${encodeURIComponent(selection.text)}`);
+  };
+
   // 設定面板／清單面板共用同一個畫面區域，一次只會顯示其中一個：開啟其中一個時
   // 要順便關掉另一個，否則兩個 overlay 疊在一起，關掉上層那個又會露出底下還開著的另一個。
   // 兩顆按鈕都是開關型：再按一次目前開著的那顆就直接關閉，不需要額外的關閉鈕/麵包屑列。
   const toggleSettings = () => {
     setListPanelTab(null);
+    setSelection(null);
+    setEditingAnnotationId(null);
     setSettingsVisible((prev) => !prev);
   };
 
   const toggleListPanel = () => {
     setSettingsVisible(false);
+    setSelection(null);
+    setEditingAnnotationId(null);
     setListPanelTab((prev) => (prev ? null : 'bookmarks'));
+  };
+
+  // 劃線模式：使用者實測回報「畫面中間三分之一窄帶長按選字沒有反應」，log 顯示觸控確實有
+  // 送到內容 iframe，但長按手勢常常在按住/微調時位移滑出那條窄帶、掃進左右兩側的翻頁點擊區
+  // 而被中斷。開啟這個模式時通知 WebView 把左右兩側的翻頁點擊區關掉 pointer-events，讓整個
+  // 畫面寬度都能長按選字（代價是這段期間點擊畫面兩側不會翻頁，需使用者自己切回一般模式）。
+  const toggleAnnotationMode = () => {
+    setSettingsVisible(false);
+    setListPanelTab(null);
+    setSelection(null);
+    setEditingAnnotationId(null);
+    setAnnotationMode((prev) => {
+      const next = !prev;
+      webviewRef.current?.postMessage(JSON.stringify({ type: 'setAnnotationMode', enabled: next }));
+      if (!next) webviewRef.current?.postMessage(JSON.stringify({ type: 'clearSelection' }));
+      return next;
+    });
   };
 
   return (
@@ -336,6 +474,19 @@ const ReaderScreen = () => {
             accessibilityLabel={isBookmarked ? '移除書籤' : '加入書籤'}
           >
             {isBookmarked ? <IconBookmarkFill color={colors.progressFill} /> : <IconBookmarkOutline color={colors.ink} />}
+          </Pressable>
+          <Pressable
+            onPress={toggleAnnotationMode}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel={annotationMode ? '結束劃線模式' : '進入劃線模式'}
+            accessibilityState={{ selected: annotationMode }}
+            style={{
+              width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center',
+              backgroundColor: annotationMode ? colors.paperBg2 : 'transparent',
+            }}
+          >
+            <IconNotes color={annotationMode ? colors.progressFill : colors.ink} />
           </Pressable>
           <Pressable
             onPress={toggleListPanel}
@@ -378,6 +529,17 @@ const ReaderScreen = () => {
           overScrollMode="never"
           style={{ flex: 1, opacity: loading ? 0 : 1 }}
         />
+        {annotationMode && (
+          <View
+            pointerEvents="none"
+            style={{
+              position: 'absolute', top: 0, left: 0, right: 0,
+              paddingVertical: 6, alignItems: 'center', backgroundColor: colors.progressFill,
+            }}
+          >
+            <Text style={{ fontSize: 11, color: '#fff' }}>劃線模式中：長按文字選取即可標記，點擊畫面翻頁已暫停</Text>
+          </View>
+        )}
         {loading && !errorMessage ? (
           <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' }}>
             <ActivityIndicator size="large" />
@@ -428,6 +590,27 @@ const ReaderScreen = () => {
             currentHref={currentHref}
             onNavigateChapter={handleNavigateToTarget}
             record={record}
+            annotations={annotations}
+            onNavigateAnnotation={handleNavigateToAnnotation}
+            onChangeAnnotationColor={handleChangeAnnotationColor}
+            onDeleteAnnotation={handleDeleteAnnotation}
+            onUpdateAnnotationNote={handleUpdateAnnotationNote}
+          />
+        )}
+        {selection && (
+          <SelectionBar
+            mode="selection"
+            text={selection.text}
+            onHighlight={handleCreateAnnotation}
+            onCopy={handleCopySelection}
+            onSearch={handleSearchSelection}
+          />
+        )}
+        {editingAnnotationId && (
+          <SelectionBar
+            mode="edit"
+            onChangeColor={(color) => handleChangeAnnotationColor(editingAnnotationId, color)}
+            onDelete={() => handleDeleteAnnotation(editingAnnotationId)}
           />
         )}
         {/* 固定高度、一律渲染（即使 pageInfo 還是 null 也只是內容留白）：避免 pageInfo 從
