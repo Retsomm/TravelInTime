@@ -1,6 +1,6 @@
 import { useLocalSearchParams, router } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Linking, Platform, Pressable, Text, View } from 'react-native';
+import { ActivityIndicator, Linking, Pressable, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import { IconBack, IconBookmarkFill, IconBookmarkOutline, IconChapters, IconSettings } from '../../components/icons';
@@ -44,6 +44,7 @@ const ReaderScreen = () => {
   const [currentCfi, setCurrentCfi] = useState('');
   const [currentHref, setCurrentHref] = useState('');
   const [currentChapterTitle, setCurrentChapterTitle] = useState('');
+  const [pageInfo, setPageInfo] = useState<{ page: number; total: number; percentage: number } | null>(null);
   const [listPanelTab, setListPanelTab] = useState<'bookmarks' | 'chapters' | 'bookinfo' | 'notes' | null>(null);
   const settingsLoadedRef = useRef(false);
   const hadSavedSettingsRef = useRef(false);
@@ -90,6 +91,7 @@ const ReaderScreen = () => {
     setCurrentCfi('');
     setCurrentHref('');
     setCurrentChapterTitle('');
+    setPageInfo(null);
     setListPanelTab(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
@@ -146,6 +148,7 @@ const ReaderScreen = () => {
         setCurrentCfi(msg.cfi);
         setCurrentHref(msg.href);
         setCurrentChapterTitle(msg.chapterTitle);
+        setPageInfo(msg.page !== null && msg.total !== null ? { page: msg.page, total: msg.total, percentage: msg.percentage } : null);
         relocatedResolverRef.current?.();
         relocatedResolverRef.current = null;
         if (!id) return;
@@ -178,10 +181,6 @@ const ReaderScreen = () => {
         if (!hadSavedSettingsRef.current) {
           setTypography((prev) => ({ ...prev, script: msg.baseScript }));
         }
-        return;
-      }
-      if (msg.type === 'debug') {
-        console.log(`[reader-web debug][${Platform.OS}]`, msg.message);
       }
     },
     [handleWebViewReady, id, darkMode, typography]
@@ -316,7 +315,7 @@ const ReaderScreen = () => {
   };
 
   return (
-    <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: colors.paperBg }}>
+    <SafeAreaView edges={['top', 'bottom']} style={{ flex: 1, backgroundColor: colors.paperBg }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', height: 44, paddingHorizontal: 12 }}>
         <Pressable
           onPress={handleBack}
@@ -431,6 +430,38 @@ const ReaderScreen = () => {
             record={record}
           />
         )}
+        {/* 固定高度、一律渲染（即使 pageInfo 還是 null 也只是內容留白）：避免 pageInfo 從
+            null 變有值時這塊區域才冒出來，導致 WebView 版面高度跟著變動——epub.js 的分頁是
+            依照初次拿到的 viewer 尺寸算的，事後才緊縮 WebView 高度容易讓已渲染好的那一頁內容
+            被裁切，需要等 resize 事件跑完才會重新分頁，中間會有一段畫面被蓋住的空窗期。 */}
+        <View style={{ height: 28, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingBottom: 8 }}>
+          {pageInfo && (() => {
+            // 跟書櫃卡片顯示的進度（來自 updateProgress 存進 library 的 msg.percentage）用同一個
+            // 數值來源，避免「頁碼算出來的 page/total 比例」跟「實際存檔的精確進度」四捨五入後
+            // 出現 1% 之類的落差，導致書櫃跟閱讀頁看起來不一致。
+            const pct = Math.round(pageInfo.percentage * 100);
+            return (
+              <>
+                <Text style={{ fontSize: 10, color: colors.ink3, letterSpacing: 0.5 }}>
+                  第 {pageInfo.page} 頁
+                </Text>
+                <View style={{ flex: 1, height: 3, backgroundColor: colors.progressTrack, borderRadius: 2 }}>
+                  <View
+                    style={{
+                      width: `${pct}%`,
+                      height: '100%',
+                      backgroundColor: colors.progressFill,
+                      borderRadius: 2,
+                    }}
+                  />
+                </View>
+                <Text style={{ fontSize: 10, color: colors.ink3, letterSpacing: 0.5 }}>
+                  / {pageInfo.total} · {pct}%
+                </Text>
+              </>
+            );
+          })()}
+        </View>
       </View>
     </SafeAreaView>
   );

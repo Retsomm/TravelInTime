@@ -21,6 +21,35 @@ let typography: TypographySettings = DEFAULT_TYPOGRAPHY;
 let baseScript: TypographySettings['script'] = 'tc';
 const contentDocs = new Set<Document>();
 
+// 全書頁碼／精確進度百分比：比照網頁版 Reader.tsx 的 scanAllChapterPages/chapterPagesRef，
+// 背景用一個隱藏的 hiddenRendition 依序 display() 每個 spine 章節，讀 epub.js 真正算出來的
+// displayed.total（該章節在目前字級/行距/字距設定下的實際頁數，不是概算），加總起來就是全書
+// 精確頁數，章節內 displayed.page 本身就是使用者「翻一次就走一個真正的頁面」，因此全書頁碼也會
+// 精準跟著每次翻頁動作 1:1 增減。
+//
+// 中間踩過的坑：一開始改用 book.locations.generate(chars) 對整本書做「每 N 字元切一個位置」的
+// 概算索引，兩個副作用都不理想：(1) 概算的位置跟使用者實際看到的螢幕頁面不是 1:1（N 字元可能
+// 橫跨不只一個螢幕頁，使用者會覺得「翻好幾頁頁碼才跳一次」）；(2) 就算把 generate() 換到獨立的
+// book 實例上執行，Locations.generate() 內部逐 section 呼叫 section.load()/section.unload() 仍是
+// 吃 CPU 的背景工作，在 Android 模擬器上可能拖慢/干擾使用者正在操作的翻頁。改成這裡的
+// hiddenRendition 方案後，用的是 epub.js Rendition 本身既有的分頁結果（不是自己另外算的概算值），
+// 且 Rendition 導覽本身不會呼叫 section.unload()（只有 Locations 才會），兩個問題應該一併解決。
+let chapterPageCounts: Map<number, number> = new Map();
+// 背景章節掃描完成後才會是 true；完成前 relocated 事件送出的全書頁碼（page/total）為 null，
+// 畫面上先不顯示頁數，避免顯示還在累加中、之後會跳動的暫時值。
+let locationsReady = false;
+// 最近一次 relocated 事件的原始 loc 物件，供背景掃描跑完後主動重算一次全書頁碼並補送——若使用者
+// 開書後沒有繼續翻頁，光是掃描完成這件事本身不會觸發新的 relocated 事件，若不補送，頁數列會一直
+// 卡在「還沒出現」。
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let lastRelocatedLoc: any = null;
+// 全書最後一個 linear 章節的 spine index（由 scanAllChapterPages 設定）。postRelocated 的
+// stuck-CFI 校正只在這一章才會生效，見該處的說明。
+let lastLinearSpineIndex: number | null = null;
+// 每次 loadBook 換書時遞增，scanAllChapterPages 完成時比對這個值，避免舊書的背景掃描
+// 在使用者已經換到新書之後才跑完，把新書的 chapterPageCounts 覆寫成舊書算出來的頁數。
+let loadGeneration = 0;
+
 // 章節目錄快取（目錄面板顯示用）與 spine href 順序（比照網頁版 Reader.tsx 的
 // getChapterTitle／getBookmarkLabel，用來把目前位置換算成章節標題）。
 let tocCache: TocItem[] = [];
@@ -262,9 +291,6 @@ const post = (msg: OutboundMessage) => {
   window.ReactNativeWebView?.postMessage(JSON.stringify(msg));
 };
 
-// 暫時的診斷用 log（會顯示在 Metro terminal 的 console.log），排查穩定後應移除。
-const debugLog = (message: string) => post({ type: 'debug', message });
-
 const base64ToArrayBuffer = (base64: string): ArrayBuffer => {
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
@@ -298,11 +324,69 @@ const unlockNavSoon = () => {
   navUnlockTimer = setTimeout(unlockNav, 250);
 };
 
+// 記錄剛剛呼叫的是 prev 還是 next，供 postRelocated 判斷「呼叫了 next() 但 CFI 完全沒變」這種
+// epub.js 量測出來的 displayed.total 比實際能翻到的頁面多 1（常發生在全書最後一章結尾）的情況——
+// 見 postRelocated 內 confirmedBookEnd 的說明。
+let lastNavDirection: 'prev' | 'next' | null = null;
+
 const turnPage = (direction: 'prev' | 'next') => {
   if (navBusy || !rendition) return;
   lockNav();
+  lastNavDirection = direction;
   const action = direction === 'prev' ? rendition.prev() : rendition.next();
   Promise.resolve(action)
+    .then(() => unlockNavSoon())
+    .catch(() => unlockNav());
+};
+
+// 章節目錄的 href 格式常常跟 spine item 的 href 對不上：epub.js 的 Navigation 解析器完全不會
+// 正規化 nav/ncx 檔案裡寫的 href（見 node_modules/epubjs/src/navigation.js，沒有傳入 resolver），
+// 而 nav.xhtml／toc.ncx 常常跟內容檔案放在不同資料夾，導致目錄裡的 href 是相對於 nav 檔案自己的
+// 路徑（例如 `../Text/Section0055.xhtml`），跟 spine.get() 用來比對的 spine item href（相對於
+// OPF 解析出來的路徑，例如 `Text/Section0055.xhtml`）對不起來，`rendition.display()` 因此拋出
+// `No Section Found`，實測就是「點目錄章節沒反應」的真正根因。網頁版 Reader.tsx 的
+// handleNavigateToChapter 已經解過這題：改用檔名比對 spine.items 找出對應項目，拿它「自己的」
+// href 去 display()，這裡照抄同一招。CFI（書籤用）本身就是 spine 索引編碼過的字串，不需要這段
+// 正規化，用 epubcfi( 開頭這個簡單特徵判斷就好。
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const resolveNavTarget = (target: string): string => {
+  if (/^epubcfi\(/i.test(target) || !book) return target;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const spineItems = ((book.spine as any)?.items ?? []) as any[];
+  const cleanHref = target.split('#')[0];
+  const filename = cleanHref.split('/').pop() ?? '';
+  const spineItem = spineItems.find((item) =>
+    item.href === target ||
+    item.href === cleanHref ||
+    item.idref === cleanHref ||
+    item.idref === filename ||
+    (filename && item.href?.endsWith('/' + filename)) ||
+    (filename && item.href === filename)
+  );
+  if (!spineItem) return target;
+  // target 可能帶有目錄錨點（例如 `../Text/Section0055.xhtml#anchor-id`），上面只拿
+  // 檔名比對找出 spine item 自己的 href，這裡要把原本的錨點片段接回去，否則章節內的
+  // 精確跳轉位置會遺失，只跳到章節開頭。
+  const fragment = target.includes('#') ? target.slice(target.indexOf('#')) : '';
+  return spineItem.href + fragment;
+};
+
+// 目錄／書籤跳轉：直接呼叫 rendition.display(target)。
+// 踩過的坑：先前這裡完全沒有經過 navBusy 忙碌鎖，如果使用者剛翻頁、忙碌鎖還沒解開（
+// unlockNavSoon 的 250ms 緩衝內）就馬上點目錄章節，會變成 display() 跟前一次 next()/prev()
+// 同時操作 epub.js 內部狀態——這正是 navBusy 鎖原本要擋的那種情況（見 turnPage 上方的說明），
+// 表現出來就是「點章節沒反應／跳轉失敗」。改成用短輪詢等待目前的忙碌鎖解開後才真的執行，
+// 而不是直接略過——章節/書籤跳轉是使用者明確的單次意圖，不應該像翻頁那樣「忙碌中就丟棄」。
+const gotoTarget = async (rawTarget: string) => {
+  if (!rendition) return;
+  const target = resolveNavTarget(rawTarget);
+  let waited = 0;
+  while (navBusy && waited < 2000) {
+    await new Promise<void>((r) => setTimeout(r, 50));
+    waited += 50;
+  }
+  lockNav();
+  Promise.resolve(rendition.display(target))
     .then(() => unlockNavSoon())
     .catch(() => unlockNav());
 };
@@ -326,7 +410,6 @@ const registerTapZone = (id: string, baseDirection: 'prev' | 'next') => {
     const direction = typography.readingDirection === 'rtl'
       ? (baseDirection === 'prev' ? 'next' : 'prev')
       : baseDirection;
-    debugLog(`[tap-zone] ${direction}`);
     turnPage(direction);
   });
 };
@@ -373,12 +456,120 @@ const extractMeta = async (base64: string) => {
   }
 };
 
+// 背景逐章渲染取得精確全書頁數（比照網頁版 Reader.tsx 的 scanAllChapterPages）：用一個隱藏、
+// 不會顯示在畫面上的 hiddenRendition（跟主 rendition 共用同一個 book 實例——Rendition 導覽不會
+// 呼叫 section.unload()，只有 Locations.generate() 才會，所以共用 book 不會干擾主 rendition，
+// 這跟之前踩過的 Locations 那顆坑不是同一回事），依序 display() 每個 spine 章節，讀 epub.js 算出
+// 來的 displayed.total（該章節在目前排版設定下的真實頁數）加總，取代原本用字元數概算的作法。
+//
+// 只掃描 item.linear === 'yes' 的章節：epub.js 的 rendition.next()/prev() 實際上只會在
+// linear 章節之間移動（見 epubjs/src/spine.js 的 item.next()/prev()，non-linear 章節會被完全
+// 跳過，使用者靠翻頁永遠到不了）。epub 常見會把版權頁/附錄等標成 linear="no"，先前沒有排除
+// 這些章節，導致全書總頁數把使用者翻頁永遠碰不到的頁面也算進去，翻到真正的最後一頁時「第 X
+// 頁」永遠比「共 Y 頁」少（Y 多算了那些 non-linear 章節的頁數）。
+const scanAllChapterPages = async (generation: number, targetBook: Book) => {
+  if (!book || book !== targetBook) return;
+  const viewer = document.getElementById('viewer');
+  if (!viewer) return;
+  const width = viewer.clientWidth;
+  const height = viewer.clientHeight;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const spineItems = ((book.spine as any)?.items ?? []) as any[];
+  const linearItems = spineItems.filter((item) => item.linear === 'yes');
+  if (!linearItems.length || width <= 0 || height <= 0) return;
+
+  const lastLinearItem = linearItems[linearItems.length - 1];
+  lastLinearSpineIndex = lastLinearItem.index as number;
+
+  // 隱藏掃描用的 rendition 只是背景讀取分頁結果，使用者看不到也不會互動，預設不需要
+  // 執行書本內容裡的腳本（allowScriptedContent 開著等於讓不受信任的 EPUB 內容在背景
+  // 平白多一次執行腳本的機會）。極少數 EPUB 版面完全靠腳本才能正確分頁、關閉腳本會讓
+  // 每一章都掃不出頁數，這種情況才退回開著腳本重掃一次。
+  const runScan = async (allowScriptedContent: boolean) => {
+    const hiddenEl = document.createElement('div');
+    Object.assign(hiddenEl.style, {
+      position: 'fixed', top: '-9999px', left: '-9999px',
+      width: `${width}px`, height: `${height}px`,
+      overflow: 'hidden', visibility: 'hidden', pointerEvents: 'none',
+    });
+    document.body.appendChild(hiddenEl);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const hiddenRendition = (book as any).renderTo(hiddenEl, {
+      width, height, spread: 'none', flow: 'paginated', allowScriptedContent,
+    });
+    hiddenRendition.hooks.content.register((contents: unknown) => {
+      const doc = (contents as { document: Document }).document;
+      if (doc) applyTypographyToDoc(doc);
+    });
+
+    const scanCounts = new Map<number, number>();
+    try {
+      for (const item of linearItems) {
+        const href = item.href as string | undefined;
+        const idx = item.index as number | undefined;
+        if (!href || idx === undefined) continue;
+        try {
+          await hiddenRendition.display(href);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const loc = (hiddenRendition as any).currentLocation?.();
+          const d = loc?.start?.displayed as { page: number; total: number } | undefined;
+          // 曾經在這裡加過「對最後一章逐頁模擬 next() 驗證真實可翻到的頁數」的邏輯，想解決
+          // epub.js 量測出的 displayed.total 有時比實際可翻到的頁數多 1 的問題。拿掉的原因：
+          // 這段驗證需要等待 hiddenRendition 的 relocated 事件，Android 上曾經因為事件遲遲不來
+          // （逾時或時序問題）讓驗證迴圈在還沒真的翻完就提早中止，反而把這一章的頁數嚴重低估
+          // （曾經整章只算出 1 頁），比原本「多算 1 頁」的問題更嚴重。改成完全信任 epub.js
+          // 量出來的 displayed.total，多算的那 1 頁改交給 postRelocated 的 stuck-CFI 校正
+          // （使用者翻到書尾、next() 真的卡住時才觸發，見該處說明）在使用者實際翻到那裡時修正，
+          // 不在背景用模擬導覽的方式先驗證——代價是使用者翻到書尾要多按一次「下一頁」數字才會
+          // 校正一致，但不會有把整章頁數算到只剩 1 頁這種更嚴重的錯誤。
+          if (d) scanCounts.set(idx, d.total);
+        } catch {
+          /* 這一章渲染失敗就略過，最後用已知章節的平均值當缺值的替代 */
+        }
+        // 讓出一個 tick，避免連續同步渲染整本書時完全佔滿主執行緒導致觸控/翻頁卡頓。
+        await new Promise<void>((r) => setTimeout(r, 0));
+      }
+    } finally {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      try { (hiddenRendition as any).destroy(); } catch { /* ignore */ }
+      hiddenEl.remove();
+    }
+    return scanCounts;
+  };
+
+  let counts = await runScan(false);
+  if (counts.size === 0) counts = await runScan(true);
+  if (counts.size === 0) return;
+  // 極少數章節渲染失敗時，用已知章節的平均頁數當替代值，避免整本書頁數整段留白
+  // （只補 linear 章節缺的值，non-linear 章節本來就不應該出現在 counts 裡）。
+  if (counts.size < linearItems.length) {
+    const avg = Math.round([...counts.values()].reduce((a, b) => a + b, 0) / counts.size);
+    for (const item of linearItems) {
+      const idx = item.index as number;
+      if (!counts.has(idx)) counts.set(idx, avg);
+    }
+  }
+  // 掃描期間使用者可能已經換了下一本書，此時 generation 已經不吻合，不能再把這批
+  // 舊書算出來的頁數寫進全域狀態（否則會覆蓋新書自己的 chapterPageCounts）。
+  if (generation !== loadGeneration || book !== targetBook) return;
+  chapterPageCounts = counts;
+  locationsReady = true;
+};
+
 const loadBook = async (base64: string, cfi: string | null) => {
   const viewer = document.getElementById('viewer');
   if (!viewer) return;
 
+  const generation = ++loadGeneration;
+  chapterPageCounts = new Map();
+  locationsReady = false;
+  lastRelocatedLoc = null;
+  lastLinearSpineIndex = null;
+
   try {
     book = ePub(base64ToArrayBuffer(base64));
+    const currentBook = book;
     rendition = book.renderTo(viewer, {
       width: viewer.clientWidth,
       height: viewer.clientHeight,
@@ -402,36 +593,79 @@ const loadBook = async (base64: string, cfi: string | null) => {
       applyTypographyToDoc(doc);
     });
 
-    rendition.on('relocated', (loc: unknown) => {
-      unlockNavSoon();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const l = loc as any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const postRelocated = (l: any, previousCfi: string | null) => {
       const displayed = l?.start?.displayed as { page: number; total: number } | undefined;
       if (!l?.start?.cfi || !displayed || !book) return;
 
       // l.start.displayed 的 page/total 只是「目前這個章節（spine item）」內部的頁碼，
       // 不是全書頁碼——書快翻到某一章結尾時 page 就會等於 total，導致每章結尾都會被
-      // RN 端誤判成「整本書讀完」而顯示 100%／讀畢。epub.js 要拿到準確的全書百分比，
-      // 需要先跑過 book.locations.generate()（見下方 loadBook 內呼叫），跑完之前
-      // l.start.percentage 會是 undefined，這裡用「章節索引 + 章內頁碼比例」概算一個
-      // 過渡值，locations 產生完成後之後的 relocated 事件就會換成精確值。
+      // RN 端誤判成「整本書讀完」而顯示 100%／讀畢。過渡值（chapterPageCounts 還沒掃完前）用
+      // 「章節索引 + 章內頁碼比例」概算，掃完後之後的 relocated 事件就會換成精確值。
       // epubjs 的 Spine 型別定義沒有列出 length（實際上 unpack() 時有設定這個欄位），只能用 any 存取。
       const spineLength = (book.spine as any).length as number;
-      const total = typeof l.start.percentage === 'number'
-        ? l.start.percentage
-        : (l.start.index + (displayed.page - 1) / Math.max(displayed.total, 1)) / Math.max(spineLength, 1);
+      const fallbackPercentage = (l.start.index + (displayed.page - 1) / Math.max(displayed.total, 1)) / Math.max(spineLength, 1);
+
+      // 全書頁碼／精確進度百分比：累加「目前章節之前」每一章已知的真實頁數（來自背景
+      // scanAllChapterPages() 的 chapterPageCounts），加上目前章節內的 displayed.page——
+      // 跟網頁版 Reader.tsx 的 accuratePage 計算方式一致，數值上會跟使用者實際翻頁動作 1:1。
+      let page: number | null = null;
+      let pageTotal: number | null = null;
+      if (locationsReady) {
+        // chapterPageCounts 現在只收錄 linear 章節（見 scanAllChapterPages 的說明），
+        // non-linear 章節的 index 在這裡直接 ?? 0，不會計入頁碼／總頁數。
+        let priorPages = 0;
+        for (let i = 0; i < l.start.index; i++) priorPages += chapterPageCounts.get(i) ?? 0;
+        page = priorPages + displayed.page;
+        let totalPages = 0;
+        for (let i = 0; i < spineLength; i++) totalPages += chapterPageCounts.get(i) ?? 0;
+        pageTotal = Math.max(totalPages, page);
+        // 保險 1：epub.js 自己判斷「已經到書尾」的 atEnd 旗標，真的到書尾時強制讓頁碼等於總頁數。
+        if (l.atEnd) page = pageTotal;
+        // 保險 2（實測抓到的真正情況）：epub.js 對同一章節，hiddenRendition 背景掃描量出來的
+        // displayed.total 有時會比「使用者實際呼叫 next() 能翻到的最後位置」多 1 頁——這一章結尾
+        // 可能有一段極短/空白內容，epub.js 的分頁量測演算法認為那還算一頁，但 next() 實際上翻不
+        // 過去（CFI 完全沒變），此時 atEnd 也不會是 true（因為 epub.js 認為 displayed.page 還沒
+        // 追上它自己量出的 displayed.total），使用者會卡在「第 315 頁／共 316 頁」翻不動也翻不完。
+        // 偵測方式：剛剛呼叫的是 next()，但這次 relocated 的 cfi 跟呼叫前完全一樣，代表沒有真的
+        // 翻動——這種情況下 page 已經是使用者能到達的最大值，把 pageTotal 降到跟 page 一致（而不是
+        // 硬把 page 往上推，因為使用者手上的畫面內容就是停在這裡，沒有更多可以顯示的頁面了）。
+        //
+        // 只在「全書最後一個 linear 章節」才套用這個校正：實測發現 Android 上翻頁跨章節時，
+        // 偶爾會有 relocated 事件回報跟前一次一樣的 CFI（不是真的卡住，馬上再翻一次就正常前進），
+        // 如果不限制章節，這個校正會在書中間被誤觸發，把 pageTotal 錯誤地永久鎖死在當下頁碼，
+        // 造成「畫面明明翻得動，但頁碼/總頁數卡住不動」的錯誤顯示（跟真正翻不到書尾是不同問題，
+        // 這裡只處理真正的書尾情境）。
+        if (
+          lastNavDirection === 'next' &&
+          previousCfi !== null &&
+          l.start.cfi === previousCfi &&
+          l.start.index === lastLinearSpineIndex
+        ) {
+          pageTotal = page;
+        }
+      }
+      const percentage = page !== null && pageTotal !== null ? (page - 1) / Math.max(pageTotal - 1, 1) : fallbackPercentage;
 
       post({
         type: 'relocated',
         cfi: l.start.cfi,
         href: l.start.href ?? '',
-        page: displayed.page,
-        total: displayed.total,
-        percentage: Math.max(0, Math.min(1, total)),
+        page,
+        total: pageTotal,
+        percentage: Math.max(0, Math.min(1, percentage)),
         atStart: Boolean(l.atStart),
         atEnd: Boolean(l.atEnd),
         chapterTitle: getChapterLabel(l.start.href ?? '', l.start.index),
       });
+    };
+
+    rendition.on('relocated', (loc: unknown) => {
+      unlockNavSoon();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const previousCfi = (lastRelocatedLoc as any)?.start?.cfi ?? null;
+      lastRelocatedLoc = loc;
+      postRelocated(loc, previousCfi);
     });
 
     await book.ready;
@@ -450,12 +684,22 @@ const loadBook = async (base64: string, cfi: string | null) => {
     post({ type: 'tocLoaded', toc: tocCache });
 
     await rendition.display(cfi ?? undefined);
-    // 全書頁面定位索引，跑完後 relocated 事件的 l.start.percentage 才會是精確的全書百分比
-    // （不是章節內比例）。放在 display() 之後、不 await，避免拖慢開書速度；期間的
-    // relocated 事件會先用上面的章節索引概算值頂著。
-    book.locations.generate(1024).catch(() => {
-      /* 定位索引產生失敗不影響閱讀本身，忽略即可，頂多進度概算比較粗略 */
-    });
+    // 全書精確頁數／進度百分比：背景跑 scanAllChapterPages()（見上方定義）。延後幾秒才開始，
+    // 避開使用者開書後最常見的「馬上連續翻頁測試」這段時間，減少背景渲染跟使用者操作互搶
+    // 主執行緒的機會；不 await，維持「不拖慢開書速度」的行為，期間的 relocated 事件會先用
+    // postRelocated 裡的章節索引概算值頂著。
+    (async () => {
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 4000));
+        await scanAllChapterPages(generation, currentBook);
+        if (generation !== loadGeneration) return;
+        // 主動用最近一次的位置重算並補送一次 relocated，避免使用者開書後沒有繼續翻頁
+        // 就看不到頁數列（見上方 lastRelocatedLoc 宣告處的說明）。
+        if (lastRelocatedLoc) postRelocated(lastRelocatedLoc, null);
+      } catch {
+        /* 背景掃描失敗不影響閱讀本身，忽略即可，頂多進度概算比較粗略，全書頁碼也會持續顯示為空 */
+      }
+    })();
   } catch (err) {
     unlockNav();
     post({ type: 'error', message: err instanceof Error ? err.message : String(err) });
@@ -486,9 +730,7 @@ const handleMessage = (event: MessageEvent<string>) => {
   if (msg.type === 'load') loadBook(msg.base64, msg.cfi);
   if (msg.type === 'prev') turnPage('prev');
   if (msg.type === 'next') turnPage('next');
-  if (msg.type === 'goto') rendition?.display(msg.target).catch(() => {
-    /* 目標 CFI／href 已失效（例如書籍內容變動），忽略即可 */
-  });
+  if (msg.type === 'goto') gotoTarget(msg.target);
   if (msg.type === 'extractMeta') extractMeta(msg.base64);
   if (msg.type === 'setDarkMode') setDarkMode(msg.darkMode);
   if (msg.type === 'setTypography') {

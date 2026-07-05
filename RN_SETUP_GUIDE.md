@@ -455,4 +455,111 @@ Monorepo 常見誤區：使用者回報「手機上」的問題，實際上可�
 - **`mobile/app/reader/[id].tsx`**：原本的 `openSettings`/`openListPanel`（只會開、不會關）改成 `toggleSettings`/`toggleListPanel`——再按一次目前已經開著的那顆圖示會直接關閉（`setSettingsVisible((prev) => !prev)`／`setListPanelTab((prev) => (prev ? null : 'bookmarks'))`），同時保留原本「開其中一個要順便關掉另一個」的互斥邏輯。兩顆圖示按鈕加上開啟狀態的視覺提示：比照這次稍早書籤按鈕的做法，開啟時圖示顏色換成 `colors.progressFill`、背景墊一層 `colors.paperBg2` 色塊（`accessibilityState={{ selected }}` 一併補上，方便無障礙工具判讀）。
 - **驗證狀態**：`tsc --noEmit`、`expo-doctor`（20/20）、`expo export --platform android` 皆通過，純打包/型別驗證，純 JS/TSX 邏輯與版面改動，不涉及原生模組，不需要重新編譯 Dev Client，reload 即可生效。**尚未實機/模擬器測試**：麻煩確認 (1) 清單／設定圖示點第二次是否正確關閉面板、(2) 面板開啟時圖示是否正確顯示高亮（顏色＋背景色塊）、關閉後是否正確恢復原色、(3) `ListPanel` 移除頂部列之後，分頁列上緣間距看起來是否還算合理（沒有貼著螢幕邊緣瀏海/狀態列）。
 
+**第十四輪：閱讀頁頁數顯示，比照網頁版 Toolbar 設計（2026-07-05）**：
+- 網頁版 `renderer/src/components/Toolbar.tsx` 中間區塊顯示「第 X 頁」＋細進度條＋「/ 共 Y 頁 · Z%」，X/Y 是**背景逐章渲染**算出的精確全書頁碼（`Reader.tsx` 的 `chapterPagesRef` 機制），mobile 沒有那套背景掃描機制（見第一輪「未做」清單）。
+- **做法**：借用第九輪已經為了算精確 `percentage` 而產生的 `book.locations`（`reader-web/index.ts` 的 `book.locations.generate(1024)`），用 `book.locations.locationFromCfi(cfi)` 當「目前頁碼」（index+1）、`book.locations.length()` 當「全書總頁數」——這是概算值（location 顆粒度取決於 1024 字元切分，不是排版精確分頁），但足夠給使用者一個大致頁碼參考，且不需要额外背景渲染成本。`locations.generate()` 完成前 `page`/`total` 送 `null`，畫面先不顯示；`readerMessages.ts` 的 `relocated` 訊息型別對應改成 `page: number | null; total: number | null`。
+- **已知型別坑**：`node_modules/epubjs/types/locations.d.ts` 把 `locationFromCfi()` 回傳型別誤標成 DOM 內建的 `Location`（單純撞名，實際上是 `number`），需要 `as unknown as number` 轉型，否則 `tsc` 會報 `>=`/`+` 不能用在 `Location` 上的錯誤。
+- **UI**：`mobile/app/reader/[id].tsx` 頂部返回列下方新增一列（`pageInfo` 有值才顯示）：「第 X 頁」＋ `flex:1` 細進度條（`colors.progressTrack`/`colors.progressFill`）＋「/ Y · Z%」，樣式與配色照抄網頁版 Toolbar 中間區塊。
+- **驗證狀態**：`tsc --noEmit`、`yarn build:reader`、`expo-doctor`（20/20）皆通過，純打包/型別驗證。**尚未實機/模擬器測試**：麻煩確認 (1) 開書後頁數列多久會出現（等待 `locations.generate()` 跑完，書越大可能越慢）、(2) 翻頁時頁碼與進度條是否隨之更新、(3) 概算頁碼是否大致合理（不需要跟網頁版逐字比對，只要不會出現明顯跳動或負數/NaN）。
+
+**第十四輪追加：兩種模擬器都完全沒看到頁數列（2026-07-05，使用者實測回報）**：
+- **根因推測（未經實機證實）**：`relocated` 事件的 handler 只在「使用者翻頁/換章節時」觸發；`book.locations.generate()` 是背景非同步跑完（可能要幾百毫秒到幾秒），若使用者開書後沒有繼續翻頁，`locations` 算完這件事本身並不會觸發新的 `relocated` 事件，`page`/`total` 就會一直停在最初的 `null`，頁數列因此永遠不出現——這是「開書後靜靜看，不翻頁」這個路徑本來就會踩到的坑，先前只用「等下一次 relocated」的假設是不完整的。
+- **修法**：`reader-web/index.ts` 把原本寫在 `relocated` handler 內的計算邏輯抽成獨立函式 `postRelocated(l)`，並新增模組層級變數 `lastRelocatedLoc` 記住最近一次的位置；`book.locations.generate(1024)` resolve 後除了設定 `locationsReady = true`，還會主動用 `lastRelocatedLoc` 呼叫一次 `postRelocated()` 補送，不必等使用者翻頁。
+- **加了診斷用 debug log**（`post({ type: 'debug', ... })`，會經 `mobile/app/reader/[id].tsx` 的 `handleMessage` 印到 RN 端 `console.log('[reader-web debug]', ...)`）：`generate()` 開始/完成（含 length）/失敗、以及每次 `postRelocated` 算出的 `locationsReady`/`locIndex`/`locTotal`/`page`/`total`。這是暫時性診斷，之後確認穩定應該移除；若這次補送後使用者仍看不到頁數列，麻煩開 Metro/Expo 終端機或 Safari/Chrome Web Inspector 看這些 log，確認是 (a) `generate()` 根本沒開始/一直失敗，還是 (b) 有跑完但 `postRelocated` 算出的 `page`/`total` 仍是 `null`（例如 `locationFromCfi` 找不到位置回傳 -1），藉此縮小根因範圍，而不是繼續猜。
+- **驗證狀態**：`tsc --noEmit`、`yarn build:reader`、`expo-doctor`（20/20）皆通過。**同樣尚未實機/模擬器測試**——這個修法解決的是「開書後不翻頁就永遠看不到」這個已知邏輯漏洞，但無法排除還有其他根因（例如某些書 `generate()` 本身失敗），需要使用者這輪重新測試並回報 debug log 內容才能確認。
+
+**第十四輪再追加：Android 翻不到書尾＋連續翻頁頁碼對不上（2026-07-05，使用者實測回報）**：
+- **根因**：`book.locations.generate(1024)` 是跟 `rendition` 共用同一個 `book` 實例呼叫的。epub.js 的 `Locations.generate()` 內部會依序對「每一個」spine section 呼叫 `section.load()` 取內容、`section.unload()` 釋放——這批 section 物件跟 `rendition` 當下正在顯示、或使用者翻頁時即將要導覽進去的 section 是**同一份**。背景掃描把某個 section `unload()` 掉的當下，如果剛好是 rendition 準備要進入的 section，會撞見已經被清空的 document／內容快取：Android 上表現成「翻到接近書尾就卡住翻不過去」；連續快速翻頁時則表現成「epub.js 內部位置跟我們算出來的頁碼對不上，翻了好幾頁但頁碼沒跟著動」。這個背景掃描本身（原本是第九輪為了修正「讀畢」誤判而加的）從那時候就存在，只是這次因為新增頁碼顯示功能而被更仔細測試出來。
+- **修法**：改用第二個**獨立、不掛 `renderTo()`** 的 `locationsBook` 實例（跟 `extractMeta()` 讀書名/封面用另一個 `metaBook` 是同一招——同一份 base64 重新 `ePub()` 解析一次），背景掃描只發生在這個獨立實例的 section 上，不會再跟 `rendition` 當下的 section 打架。連帶地，原本讀取 `l.start.percentage`（epub.js 內建算法，內部其實是用 `this.book.locations`，`this.book` 就是跟 rendition 共用的主 `book`，等於還是踩同一顆坑）也拿掉，全書精確進度百分比改成用 `locationsBook` 自己算的 `locIndex / locTotal`，跟頁碼共用同一份定位索引，數值上互相一致。
+- `mobile/reader-web/index.ts`：新增模組層級變數 `locationsBook`；`loadBook()` 內 `rendition.display()` 之後改成 `locationsBook = ePub(base64ToArrayBuffer(base64)); await locationsBook.ready; await locationsBook.locations.generate(1024)`（包在自執行 async function 內、不 `await` 外層，維持原本「不拖慢開書速度」的行為）。
+- **驗證狀態**：`tsc --noEmit`、`yarn build:reader`、`expo-doctor`（20/20）皆通過。**尚未實機/模擬器測試**：麻煩確認 (1) Android 上這次能不能順利翻到書本最後一頁、(2) 連續快速翻頁時「第 X 頁」數字是否每次翻頁都會跟著變化、不再卡在原地不動、(3) 進度百分比／「讀畢」判斷是否還維持正常（不會提早在章節結尾誤判 100%）。若還有異常，一樣可以看 `[reader-web debug]` 開頭的 log（`locationsBook.generate` 開始/完成/失敗、每次 `postRelocated` 算出的數值）幫忙定位。
+
+**第十四輪再追加之二：使用者回報重新 build 後兩個問題依然都在（2026-07-05）**：
+- **誠實記錄**：上一輪「獨立 locationsBook 隔開 section 衝突」的推測，實測結果證明**沒有解決問題**（或至少不是唯一根因），不能再假裝這個修法有效。這輪改往兩個新方向處理，但同樣缺乏實機驗證管道，如果這次還是沒改善，需要靠使用者提供的 debug log 才能真正定位，而不是繼續憑空猜測。
+- **方向一（可能導致「連續翻頁頁碼跟不上」的根因）**：`locations.generate(1024)` 用 1024 字元切一個「location」，但一般字級設定下手機螢幕一頁大概只有幾百字，等於一個 location 大約橫跨 2 個實際螢幕頁——使用者翻 2 頁，頁碼概念上才會跳 1，這是原本設計對「概算」的取捨沒說清楚會有多粗，不是真的邏輯錯誤，但體感上就是「翻好幾頁沒反應」。**修法**：`reader-web/index.ts` 把切分粒度從 `1024` 字元降到 `350` 字元（`LOCATIONS_CHARS_PER_PAGE` 常數），讓一個 location 更接近一般設定下的一頁螢幕內容，仍不是精確 1:1（字體大小/行距等排版設定會讓實際落差不同），但應該會讓頁碼變化跟翻頁動作更貼近。
+- **方向二（可能導致「Android 翻不到書尾」的另一個根因，尚未證實）**：即使改成獨立的 `locationsBook`，`ePub()` 解析 zip（JSZip 解壓）＋逐章掃描字元本身仍是吃 CPU 的背景工作，如果剛好在使用者開書後馬上連續翻頁測試的那幾秒執行，可能讓 WebView 主執行緒忙線，導致觸控/`relocated` 事件被延遲甚至掉幀。**修法**：`loadBook()` 內用 `setTimeout` 把 `locationsBook` 的建立與 `generate()` 延後 4000ms 才啟動，避開使用者剛打開書最常見的「馬上連續翻頁測試」這個時間窗口。
+- **加強診斷**：`turnPage()` 現在每次呼叫都會送 debug log（direction、是否因為 `navBusy` 被略過、`rendition.next()/prev()` 的 promise 何時 resolve/reject），方便下次如果還有問題時，直接比對「使用者實際按了幾次」跟「log 裡真正執行了幾次、有沒有卡在 promise 沒 resolve」，而不是只能看最終畫面結果猜測。
+- **這輪坦白說明限制**：以上兩個方向都是**推測**，我沒有辦法在這個環境重現 Android 模擬器連續翻頁或翻到書尾的行為，無法實際驗證是否真的解決。如果這輪測試後問題依然存在，**麻煩把 Metro/Expo 終端機裡完整的 `[reader-web debug]` 系列 log 貼給我**（尤其是使用者連續翻頁那段期間、以及翻到書尾附近卡住那次的 log），才能從「使用者實際按了幾次、log 裡對應到幾次 `turnPage` 執行、`relocated` 有沒有觸發」精確定位問題，不要再靠我單方面猜測改。
+- **驗證狀態**：`tsc --noEmit`、`yarn build:reader`、`expo-doctor`（20/20）皆通過，純打包/型別驗證，不代表功能已修正。
+
+**第十四輪再追加之三：使用者回報頁碼有增加但翻兩頁才跳一次、Android 依然翻不到書尾（2026-07-05）**：
+- **判斷**：字元切分粒度調整（1024→350）方向是對的但治標不治本——只要用「每 N 字元一個位置」概算，就永遠沒辦法保證使用者「翻一次螢幕頁＝頁碼加一」，因為 N 字元橫跨幾個實際螢幕頁會隨字體大小/行距等排版設定變動，不可能靠調參數湊出精確 1:1。Android 翻不到書尾的問題則兩輪都沒解決，代表「獨立 book 實例隔開 section 衝突」這個推測大機率是錯的方向。
+- **改用網頁版既有、已驗證的做法**：`renderer/src/page/Reader.tsx` 的 `scanAllChapterPages`——背景用一個**隱藏、不顯示在畫面上**的 `hiddenRendition`（**跟主 rendition 共用同一個 book 實例**，不是另外重新解析一份）依序 `display()` 每個 spine 章節，直接讀 epub.js 自己算出來的 `displayed.total`（該章節在目前字級/行距/字距設定下的真實頁數，不是概算），加總起來當全書總頁數。因為讀的是 epub.js 真正的分頁結果，使用者在主畫面翻一次頁，`displayed.page` 就真的加 1，全書頁碼自然也是 1:1。這次額外想通的一點：**Rendition 的 `display()`／導覽本身不會呼叫 `section.unload()`，只有 `Locations.generate()` 才會**——所以用 hiddenRendition 掃描完全不用擔心先前顧慮的「跟主 rendition 搶同一批 section 物件」問題，可以放心共用同一個 `book`，不需要再另外解析一份（也省了重新解析 zip 的 CPU 成本）。
+- `mobile/reader-web/index.ts`：新增 `scanAllChapterPages()`（建立隱形 `hiddenEl` 附加到 `document.body`、`book.renderTo(hiddenEl, ...)`、套用跟主 rendition 一樣的 `applyTypographyToDoc` hook、逐章 `await hiddenRendition.display(href)` 後讀 `currentLocation().start.displayed.total` 存進 `chapterPageCounts: Map<index, total>`，每章之間 `await new Promise(r => setTimeout(r, 0))` 讓出一個 tick 避免整段同步佔滿主執行緒，跑完 `hiddenRendition.destroy()` 並移除 `hiddenEl`）；`postRelocated()` 改成用 `chapterPageCounts` 累加「目前章節之前」的頁數 + 當前章節 `displayed.page` 算全書頁碼，累加全部章節算全書總頁數，寫法對應網頁版 `accuratePage`/`totalPages` 的計算方式。移除了上一輪的 `locationsBook`／`book.locations.generate(chars)` 整套字元概算邏輯。
+- 保留上一輪「延後 4000ms 才開始背景掃描」與 `turnPage()` 的 debug log，這兩個改動本身沒有壞處，繼續留著。
+- **驗證狀態**：`tsc --noEmit`、`yarn build:reader`、`expo-doctor`（20/20）皆通過。**尚未實機/模擬器測試**：這是目前為止最貼近網頁版做法、理論上最站得住腳的版本，但同樣沒有把握一定解決 Android 翻不到書尾的問題（那個推測至今兩輪都沒中，這次換了完全不同的技術路徑，用意是排除「locations 生成方式」這整條懷疑鏈，而不是繼續在同一條路上微調）。麻煩重新測試：(1) 連續翻頁時「第 X 頁」是否確實每翻一次就加 1、(2) Android 這次能不能翻到書本真正的最後一頁。若 (2) 依然沒解決，代表根因很可能完全跟頁碼功能無關，是更早就存在、和這個功能無關的翻頁/導覽層問題，需要換方向單獨排查（例如先確認不開頁碼功能的情況下，Android 單純翻頁到書尾是否本來就有問題），而不要再往頁碼計算這個方向猜。
+
+**第十四輪再追加之四：Android 已能翻到書尾，但最後一頁顯示「第 315 頁／共 316 頁・100%」（2026-07-05，使用者實測回報＋截圖）**：
+- **證實**：上一輪換成 `scanAllChapterPages` 隱藏渲染的做法後，Android 翻不到書尾的問題**這次真的解決了**——原本「獨立 book 實例隔開 section 衝突」的推測方向確實是錯的，問題根因跟 `Locations.generate()` 有關，換掉整套機制後就好了。
+- **新的小落差**：畫面顯示「第 315 頁」但「共 316 頁」，內文卻已經是「[全書完]」——顯然使用者已經在真正的最後一頁。**根因**：`scanAllChapterPages()` 的 `hiddenRendition` 跟畫面上真正顯示中的 `rendition` 是兩個各自獨立的渲染流程，即使套用完全相同的字級/行距/字距設定，字型載入時機、版面量測時機等細節仍可能有極小差異，導致兩邊各自算出「最後一章有幾頁」時相差 1 頁——這不是計算邏輯錯誤，是兩份獨立渲染結果之間無法完全對齊的先天限制。
+- **修法**：`postRelocated()` 內，`chapterPageCounts` 算出 `pageTotal` 後，如果 epub.js 自己回報的 `l.atEnd`（真的已經翻到書尾）為真，直接把 `page` 強制設成等於 `pageTotal`——用 epub.js 自己「是否已到書尾」的判斷當最終校正基準，不管背景掃描跟即時渲染兩邊差了幾頁，翻到真正最後一頁時畫面一定會顯示「第 Y 頁／共 Y 頁・100%」，不會再出現「明明讀完了但頁碼沒對齊」的觀感問題。
+- **驗證狀態**：`tsc --noEmit`、`yarn build:reader`、`expo-doctor`（20/20）皆通過。**尚未實機測試這個最新的 atEnd 校正**：麻煩確認翻到書尾時「第 X 頁」是否確實等於「共 Y 頁」且顯示 100%；另外因為使用者這輪已確認「連續翻頁頁碼是否每次準確加 1」看起來沒有再回報異常，可以視為這部分已驗證通過（如果實際上還有落差，麻煩再告知）。
+
+**第十四輪再追加之五：atEnd 校正沒生效，重新 build 後落差依舊（2026-07-05，使用者回報）**：
+- **真正根因（這次找到具體機制，不是猜測）**：epub.js 的 `rendition.next()`/`prev()` 實際上只會在 `item.linear === 'yes'` 的章節之間移動（`node_modules/epubjs/src/spine.js` 的 `item.next()`/`item.prev()`，遇到 `linear !== 'yes'` 的章節會整個跳過，使用者靠翻頁永遠到不了）；`atEnd` 的判斷條件也明確寫死是「目前章節 === `book.spine.last().index`」（`node_modules/epubjs/src/rendition.js` 第 825 行），這裡的 `spine.last()` 是**整個 spine 陣列最後一筆**，不管它是不是 linear。epub 檔案很常把版權頁／後記等單獨標成 `linear="no"`（例如放在最後一個 spine 項目）。之前的 `scanAllChapterPages()` 掃描的是**全部** spine 章節（沒有排除 non-linear），把使用者翻頁永遠碰不到的那個 non-linear 章節的頁數也算進 `pageTotal`，導致總頁數比使用者實際能翻到的最大頁數多；同時因為那個 non-linear 章節不是 spine 最後一筆以外的情形時 `atEnd` 也不會在使用者翻到的真正最後一頁被觸發（`end.index` 永遠到不了 `spine.last().index`），上一輪加的 `if (l.atEnd) page = pageTotal` 校正因此完全沒有機會執行——這解釋了為什麼那個修法沒有效果。
+- **修法**：`scanAllChapterPages()` 改成只掃描 `item.linear === 'yes'` 的章節（`linearItems = spineItems.filter(item => item.linear === 'yes')`），`chapterPageCounts` 只會收錄使用者翻頁真正到得了的章節，non-linear 章節的頁數不會被算進全書總頁數，兩者的落差自然消失，不需要再依賴 `atEnd` 硬校正（`atEnd` 校正邏輯保留當作保險，理論上不會再被觸發）。
+- **驗證狀態**：`tsc --noEmit`、`yarn build:reader`、`expo-doctor`（20/20）皆通過。**尚未實機測試**：麻煩確認翻到書尾時「第 X 頁」這次是否真的等於「共 Y 頁」；如果這本書原本就沒有 non-linear 章節，這個修法不會改變任何顯示結果，落差若依然存在就代表根因不是這個，需要請你回報翻到書尾那次的 `[reader-web debug]` log（尤其 `postRelocated` 那行印出的 `spineIndex`/`page`/`total`/`atEnd` 數值），才能繼續往下查。
+
+**第十四輪再追加之六：使用者回報 debug log，找到真正卡住的原因（2026-07-05）**：
+- 使用者這本書沒有 non-linear 章節（上一輪修法沒改變結果），但提供的 log 顯示連續按兩次「下一頁」，兩次 `postRelocated` 印出的數值完全一樣：`spineIndex=22 page=315 total=316 atEnd=false`——`turnPage` 的 log 也顯示 `[turnPage] direction=next promise resolved`（epub.js 的 `next()` 有正常呼叫、promise 也正常 resolve），但畫面位置（CFI）完全沒有移動，也沒有觸發 `atEnd`。
+- **根因**：最後一章（spineIndex 22）結尾有一小段內容，epub.js 的分頁量測（`displayed.total`）認為那還算獨立的一頁，但 `next()` 實際上翻不過去（可能是那段內容太短/是空白，epub.js 內部判斷「沒有更多內容可以顯示」而拒絕真的翻頁，但同時因為 `displayed.page` 還沒追上它自己量出的 `displayed.total`，`atEnd`（`node_modules/epubjs/src/rendition.js` 第 825 行的判斷）就一直不會是 `true`）。這是 epub.js 對這一類「章節結尾剩一小段」情境的分頁量測跟實際導覽結果不一致的既有行為，不是我們的計算邏輯錯誤，靠 `atEnd` 旗標校正在這種情況下天生就不會生效。
+- **修法**：`reader-web/index.ts` 新增 `lastNavDirection` 記錄剛剛呼叫的是 `prev()` 還是 `next()`；`postRelocated()` 現在會額外收到「呼叫翻頁前的 CFI」，如果剛剛呼叫的是 `next()`、但這次 relocated 事件的 CFI 跟呼叫前完全一樣（代表畫面根本沒有真的翻動），就直接把 `pageTotal` 校正成等於目前的 `page`（不是反過來把 `page` 往上推，因為使用者畫面上就是停在這裡，沒有更多內容可以顯示；把 `page` 硬推高只會讓「共 Y 頁」對得上但畫面顯示的頁碼變成假的）。
+- **驗證狀態**：`tsc --noEmit`、`yarn build:reader`、`expo-doctor`（20/20）皆通過。**尚未實機測試這次的修正**：麻煩確認翻到書尾（連續按下一頁按到不會再動為止）時，畫面是否會變成「第 X 頁／共 X 頁・100%」（兩個數字一致）；如果還有落差，麻煩再貼一次那次的 `[reader-web debug]` log（這次應該會多印出一行「偵測到 next() 後 CFI 未變化…」的校正 log，可以確認校正邏輯有沒有被觸發到）。
+
+**第十四輪再追加之七：postRelocated 的 stuck-CFI 校正確實有效，但要多按一次「下一頁」才會生效（2026-07-05，使用者實測回報＋截圖）**：
+- 使用者截圖確認：翻到書尾第一次顯示「第 315 頁／共 316 頁・100%」，再按一次下一頁畫面沒有變動，這時才變成「第 315 頁／共 315 頁・100%」——上一輪加的 stuck-CFI 校正邏輯本身是有效的，但要使用者多按一次原本不需要的「下一頁」才會觸發，體驗上不夠好（使用者會覺得「怎麼按了沒反應，還要再按一次數字才對」）。
+- **修法**：把驗證提前到背景掃描階段，不要等使用者自己翻到書尾才發現。`scanAllChapterPages()` 現在對「全書最後一個 linear 章節」多做一次驗證：先用 epub.js 量出來的 `displayed.total` 當初始值，接著在隱藏的 `hiddenRendition` 上實際逐頁呼叫 `next()`，每次都比對 CFI 是否真的往前移動；一旦 CFI 不再變化，就代表那就是真正能翻到的最後一頁，把這章的頁數改記錄成這個「實測驗證過」的頁數，而不是 epub.js 一開始量出來、可能多算 1 頁的 `displayed.total`。這樣使用者第一次翻到書尾時，頁碼／總頁數就已經是對的，不需要再多按一次。只對最後一章做這個額外驗證（其他章節中間如果也有同樣的量測誤差，頂多讓全書總頁數有 ±1 的極小誤差，不會像最後一頁那樣造成「卡住翻不動」的明顯體驗問題，不需要對每一章都做，避免背景掃描時間大幅增加）。
+- 上一輪加的 `postRelocated` stuck-CFI 校正邏輯（使用者多按一次下一頁時的保險）繼續保留，當作這個背景驗證萬一沒觸發到（例如某些特殊情況）時的最後防線，兩者不衝突。
+- **驗證狀態**：`tsc --noEmit`、`yarn build:reader`、`expo-doctor`（20/20）皆通過。**尚未實機測試**：麻煩確認這次翻到書尾時，是不是第一次就顯示「第 X 頁／共 X 頁・100%」，不需要再多按一次下一頁。
+
+**第十四輪再追加之八：加了背景驗證後反而「翻不到最後一頁」變成真的翻不動了（2026-07-05，使用者回報＋log＋截圖）**：
+- **回報現象**：log 顯示 `postRelocated` 校正訊息「pageTotal 從 315 校正為 315」（數字沒變，代表背景驗證這次算出來的總頁數本身就是 315），但截圖顯示畫面卡在「凱蒂活下來了…」那段，還沒翻到「[全書完]」那頁——代表背景驗證算出的 315 是**錯的、少算了**，把使用者原本翻得到的最後幾頁都排除在外，比上一輪（顯示 315/316，只是數字對不上但至少翻得到底）還要糟。
+- **根因**：上一輪新增的驗證迴圈裡，`await hiddenRendition.next()` 的 promise 一 resolve 就馬上呼叫 `currentLocation()` 讀新位置——但這個 promise resolve 的時機，不保證 epub.js 內部的位置狀態已經真的更新完成（這正是主畫面翻頁那邊，`navBusy`/`unlockNavSoon` 需要在 relocated 之後還額外留 250ms 緩衝時間、不能 promise 一 resolve 就解鎖的同一個原因，這裡新寫的驗證迴圈忽略了這個已知的坑）。結果驗證迴圈常常在還沒真的翻到底時，就因為讀到「舊」CFI 誤判成「翻不動了」而提前中止，把後面其實翻得到的頁數也算沒了。
+- **修法**：驗證迴圈改成掛一次性的 `hiddenRendition.on('relocated', ...)` 監聽器，`next()` 呼叫後改成等真正的 `relocated` 事件觸發（而不是 promise resolve 當下）才讀新的 CFI 判斷有沒有真的翻動；有 1000ms 逾時保護避免萬一沒收到事件卡住背景掃描。
+- **這輪的風險評估，供下次對話參考**：如果這個修法還是不準，比較安全的退路是**整個拿掉「背景預先驗證最後一章」這個附加功能**，只保留已經證實有效、無害的 `postRelocated` stuck-CFI 即時校正（代價只是使用者翻到書尾那次要多按一次「下一頁」才會把數字校正成一致，不會有「明明翻得到卻被擋住」這種更嚴重的問題）。背景預先驗證是體驗優化（少按一次），不是必要功能，優先度低於「翻頁本身不能被我們的計算邏輯卡住」。
+- **驗證狀態**：`tsc --noEmit`、`yarn build:reader`、`expo-doctor`（20/20）皆通過。**尚未實機測試**：麻煩確認 (1) 這次翻到書尾能不能翻到「[全書完]」那頁、(2) 到達之後頁碼／總頁數是否一致。如果還是翻不到底或數字算少了，請直接告訴我，下一步會考慮移除這個背景驗證功能，改回只靠即時校正。
+
+**第十五輪：點目錄章節無法跳轉＋goto 補上 navBusy 忙碌鎖（2026-07-05，使用者回報 iOS/Android 皆有問題）**：
+- **第一步**：`goto`（目錄／書籤跳轉）訊息原本完全沒有經過翻頁用的 `navBusy` 忙碌鎖，直接呼叫 `rendition.display(target)`。如果使用者剛翻頁、鎖還沒解開（`unlockNavSoon` 的 250ms 緩衝內）就馬上點目錄章節，會變成 `display()` 跟前一次 `next()/prev()` 同時操作 epub.js 內部狀態——這正是 `navBusy` 鎖原本要擋的情況，只是 `goto` 這條路徑當初漏接了。改成新增 `gotoTarget()`，用短輪詢等現有忙碌鎖解開後才真的執行（不像 `turnPage` 忙碌時直接略過——章節/書籤跳轉是使用者明確的單次意圖，不應該被靜默丟棄），並加上 debug log。
+- **第二步（使用者提供 log 後找到的真正根因）**：加了 log 後使用者實測回報 `[goto] target=../Text/Section0055.xhtml promise rejected: No Section Found`——問題其實不是忙碌鎖，是 **href 格式對不上**。epub.js 的 `Navigation` 解析器（`node_modules/epubjs/src/navigation.js`）完全不會正規化 nav/ncx 檔案裡寫的 href（建構時沒有傳入 resolver），而 `nav.xhtml`／`toc.ncx` 常常跟內容檔案放在不同資料夾，導致目錄裡的 href 是**相對於 nav 檔案自己的路徑**（例如 `../Text/Section0055.xhtml`），跟 spine item 的 href（相對於 OPF 解析出來的路徑，例如 `Text/Section0055.xhtml`）對不起來，`spine.get()` 找不到對應 section，`rendition.display()` 因此拋出 `No Section Found`。
+- **修法**：新增 `resolveNavTarget()`，先用 `/^epubcfi\(/i` 判斷是不是 CFI（書籤跳轉用，本身就是 spine 索引編碼過的字串，不需要這段正規化），如果是章節 href，改用**檔名比對** `book.spine.items` 找出對應項目，拿 spine item「自己的」href 去 `display()`——這是照抄網頁版 `renderer/src/page/Reader.tsx` 的 `handleNavigateToChapter` 已經驗證過的解法（同一個 monorepo 的 web 版本原本就踩過、也修過這題，這次只是把同一招搬到 mobile）。
+- **驗證狀態**：`tsc --noEmit`、`yarn build:reader`、`expo-doctor`（20/20）皆通過。**尚未實機測試**：麻煩確認目錄點擊章節這次是否能正常跳轉（iOS、Android 都測），也留意 debug log 是否有印出「href 正規化 ... -> ...」這行，可以確認有沒有真的比對到 spine item。
+
+**待查（尚未動手）**：使用者另外回報 Android「點一次右側畫面翻頁區塊卻實際翻兩頁」，原因未知，使用者選擇先擱置、優先處理目錄跳轉問題。下次對話若要繼續查，需要使用者重現當下（點一次、確認翻了兩頁）前後的完整 `[reader-web debug]` log，藉此分辨是「同一次點擊觸發了兩次 `turnPage`」還是「一次 `turnPage`/`next()` 內部就跳了兩頁」，兩者根因與修法完全不同，不要沒有 log 就先猜著改。
+
+**第十五輪追加：目錄跳轉已修好，但 Android 書中間頁碼卡在「第 301 頁／共 301 頁・100%」（iOS 同一位置正常顯示「第 321 頁／共 337 頁・95%」）（2026-07-05，使用者截圖回報）**：
+- **先確認現象**：問過使用者，畫面在這個位置還是能正常繼續往前翻（不是卡住），純粹是頁碼／總頁數的數字顯示錯了——排除掉「翻不到底」那一類問題，縮小到單純的計算邏輯錯誤。
+- **根因**：`postRelocated()` 裡第十四輪加的 stuck-CFI 校正（`next()` 後 CFI 沒變就把 `pageTotal` 降到等於 `page`）沒有限制只在真正的書尾章節才生效，只要 `next()` 之後任何一次 relocated 事件剛好回報了「跟前一次相同的 CFI」就會觸發。Android 上翻頁跨章節時，偶爾會有這種 relocated 事件回報了尚未更新的 CFI（不是真的卡住，多半再翻一次就正常前進），這個校正邏輯把它誤判成「已經到書尾」，把 `pageTotal` 永久鎖死在當下頁碼——這正是這次看到「書中間卡在 100%」的根因，是上一輪加的保險機制本身的副作用，不是新問題。
+- **修法**：新增 `lastLinearSpineIndex`（由 `scanAllChapterPages()` 設定成全書最後一個 linear 章節的 spine index），`postRelocated()` 的 stuck-CFI 校正現在多加一個條件：只有 `l.start.index === lastLinearSpineIndex`（真的在最後一章）才會觸發，書中間任何章節都不會被這個校正影響，避免誤判。
+- **驗證狀態**：`tsc --noEmit`、`yarn build:reader`、`expo-doctor`（20/20）皆通過。**尚未實機測試**：麻煩確認 (1) 書中間翻頁時頁碼／總頁數是否恢復正常、不會再卡在某個數字不動、(2) 翻到真正書尾時「第 X 頁／共 X 頁・100%」的校正是否仍然正常運作（避免這次限制範圍時把原本修好的書尾情境弄壞）。
+
+**第十五輪再追加：範圍限制沒解決問題，log 顯示總頁數整段都跟頁碼同步變化（2026-07-05，使用者附完整 log 回報）**：
+- **回報現象**：使用者這次附的 log 顯示，翻到最後一章後連續按 4 次下一頁，「共 X 頁」的數字**每次都跟著「第 X 頁」一起變成一樣的數字**（312/312 → 313/313 → 314/314 → 315/315），代表全書總頁數根本沒有被當成固定值，而是被算成跟目前頁碼一樣——範圍限制（只在最後一章生效）本身沒錯，但揭露了另一個更根本的問題：全書總頁數的來源本身就是錯的。
+- **真正根因**：這一切都指向 `chapterPageCounts.get(22)`（全書最後一個 linear 章節、也就是使用者當下正在看的這一章）被記錄成一個遠小於實際值的數字（例如 1），導致「全書所有章節頁數加總」这個 `totalPages` 一路都小於「目前頁碼」，`Math.max(totalPages, page)` 於是每次都選中 `page` 自己，畫面上總頁數就變成跟著頁碼同步跳動。往回追，兇手是第十四輪加的「對最後一章逐頁模擬 `next()`，驗證真的翻不翻得動」那段背景驗證邏輯：它會等待 `hiddenRendition` 的 `relocated` 事件才判斷有沒有真的翻頁，但如果**這個事件在背景掃描當下遲遲沒有觸發**（逾時 1000ms 或時序問題，在 Android 模擬器背景執行時很有可能發生），迴圈會在還沒真的翻完一整章之前就提早中止，把這一章的頁數嚴重低估到接近初始值（例如整章只算出 1 頁）——這比它原本想解決的「多算 1 頁」問題嚴重得多。
+- **修法（這次選擇拿掉整個功能，不再修修補補）**：`scanAllChapterPages()` 移除「對最後一章模擬 next() 驗證」這整段邏輯，改回完全信任 epub.js 量出來的 `displayed.total`（跟其他章節一視同仁，不再對最後一章特殊處理）。原本這段驗證想解決的「使用者翻到書尾時可能多算 1 頁」，改回完全交給 `postRelocated()` 的 stuck-CFI 校正處理（`next()` 真的卡住、CFI 沒變、且發生在 `lastLinearSpineIndex` 時才校正）——差別只是使用者翻到書尾那次要多按一次「下一頁」數字才會校正一致，但不會再有把整章頁數低估成 1 頁這種嚴重錯誤。
+- **這輪教訓**：背景模擬導覽（呼叫 `next()`／等 `relocated` 事件）在 Android 這個環境下時序不可靠，已經連續兩輪在這個「背景預先驗證最後一章」功能上出包（先是提早誤判翻不動、這次是逾時提早中止）——**日後不要再嘗試用背景模擬導覽的方式取得精確頁數**，優先用「使用者實際翻頁時即時修正」這種被動、低風險的做法，即使代價是體驗上少一點即時性。
+- **驗證狀態**：`tsc --noEmit`、`yarn build:reader`、`expo-doctor`（20/20）皆通過。**尚未實機測試**：麻煩確認 (1) 全書總頁數這次是否恢復成固定值、不會再跟著頁碼一起跳動、(2) 翻到真正書尾時，是否還是需要多按一次下一頁才會讓頁碼／總頁數校正一致（這是預期中的、可接受的行為，不是 bug）。**使用者後續貼的 log 顯示總頁數全程固定在 316、翻到書尾後校正也正確從 316 變成 315（見上一輪的 log），推斷已解決，但使用者沒有明確用文字說「好了」，之後若還有相關回報要留意。**
+
+**第十六輪：閱讀頁與書櫃卡片的進度百分比不一致（2026-07-05，使用者截圖回報「個人時代」書櫃顯示 28%、閱讀頁顯示 29%）**：
+- **根因**：兩處各自用不同公式算百分比。存進書櫃／`updateProgress()` 用的是 `postRelocated()` 算出的 `percentage`（`(page - 1) / (total - 1)`，語意是「第 1 頁 = 0%，最後一頁 = 100%」）；但 `mobile/app/reader/[id].tsx` 閱讀頁footer 自己另外用 `page / total`（沒有減 1）重算了一次百分比給畫面顯示用。兩個公式在頁數夠大時差異很小，四捨五入後常常剛好差 1%，就是這次「書櫃 28%、閱讀頁 29%」的來源——不是進度儲存錯誤，是同一份資料被算了兩次、公式不一致。
+- **修法**：`readerMessages.ts` 的 `relocated` 訊息本來就有 `percentage` 欄位（已經在算了，只是閱讀頁沒有拿來用），`mobile/app/reader/[id].tsx` 的 `pageInfo` state 新增 `percentage` 欄位直接存下 `msg.percentage`，footer 的百分比顯示與進度條寬度改成直接用 `Math.round(pageInfo.percentage * 100)`，不再自己用 `page/total` 另外算一次——這樣閱讀頁畫面上顯示的數字，保證跟同時間存進 `updateProgress()`、書櫃卡片讀到的是同一個數字來源，四捨五入結果一定一致。
+- **驗證狀態**：`tsc --noEmit`、`yarn build:reader`、`expo-doctor`（20/20）皆通過，純 JS/TSX 改動不影響原生模組，不需要重新編譯 Dev Client。**尚未實機測試**：麻煩確認同一本書在書櫃卡片與閱讀頁 footer 顯示的百分比這次是否完全一致。
+
+**第十七輪：iOS 模擬器點目錄章節跳轉失敗，且完全沒看到任何 debug log（2026-07-05）**：
+- 使用者回報 iOS 模擬器上目錄跳轉失敗；請對方抓 log 時，回報「完全沒有 log」——這比「有 log 但數字不對」更值得注意，代表問題可能發生在比 `gotoTarget()`／`resolveNavTarget()` 更早的環節（例如 `ListPanel` 章節按鈕的觸控事件在 iOS 上根本沒有觸發、或 postMessage 沒有送達 WebView），先前這幾輪除錯（`[reader-web debug]`）都是 WebView 內部的 log，如果訊息根本沒送到 WebView，這些 log 自然一行都不會出現。
+- **這次還沒找到根因，只先補齊診斷用的 log，縮小範圍**：
+  1. `mobile/app/reader/[id].tsx` 的 `handleNavigateToTarget()` 新增一行**純 RN 端**（不經過 WebView bridge）的 `console.log`，印出呼叫時的 `target` 跟 `webviewRef.current` 是否存在——如果連這行都沒出現，代表問題出在 `ListPanel` 章節列表的按鈕本身沒有把觸控事件正確傳到這個函式，是 RN 元件層級的問題，跟 WebView／epub.js 完全無關。
+  2. `mobile/reader-web/index.ts` 的 `handleMessage()` 補上「JSON.parse 失敗」的 log（原本失敗是直接靜默 return，訊息內容跟原因完全看不到）以及「收到任何合法訊息就印出 type」的一行 log——如果第 1 點的 log 有出現、但這裡完全沒印，代表 `postMessage` 送出去了但 WebView 端沒收到（iOS/Android 傳遞 message 事件的機制不同，`document`/`window` 都有掛 listener，但不排除 iOS 這裡還有沒覆蓋到的情況）。
+- **驗證狀態**：`tsc --noEmit`、`yarn build:reader`、`expo-doctor`（20/20）皆通過，純診斷用改動。**下一步需要使用者重新測試並回報兩種 log 各自有沒有出現**：(1) 純 RN 端的 `[reader] handleNavigateToTarget ...`、(2) WebView 端的 `[reader-web debug][ios] [handleMessage] 收到 type=goto`。哪一個先斷掉，就能準確定位問題在 RN 元件層、訊息傳遞層、還是 WebView 內部處理邏輯，這次不要再猜，先看這兩個 log 的落點。
+
+**另外回報的 `TurboModuleRegistry.getEnforcing(...): 'RNCWebViewModule' could not be found` 錯誤，跟頁碼功能無關**：這是原生模組層級的錯誤，代表目前執行的 Android 原生 App 二進位檔裡沒有註冊 `react-native-webview` 這個原生模組——純 JS/Metro 的 reload 或 Fast Refresh 沒辦法修好這種錯誤，因為原生模組需要在原生建置（compile）階段連結進 App 裡。這次對話完全沒有異動任何原生依賴（`package.json` 的 `react-native-webview` 版本從頭到尾都是 `13.16.1`，見 `mobile/package.json`），所以這應該是環境面的問題，不是這幾輪程式改動造成的。**建議處理方式**：關掉目前的 Metro/Dev Client，重新跑一次 `npx expo run:android`（不是 `yarn start`／`expo start`）讓它重新編譯並安裝原生 App；如果重新編譯後還是一樣，可能要試著清一下 Android 的 build 快取（`cd android && ./gradlew clean`，跑完再 `npx expo run:android`）。
+
+**第十七輪追加：iOS 目錄跳轉問題重新測試後恢復正常，移除所有診斷用 log（2026-07-05）**：
+- 使用者回報「剛才測試又變正常了」，第十七輪那次 iOS 跳轉失敗研判是一次性/暫時性狀況（例如尚未重新整理到最新 JS bundle、或模擬器本身的暫時性問題），不是程式邏輯的 bug，沒有繼續深究根因。
+- 使用者要求移除這幾輪為了除錯陸續加上的所有診斷用 log，全部清除：
+  - `mobile/reader-web/index.ts`：`debugLog()` 函式本身、`turnPage()`／`gotoTarget()`／`registerTapZone()`／`scanAllChapterPages()`／`postRelocated()`／`handleMessage()` 內所有 `debugLog(...)`／`post({ type: 'debug', ... })` 呼叫全部移除，恢復成單純的邏輯（不影響任何行為，只是拿掉印 log 的動作）。
+  - `mobile/lib/readerMessages.ts`：`OutboundMessage` 移除 `{ type: 'debug'; message: string }` 這個變體。
+  - `mobile/app/reader/[id].tsx`：`handleMessage` 移除 `msg.type === 'debug'` 的分支（原本會 `console.log('[reader-web debug][...]', ...)`）；`handleNavigateToTarget` 移除上一輪新增的純 RN 端診斷 `console.log`；連帶移除已經沒用到的 `Platform` import。
+- **驗證狀態**：`tsc --noEmit`、`yarn build:reader`、`expo-doctor`（20/20）皆通過，純移除診斷程式碼，不涉及任何功能邏輯改動，理論上不需要使用者額外測試，但如果之後這幾個功能（翻頁頁碼、目錄跳轉）又出現問題，會需要重新加回類似的 log 才能除錯。
+
 **Why 記錄這段**：mobile/ 的建置細節分散在多次對話中，若不集中記錄，下次對話容易重複「已經做過的初始化」或忘記 epub.js 在 RN 上不能直接用這個關鍵限制。
