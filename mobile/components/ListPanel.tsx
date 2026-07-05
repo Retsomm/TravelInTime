@@ -1,5 +1,5 @@
 import * as Clipboard from 'expo-clipboard';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Image, Pressable, ScrollView, Text, View } from 'react-native';
 import { IconCopy } from './icons';
 import { getCoverUri, type BookRecord, type Bookmark } from '../lib/library';
@@ -77,7 +77,7 @@ const ListPanel = ({
 
   const cs = record ? coverStyleFor(record.id) : null;
   const pct = record?.progress != null ? Math.round(record.progress * 100) : null;
-  const coverUri = record ? getCoverUri(record) : null;
+  const coverUri = useMemo(() => (record ? getCoverUri(record) : null), [record?.coverFilename, record?.coverUri]);
 
   return (
     <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: colors.paperBg, zIndex: 20 }}>

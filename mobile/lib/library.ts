@@ -123,13 +123,16 @@ export const getBookFileUri = (record: BookRecord): string => new File(booksDir(
 export const getBookBase64 = (record: BookRecord): Promise<string> =>
   new File(booksDir(), record.filename).base64();
 
+const resolveCoverFilename = (record: BookRecord): string | undefined =>
+  record.coverFilename ?? record.coverUri?.split('/').pop();
+
 export const removeBook = (id: string) =>
   updateMeta((records) => {
     const record = records.find((r) => r.id === id);
     if (record) {
       const file = new File(booksDir(), record.filename);
       if (file.exists) file.delete();
-      const coverFilename = record.coverFilename ?? record.coverUri?.split('/').pop();
+      const coverFilename = resolveCoverFilename(record);
       if (coverFilename) {
         const cover = new File(coversDir(), coverFilename);
         if (cover.exists) cover.delete();
@@ -151,11 +154,16 @@ export const updateBookMeta = (
 // 封面圖檔存進沙盒目錄，AsyncStorage 只存檔名（圖片轉 base64 存 AsyncStorage 太肥）。
 // 回傳檔名而不是完整 file:// 路徑：完整路徑開頭是當次 App 安裝的 sandbox 容器 UUID，
 // 重新安裝／原生重新編譯後容器路徑會變，存死的完整路徑就會失效（見 getCoverUri 現算路徑）。
+const coverExtensions = ['jpg', 'png', 'gif', 'webp'];
+
 export const saveCoverImage = (id: string, base64: string, mediaType: string | null): string => {
   const dir = coversDir();
   if (!dir.exists) dir.create({ intermediates: true });
+  for (const ext of coverExtensions) {
+    const existing = new File(dir, `${id}.${ext}`);
+    if (existing.exists) existing.delete();
+  }
   const file = new File(dir, `${id}.${coverExtension(mediaType)}`);
-  if (file.exists) file.delete();
   file.create();
   file.write(base64ToBytes(base64));
   return file.name;
@@ -165,7 +173,7 @@ export const saveCoverImage = (id: string, base64: string, mediaType: string | n
 // 不依賴存死的絕對路徑。若只有舊版留下的 coverUri（完整路徑），退而求其次取檔名部分
 // 拼回目前的 coversDir()，讓舊資料在 App 重新安裝後也有機會恢復顯示。
 export const getCoverUri = (record: BookRecord): string | null => {
-  const filename = record.coverFilename ?? record.coverUri?.split('/').pop();
+  const filename = resolveCoverFilename(record);
   if (!filename) return null;
   const file = new File(coversDir(), filename);
   return file.exists ? file.uri : null;
