@@ -1,8 +1,13 @@
+import type { Script, TypographySettings } from './readerSettings';
+
 export type InboundMessage =
   | { type: 'load'; base64: string; cfi: string | null }
   | { type: 'prev' }
   | { type: 'next' }
-  | { type: 'extractMeta'; base64: string };
+  | { type: 'extractMeta'; base64: string }
+  | { type: 'setDarkMode'; darkMode: boolean }
+  | ({ type: 'setTypography' } & TypographySettings)
+  | { type: 'getChapterText' };
 
 export type OutboundMessage =
   | { type: 'ready' }
@@ -10,4 +15,6 @@ export type OutboundMessage =
   | { type: 'error'; message: string }
   | { type: 'debug'; message: string }
   | { type: 'metaExtracted'; title: string; author: string; coverBase64: string | null; coverMediaType: string | null }
-  | { type: 'metaError'; message: string };
+  | { type: 'metaError'; message: string }
+  | { type: 'chapterText'; text: string }
+  | { type: 'bookLanguageDetected'; baseScript: Script };

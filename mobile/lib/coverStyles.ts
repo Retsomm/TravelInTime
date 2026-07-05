@@ -14,6 +14,3 @@ export const coverStyleFor = (id: string) => {
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
   return COVER_STYLES[h % COVER_STYLES.length];
 };
-
-export const PROGRESS_TRACK_COLOR = '#E4DDD0';
-export const PROGRESS_FILL_COLOR = '#C17A4A';
