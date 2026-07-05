@@ -19,9 +19,8 @@ export type InboundMessage =
 
 export type OutboundMessage =
   | { type: 'ready' }
-  | { type: 'relocated'; cfi: string; href: string; page: number; total: number; percentage: number; atStart: boolean; atEnd: boolean; chapterTitle: string }
+  | { type: 'relocated'; cfi: string; href: string; page: number | null; total: number | null; percentage: number; atStart: boolean; atEnd: boolean; chapterTitle: string }
   | { type: 'error'; message: string }
-  | { type: 'debug'; message: string }
   | { type: 'metaExtracted'; title: string; author: string; coverBase64: string | null; coverMediaType: string | null }
   | { type: 'metaError'; message: string }
   | { type: 'chapterText'; text: string }
