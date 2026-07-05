@@ -46,6 +46,9 @@ let lastRelocatedLoc: any = null;
 // 全書最後一個 linear 章節的 spine index（由 scanAllChapterPages 設定）。postRelocated 的
 // stuck-CFI 校正只在這一章才會生效，見該處的說明。
 let lastLinearSpineIndex: number | null = null;
+// 每次 loadBook 換書時遞增，scanAllChapterPages 完成時比對這個值，避免舊書的背景掃描
+// 在使用者已經換到新書之後才跑完，把新書的 chapterPageCounts 覆寫成舊書算出來的頁數。
+let loadGeneration = 0;
 
 // 章節目錄快取（目錄面板顯示用）與 spine href 順序（比照網頁版 Reader.tsx 的
 // getChapterTitle／getBookmarkLabel，用來把目前位置換算成章節標題）。
@@ -360,7 +363,12 @@ const resolveNavTarget = (target: string): string => {
     (filename && item.href?.endsWith('/' + filename)) ||
     (filename && item.href === filename)
   );
-  return spineItem?.href ?? target;
+  if (!spineItem) return target;
+  // target 可能帶有目錄錨點（例如 `../Text/Section0055.xhtml#anchor-id`），上面只拿
+  // 檔名比對找出 spine item 自己的 href，這裡要把原本的錨點片段接回去，否則章節內的
+  // 精確跳轉位置會遺失，只跳到章節開頭。
+  const fragment = target.includes('#') ? target.slice(target.indexOf('#')) : '';
+  return spineItem.href + fragment;
 };
 
 // 目錄／書籤跳轉：直接呼叫 rendition.display(target)。
@@ -459,8 +467,8 @@ const extractMeta = async (base64: string) => {
 // 跳過，使用者靠翻頁永遠到不了）。epub 常見會把版權頁/附錄等標成 linear="no"，先前沒有排除
 // 這些章節，導致全書總頁數把使用者翻頁永遠碰不到的頁面也算進去，翻到真正的最後一頁時「第 X
 // 頁」永遠比「共 Y 頁」少（Y 多算了那些 non-linear 章節的頁數）。
-const scanAllChapterPages = async () => {
-  if (!book) return;
+const scanAllChapterPages = async (generation: number, targetBook: Book) => {
+  if (!book || book !== targetBook) return;
   const viewer = document.getElementById('viewer');
   if (!viewer) return;
   const width = viewer.clientWidth;
@@ -470,58 +478,68 @@ const scanAllChapterPages = async () => {
   const linearItems = spineItems.filter((item) => item.linear === 'yes');
   if (!linearItems.length || width <= 0 || height <= 0) return;
 
-  const hiddenEl = document.createElement('div');
-  Object.assign(hiddenEl.style, {
-    position: 'fixed', top: '-9999px', left: '-9999px',
-    width: `${width}px`, height: `${height}px`,
-    overflow: 'hidden', visibility: 'hidden', pointerEvents: 'none',
-  });
-  document.body.appendChild(hiddenEl);
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const hiddenRendition = (book as any).renderTo(hiddenEl, {
-    width, height, spread: 'none', flow: 'paginated', allowScriptedContent: true,
-  });
-  hiddenRendition.hooks.content.register((contents: unknown) => {
-    const doc = (contents as { document: Document }).document;
-    if (doc) applyTypographyToDoc(doc);
-  });
-
-  const counts = new Map<number, number>();
   const lastLinearItem = linearItems[linearItems.length - 1];
   lastLinearSpineIndex = lastLinearItem.index as number;
-  try {
-    for (const item of linearItems) {
-      const href = item.href as string | undefined;
-      const idx = item.index as number | undefined;
-      if (!href || idx === undefined) continue;
-      try {
-        await hiddenRendition.display(href);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const loc = (hiddenRendition as any).currentLocation?.();
-        const d = loc?.start?.displayed as { page: number; total: number } | undefined;
-        // 曾經在這裡加過「對最後一章逐頁模擬 next() 驗證真實可翻到的頁數」的邏輯，想解決
-        // epub.js 量測出的 displayed.total 有時比實際可翻到的頁數多 1 的問題。拿掉的原因：
-        // 這段驗證需要等待 hiddenRendition 的 relocated 事件，Android 上曾經因為事件遲遲不來
-        // （逾時或時序問題）讓驗證迴圈在還沒真的翻完就提早中止，反而把這一章的頁數嚴重低估
-        // （曾經整章只算出 1 頁），比原本「多算 1 頁」的問題更嚴重。改成完全信任 epub.js
-        // 量出來的 displayed.total，多算的那 1 頁改交給 postRelocated 的 stuck-CFI 校正
-        // （使用者翻到書尾、next() 真的卡住時才觸發，見該處說明）在使用者實際翻到那裡時修正，
-        // 不在背景用模擬導覽的方式先驗證——代價是使用者翻到書尾要多按一次「下一頁」數字才會
-        // 校正一致，但不會有把整章頁數算到只剩 1 頁這種更嚴重的錯誤。
-        if (d) counts.set(idx, d.total);
-      } catch {
-        /* 這一章渲染失敗就略過，最後用已知章節的平均值當缺值的替代 */
-      }
-      // 讓出一個 tick，避免連續同步渲染整本書時完全佔滿主執行緒導致觸控/翻頁卡頓。
-      await new Promise<void>((r) => setTimeout(r, 0));
-    }
-  } finally {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    try { (hiddenRendition as any).destroy(); } catch { /* ignore */ }
-    hiddenEl.remove();
-  }
 
+  // 隱藏掃描用的 rendition 只是背景讀取分頁結果，使用者看不到也不會互動，預設不需要
+  // 執行書本內容裡的腳本（allowScriptedContent 開著等於讓不受信任的 EPUB 內容在背景
+  // 平白多一次執行腳本的機會）。極少數 EPUB 版面完全靠腳本才能正確分頁、關閉腳本會讓
+  // 每一章都掃不出頁數，這種情況才退回開著腳本重掃一次。
+  const runScan = async (allowScriptedContent: boolean) => {
+    const hiddenEl = document.createElement('div');
+    Object.assign(hiddenEl.style, {
+      position: 'fixed', top: '-9999px', left: '-9999px',
+      width: `${width}px`, height: `${height}px`,
+      overflow: 'hidden', visibility: 'hidden', pointerEvents: 'none',
+    });
+    document.body.appendChild(hiddenEl);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const hiddenRendition = (book as any).renderTo(hiddenEl, {
+      width, height, spread: 'none', flow: 'paginated', allowScriptedContent,
+    });
+    hiddenRendition.hooks.content.register((contents: unknown) => {
+      const doc = (contents as { document: Document }).document;
+      if (doc) applyTypographyToDoc(doc);
+    });
+
+    const scanCounts = new Map<number, number>();
+    try {
+      for (const item of linearItems) {
+        const href = item.href as string | undefined;
+        const idx = item.index as number | undefined;
+        if (!href || idx === undefined) continue;
+        try {
+          await hiddenRendition.display(href);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const loc = (hiddenRendition as any).currentLocation?.();
+          const d = loc?.start?.displayed as { page: number; total: number } | undefined;
+          // 曾經在這裡加過「對最後一章逐頁模擬 next() 驗證真實可翻到的頁數」的邏輯，想解決
+          // epub.js 量測出的 displayed.total 有時比實際可翻到的頁數多 1 的問題。拿掉的原因：
+          // 這段驗證需要等待 hiddenRendition 的 relocated 事件，Android 上曾經因為事件遲遲不來
+          // （逾時或時序問題）讓驗證迴圈在還沒真的翻完就提早中止，反而把這一章的頁數嚴重低估
+          // （曾經整章只算出 1 頁），比原本「多算 1 頁」的問題更嚴重。改成完全信任 epub.js
+          // 量出來的 displayed.total，多算的那 1 頁改交給 postRelocated 的 stuck-CFI 校正
+          // （使用者翻到書尾、next() 真的卡住時才觸發，見該處說明）在使用者實際翻到那裡時修正，
+          // 不在背景用模擬導覽的方式先驗證——代價是使用者翻到書尾要多按一次「下一頁」數字才會
+          // 校正一致，但不會有把整章頁數算到只剩 1 頁這種更嚴重的錯誤。
+          if (d) scanCounts.set(idx, d.total);
+        } catch {
+          /* 這一章渲染失敗就略過，最後用已知章節的平均值當缺值的替代 */
+        }
+        // 讓出一個 tick，避免連續同步渲染整本書時完全佔滿主執行緒導致觸控/翻頁卡頓。
+        await new Promise<void>((r) => setTimeout(r, 0));
+      }
+    } finally {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      try { (hiddenRendition as any).destroy(); } catch { /* ignore */ }
+      hiddenEl.remove();
+    }
+    return scanCounts;
+  };
+
+  let counts = await runScan(false);
+  if (counts.size === 0) counts = await runScan(true);
   if (counts.size === 0) return;
   // 極少數章節渲染失敗時，用已知章節的平均頁數當替代值，避免整本書頁數整段留白
   // （只補 linear 章節缺的值，non-linear 章節本來就不應該出現在 counts 裡）。
@@ -532,6 +550,9 @@ const scanAllChapterPages = async () => {
       if (!counts.has(idx)) counts.set(idx, avg);
     }
   }
+  // 掃描期間使用者可能已經換了下一本書，此時 generation 已經不吻合，不能再把這批
+  // 舊書算出來的頁數寫進全域狀態（否則會覆蓋新書自己的 chapterPageCounts）。
+  if (generation !== loadGeneration || book !== targetBook) return;
   chapterPageCounts = counts;
   locationsReady = true;
 };
@@ -540,8 +561,15 @@ const loadBook = async (base64: string, cfi: string | null) => {
   const viewer = document.getElementById('viewer');
   if (!viewer) return;
 
+  const generation = ++loadGeneration;
+  chapterPageCounts = new Map();
+  locationsReady = false;
+  lastRelocatedLoc = null;
+  lastLinearSpineIndex = null;
+
   try {
     book = ePub(base64ToArrayBuffer(base64));
+    const currentBook = book;
     rendition = book.renderTo(viewer, {
       width: viewer.clientWidth,
       height: viewer.clientHeight,
@@ -663,7 +691,8 @@ const loadBook = async (base64: string, cfi: string | null) => {
     (async () => {
       try {
         await new Promise((resolve) => setTimeout(resolve, 4000));
-        await scanAllChapterPages();
+        await scanAllChapterPages(generation, currentBook);
+        if (generation !== loadGeneration) return;
         // 主動用最近一次的位置重算並補送一次 relocated，避免使用者開書後沒有繼續翻頁
         // 就看不到頁數列（見上方 lastRelocatedLoc 宣告處的說明）。
         if (lastRelocatedLoc) postRelocated(lastRelocatedLoc, null);
