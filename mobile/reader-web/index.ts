@@ -3,6 +3,14 @@ import type { Book, Rendition } from 'epubjs';
 import * as OpenCC from 'opencc-js';
 import type { AnnotationMark, InboundMessage, OutboundMessage, TocItem } from '../lib/readerMessages';
 import { DEFAULT_TYPOGRAPHY, normalizeFontFamily, type TypographySettings } from '../lib/readerSettings';
+import {
+  clearTTSHighlight,
+  createRangeFromTextOffset,
+  ensureTTSHighlightStyle,
+  getBoundaryOffsetFromRange,
+  getTextIndex,
+  paintTTSHighlightOverlay,
+} from './ttsHighlight';
 
 declare global {
   interface Window {
@@ -346,6 +354,100 @@ const turnPage = (direction: 'prev' | 'next') => {
   Promise.resolve(action)
     .then(() => unlockNavSoon())
     .catch(() => unlockNav());
+};
+
+// 朗讀跟讀高亮／精確頁面邊界自動翻頁：比照網頁版 Reader.tsx 的 updateTTSHighlight／
+// followTTSRange。RN 端只負責把 expo-speech 的 onBoundary charIndex（相對於整章文字的
+// 絕對位移）轉送過來，實際的「畫底線標記在朗讀中的句子下方」與「快讀到頁尾就翻頁」都在
+// 這裡完成——因為只有這裡才有 epub.js 的 rendition／DOM 可以用。
+const getVisibleDoc = (): Document | null => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const contents = (rendition as any)?.getContents?.() as { document: Document }[] | undefined;
+  return contents?.[0]?.document ?? null;
+};
+
+let ttsDoc: Document | null = null;
+let ttsPageStartOffset: number | null = null;
+let ttsPageEndOffset: number | null = null;
+let ttsAutoFollowBusy = false;
+let ttsAutoFollowLastAt = 0;
+let ttsAutoFollowFallbackTimer: ReturnType<typeof setTimeout> | null = null;
+// 觸發翻頁的位移量比頁尾實際字元位移提前一點點，讓翻頁動作跟朗讀到頁尾幾乎同時完成，
+// 而不是朗讀完頁尾最後一個字才觸發（會感覺翻頁慢半拍）。
+const TTS_PAGE_END_LEAD = 8;
+const TTS_AUTO_FOLLOW_THROTTLE = 650;
+
+const measurePageEdgeOffset = (doc: Document, edge: 'start' | 'end'): number | null => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const loc = (rendition as any)?.currentLocation?.();
+  const cfi = loc?.[edge]?.cfi as string | undefined;
+  if (!cfi || !rendition) return null;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const range = (rendition as any).getRange?.(cfi) as Range | null | undefined;
+    return getBoundaryOffsetFromRange(doc, range, edge);
+  } catch {
+    return null;
+  }
+};
+
+const refreshTTSPageBounds = () => {
+  if (!ttsDoc) return;
+  ttsPageStartOffset = measurePageEdgeOffset(ttsDoc, 'start');
+  ttsPageEndOffset = measurePageEdgeOffset(ttsDoc, 'end');
+};
+
+// RN 端每次開始朗讀新的一章（或從暫停恢復）都會送一次 ttsStart：以目前可見的 iframe
+// document 為朗讀對象，記住它並量出目前頁面的字元邊界，供後續 boundary 事件比對。
+const startTTSTracking = () => {
+  ttsDoc = getVisibleDoc();
+  ttsAutoFollowBusy = false;
+  ttsAutoFollowLastAt = 0;
+  refreshTTSPageBounds();
+};
+
+const stopTTSTracking = () => {
+  if (ttsDoc) clearTTSHighlight(ttsDoc);
+  ttsDoc = null;
+  ttsPageStartOffset = null;
+  ttsPageEndOffset = null;
+  ttsAutoFollowBusy = false;
+  if (ttsAutoFollowFallbackTimer) {
+    clearTimeout(ttsAutoFollowFallbackTimer);
+    ttsAutoFollowFallbackTimer = null;
+  }
+};
+
+const handleTTSBoundary = (charIndex: number) => {
+  // ttsDoc.defaultView 在 iframe 從 DOM 移除後會變成 null（比照 pruneStaleContentDocs
+  // 的判斷）——章節朗讀完後舊 iframe 可能已經被 epub.js 卸載，這裡的殘餘 boundary 事件
+  // 直接略過，不強制存取已卸載文件。
+  if (!ttsDoc || !ttsDoc.defaultView) return;
+  ensureTTSHighlightStyle(ttsDoc);
+  const range = createRangeFromTextOffset(ttsDoc, charIndex);
+  if (range) paintTTSHighlightOverlay(ttsDoc, range);
+
+  // 使用者若在朗讀中手動跳去別的章節，目前可見的 document 已經不是朗讀中的 ttsDoc，
+  // 不應該再自動翻頁去追朗讀進度（那樣會把使用者剛跳去的畫面搶走）。
+  if (getVisibleDoc() !== ttsDoc) return;
+  if (ttsAutoFollowBusy) return;
+  if (ttsPageEndOffset === null) return;
+  const turnAt = Math.max(ttsPageStartOffset ?? 0, ttsPageEndOffset - TTS_PAGE_END_LEAD);
+  if (charIndex < turnAt) return;
+
+  const now = Date.now();
+  if (now - ttsAutoFollowLastAt < TTS_AUTO_FOLLOW_THROTTLE) return;
+  ttsAutoFollowLastAt = now;
+  ttsAutoFollowBusy = true;
+  turnPage('next');
+  // 正常情況下下面 rendition.on('relocated') 的處理會在翻頁完成後立刻解鎖並重新量測頁面
+  // 邊界；這裡的逾時只是保險，避免 relocated 因故沒有觸發（例如已經翻到全書最後一頁）
+  // 導致自動翻頁永久卡死。
+  if (ttsAutoFollowFallbackTimer) clearTimeout(ttsAutoFollowFallbackTimer);
+  ttsAutoFollowFallbackTimer = setTimeout(() => {
+    ttsAutoFollowBusy = false;
+    refreshTTSPageBounds();
+  }, 2000);
 };
 
 // 章節目錄的 href 格式常常跟 spine item 的 href 對不上：epub.js 的 Navigation 解析器完全不會
@@ -746,6 +848,7 @@ const loadBook = async (base64: string, cfi: string | null, initialAnnotations: 
   lastRelocatedLoc = null;
   lastLinearSpineIndex = null;
   renderedAnnotations = new Map();
+  stopTTSTracking();
 
   try {
     book = ePub(base64ToArrayBuffer(base64));
@@ -867,6 +970,22 @@ const loadBook = async (base64: string, cfi: string | null, initialAnnotations: 
       const previousCfi = (lastRelocatedLoc as any)?.start?.cfi ?? null;
       lastRelocatedLoc = loc;
       postRelocated(loc, previousCfi);
+      // 朗讀中的章節如果還是目前可見章節，翻頁完成後重新量測新頁面的字元邊界，並解除
+      // 自動翻頁的忙碌鎖（不論這次翻頁是自動跟讀觸發還是使用者手動翻頁都要重新量測，
+      // 因為兩種情況下「目前頁面」都變了）；如果朗讀中的章節已經不是目前可見章節
+      // （使用者手動跳走），只清掉底線標記，不再嘗試量測。
+      if (ttsDoc) {
+        if (getVisibleDoc() === ttsDoc) {
+          refreshTTSPageBounds();
+          ttsAutoFollowBusy = false;
+          if (ttsAutoFollowFallbackTimer) {
+            clearTimeout(ttsAutoFollowFallbackTimer);
+            ttsAutoFollowFallbackTimer = null;
+          }
+        } else {
+          clearTTSHighlight(ttsDoc);
+        }
+      }
     });
 
     // 文字選取 → 劃線註記的第一步：epub.js 已經幫忙把選取範圍換算成 CFI 字串，
@@ -932,16 +1051,15 @@ const loadBook = async (base64: string, cfi: string | null, initialAnnotations: 
 
 // TTS 朗讀文字來源：目前顯示中章節的 iframe document.body 全文（paginated 模式下，
 // 一個章節的完整內容是渲染在同一份 document 裡用 CSS 分欄呈現，body.textContent 涵蓋整章，
-// 不只是目前可見的那一頁）。這是簡化版實作，不像網頁版那樣從目前頁面的精確字元位移開始，
-// 一律從章節開頭朗讀；也還沒有 CFI/高亮同步，僅供 mobile 第一版朗讀功能使用。
+// 不只是目前可見的那一頁），一律從章節開頭朗讀。改用 getTextIndex() 而不是先前的
+// cloneNode+regex 正規化空白，是因為朗讀跟讀高亮需要拿 expo-speech 回報的 charIndex
+// （相對於這段文字的絕對位移）反查回真正的 DOM 文字節點畫底線——如果先把文字正規化
+// （空白合併、trim）,字元位移就會跟 getTextIndex() 量出來的原始 DOM 位移對不上，畫底線
+// 的位置也會跟著錯位。跟網頁版 Reader.tsx 的 speakCurrentPage 一樣直接用原始節點文字。
 const getChapterText = (): string => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const contents = (rendition as any)?.getContents?.() as { document: Document }[] | undefined;
-  const doc = contents?.[0]?.document;
+  const doc = getVisibleDoc();
   if (!doc?.body) return '';
-  const clone = doc.body.cloneNode(true) as HTMLElement;
-  clone.querySelectorAll('script, style').forEach((el) => el.remove());
-  return (clone.textContent ?? '').replace(/\s+/g, ' ').trim();
+  return getTextIndex(doc)?.text ?? '';
 };
 
 const handleMessage = (event: MessageEvent<string>) => {
@@ -968,6 +1086,9 @@ const handleMessage = (event: MessageEvent<string>) => {
     clearNativeSelection();
   }
   if (msg.type === 'setAnnotationMode') setAnnotationMode(msg.enabled);
+  if (msg.type === 'ttsStart') startTTSTracking();
+  if (msg.type === 'ttsBoundary') handleTTSBoundary(msg.charIndex);
+  if (msg.type === 'ttsStop') stopTTSTracking();
 };
 
 // RN WebView 在 Android 觸發 document 的 message 事件，iOS 觸發 window 的，兩者都要監聽

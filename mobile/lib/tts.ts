@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { AppState } from 'react-native';
 import * as Speech from 'expo-speech';
 
 // 手機系統 TTS 引擎對單次 utterance 的文字長度可能有限制（比照網頁版 useTTS.ts 的
@@ -73,10 +74,28 @@ export const useTTS = () => {
 
   const rateRef = useRef(1.0);
   const selectedVoiceRef = useRef<TTSVoice | null>(null);
+  // fullTextRef 是這次 speak() 傳入的完整文字（不會因為切成 chunk 或暫停/恢復而改變）；
+  // chunksRef 則是「目前這一輪」實際拿去餵給 Speech.speak() 的切段結果，恢復播放時會用
+  // fullTextRef 從暫停位置重新切一輪新的 chunksRef（見 resume() 的說明），兩者不可混用。
+  const fullTextRef = useRef('');
   const chunksRef = useRef<string[]>([]);
   const chunkIndexRef = useRef(0);
+  // baseOffsetRef：目前這輪 chunksRef 在 fullTextRef 裡的起始位移。一般從頭朗讀時是 0；
+  // 從暫停位置恢復播放時，chunksRef 是從暫停處重新切出來的，這裡就會是暫停時的絕對位移，
+  // 讓 onBoundary 回報出去的字元位移永遠是相對於 fullTextRef（也就是呼叫端認知的「整章
+  // 文字」）的絕對位置，不會因為中途暫停過一次就整個位移錯位。
+  const baseOffsetRef = useRef(0);
+  // chunkStartOffsetRef／lastBoundaryCharIndexRef：分別記錄「目前這個 chunk 在 chunksRef
+  // 裡的起始位移」與「最近一次 onBoundary 回報、相對於目前 chunk 的字元位移」，兩者相加
+  // 再加上 baseOffsetRef，就是暫停當下真正朗讀到的絕對位置——這是修正「暫停後再播放會
+  // 整個 chunk 重講一次」的關鍵：舊版 resume() 是直接重新呼叫 speakChunk() 重講同一個
+  // chunk，expo-speech 的 Speech.speak() 只能從文字開頭朗讀，沒有「從第 N 個字繼續」的
+  // API，所以整個 chunk（最長可能到 3000 字）都會從頭重念一次。
+  const chunkStartOffsetRef = useRef(0);
+  const lastBoundaryCharIndexRef = useRef(0);
   const generationRef = useRef(0);
   const onAllDoneRef = useRef<(() => void) | undefined>(undefined);
+  const onBoundaryRef = useRef<((charIndex: number) => void) | undefined>(undefined);
   const sleepTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => { rateRef.current = rate; }, [rate]);
@@ -110,11 +129,21 @@ export const useTTS = () => {
       });
   }, []);
 
+  // 睡眠計時的到期時間點（絕對時間戳，非倒數秒數）：iOS 上 App 進入背景（例如使用者鎖螢幕、
+  // 或切到其他 App 讓朗讀在背景繼續播放——這正是睡眠計時最常見的使用情境）時，RN 的
+  // setInterval 會被系統節流甚至完全暫停好幾分鐘才補跑一次，如果倒數邏輯是「每次 tick
+  // 扣 1 秒」，被節流期間流逝的真實時間並不會被扣掉，導致「設定 15 分鐘，回到前景時卻早就
+  // 超過 15 分鐘還在播放」。改成每次 tick 都用 Date.now() 跟這個絕對到期時間比較，不管
+  // tick 被延後多久，只要真的醒來執行一次就會偵測到「已經過期」並立刻停止，不會因為少
+  // 跑了幾次 tick 就把到期時間往後推。
+  const sleepDeadlineAtRef = useRef<number | null>(null);
+
   const clearSleepTimer = useCallback(() => {
     if (sleepTimerRef.current !== null) {
       clearInterval(sleepTimerRef.current);
       sleepTimerRef.current = null;
     }
+    sleepDeadlineAtRef.current = null;
     setSleepRemaining(null);
   }, []);
 
@@ -132,23 +161,39 @@ export const useTTS = () => {
     clearSleepTimer();
     setSleepMinutes(0);
     onAllDoneRef.current = undefined;
+    onBoundaryRef.current = undefined;
   }, [stop, clearSleepTimer]);
+
+  // 檢查是否已經超過到期時間，超過就停止播放並清掉計時器；供下面的 interval tick 跟
+  // AppState 回到前景時共用同一份判斷邏輯，避免兩處各自實作出不一致的行為。
+  const checkSleepDeadline = useCallback(() => {
+    const deadline = sleepDeadlineAtRef.current;
+    if (deadline === null) return;
+    const msLeft = deadline - Date.now();
+    if (msLeft <= 0) {
+      clearSleepTimer();
+      stop();
+      return;
+    }
+    setSleepRemaining(Math.ceil(msLeft / 1000));
+  }, [clearSleepTimer, stop]);
 
   const startSleepTimer = useCallback((minutes: number) => {
     clearSleepTimer();
     if (minutes <= 0) return;
-    let remaining = minutes * 60;
-    setSleepRemaining(remaining);
-    sleepTimerRef.current = setInterval(() => {
-      remaining -= 1;
-      if (remaining <= 0) {
-        clearSleepTimer();
-        stop();
-        return;
-      }
-      setSleepRemaining(remaining);
-    }, 1000);
-  }, [clearSleepTimer, stop]);
+    sleepDeadlineAtRef.current = Date.now() + minutes * 60_000;
+    setSleepRemaining(minutes * 60);
+    sleepTimerRef.current = setInterval(checkSleepDeadline, 1000);
+  }, [clearSleepTimer, checkSleepDeadline]);
+
+  // App 從背景回到前景時立刻校正一次：不用等下一次 1 秒 tick，避免使用者鎖螢幕朗讀一段
+  // 時間後解鎖，畫面短暫還顯示著早已過期的舊倒數數字／仍在播放的朗讀音訊。
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') checkSleepDeadline();
+    });
+    return () => subscription.remove();
+  }, [checkSleepDeadline]);
 
   const speakChunk = useCallback((generation: number) => {
     const chunk = chunksRef.current[chunkIndexRef.current];
@@ -158,6 +203,14 @@ export const useTTS = () => {
       onAllDoneRef.current?.();
       return;
     }
+    // chunk 只是因應 MAX_UTTERANCE_LENGTH 切出來的其中一段，onBoundary 回報的 charIndex
+    // 是相對於「這個 chunk」的位移；呼叫端（reader 頁）需要的是相對於整段朗讀文字（一整章）
+    // 的絕對位移，才能拿去比對 WebView 內畫底線／頁面邊界用的字元索引，因此這裡要加上
+    // 前面所有已念完 chunk 的長度總和，再加上這一輪 chunksRef 相對於 fullTextRef 的起始位移。
+    let chunkStartOffset = 0;
+    for (let i = 0; i < chunkIndexRef.current; i++) chunkStartOffset += chunksRef.current[i].length;
+    chunkStartOffsetRef.current = chunkStartOffset;
+    lastBoundaryCharIndexRef.current = 0;
     Speech.speak(chunk, {
       voice: selectedVoiceRef.current?.identifier,
       language: selectedVoiceRef.current?.language ?? 'zh-TW',
@@ -175,15 +228,23 @@ export const useTTS = () => {
         setPlaying(false);
         setPaused(false);
       },
+      onBoundary: (ev: { charIndex: number }) => {
+        if (generationRef.current !== generation) return;
+        lastBoundaryCharIndexRef.current = ev.charIndex;
+        onBoundaryRef.current?.(baseOffsetRef.current + chunkStartOffset + ev.charIndex);
+      },
     });
   }, []);
 
-  const speak = useCallback((text: string, onAllDone?: () => void) => {
+  const speak = useCallback((text: string, onAllDone?: () => void, onBoundary?: (charIndex: number) => void) => {
     if (!text.trim()) return;
     const generation = ++generationRef.current;
+    fullTextRef.current = text;
+    baseOffsetRef.current = 0;
     chunksRef.current = splitTextByLength(text);
     chunkIndexRef.current = 0;
     onAllDoneRef.current = onAllDone;
+    onBoundaryRef.current = onBoundary;
     setPlaying(true);
     setPaused(false);
     // 使用者可能在按下播放前就先選好睡眠計時，這裡補上啟動，避免預先選的分鐘數被忽略。
@@ -199,9 +260,25 @@ export const useTTS = () => {
     setPaused(true);
   }, [playing]);
 
+  // 恢復播放：expo-speech 的 Speech.speak() 沒有「從第 N 個字繼續朗讀」的 API，只能重新
+  // 給一段文字從頭念。因此不能像舊版那樣直接重講暫停當下的整個 chunk（可能長達 3000 字），
+  // 而是要用暫停時記下的絕對位移，從 fullTextRef 裡切出「還沒念的部分」重新分段、從頭
+  // 這一小段開始念——對使用者來說就是「接續播放」，聽感上跟真正的逐字元續播是一致的
+  // （最多差在最近一次 onBoundary 到暫停指令之間那一小段，通常是零到一個詞的長度）。
   const resume = useCallback(() => {
     if (!paused) return;
+    const resumeFrom = baseOffsetRef.current + chunkStartOffsetRef.current + lastBoundaryCharIndexRef.current;
+    const remaining = fullTextRef.current.slice(resumeFrom);
+    if (!remaining.trim()) {
+      setPlaying(false);
+      setPaused(false);
+      onAllDoneRef.current?.();
+      return;
+    }
     const generation = ++generationRef.current;
+    baseOffsetRef.current = resumeFrom;
+    chunksRef.current = splitTextByLength(remaining);
+    chunkIndexRef.current = 0;
     setPlaying(true);
     setPaused(false);
     speakChunk(generation);
