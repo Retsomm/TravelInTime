@@ -9,7 +9,9 @@ export interface BookRecord {
   addedAt: number;
   lastOpenedAt: number;
   progress?: number;
+  /** @deprecated 舊版直接存完整 file:// 路徑，App 重新安裝／原生重新編譯後 sandbox 容器路徑改變就會失效；改用 coverFilename 現算。僅為相容舊資料保留讀取。 */
   coverUri?: string;
+  coverFilename?: string;
 }
 
 export interface Bookmark {
@@ -36,7 +38,7 @@ const bookmarksKey = (id: string) => `tit:bookmarks:${id}`;
 const booksDir = () => new Directory(Paths.document, 'books');
 const coversDir = () => new Directory(Paths.document, 'covers');
 
-const generateId = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+export const generateId = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
 
 const coverExtension = (mediaType: string | null): string => {
   if (mediaType?.includes('png')) return 'png';
@@ -127,8 +129,9 @@ export const removeBook = (id: string) =>
     if (record) {
       const file = new File(booksDir(), record.filename);
       if (file.exists) file.delete();
-      if (record.coverUri) {
-        const cover = new File(record.coverUri);
+      const coverFilename = record.coverFilename ?? record.coverUri?.split('/').pop();
+      if (coverFilename) {
+        const cover = new File(coversDir(), coverFilename);
         if (cover.exists) cover.delete();
       }
     }
@@ -138,14 +141,16 @@ export const removeBook = (id: string) =>
 
 export const updateBookMeta = (
   id: string,
-  patch: Partial<Pick<BookRecord, 'title' | 'author' | 'coverUri'>>
+  patch: Partial<Pick<BookRecord, 'title' | 'author' | 'coverFilename'>>
 ) =>
   updateMeta((records) => [
     records.map((r) => (r.id === id ? { ...r, ...patch } : r)),
     undefined,
   ]);
 
-// 封面圖檔存進沙盒目錄，AsyncStorage 只存檔案路徑（圖片轉 base64 存 AsyncStorage 太肥）。
+// 封面圖檔存進沙盒目錄，AsyncStorage 只存檔名（圖片轉 base64 存 AsyncStorage 太肥）。
+// 回傳檔名而不是完整 file:// 路徑：完整路徑開頭是當次 App 安裝的 sandbox 容器 UUID，
+// 重新安裝／原生重新編譯後容器路徑會變，存死的完整路徑就會失效（見 getCoverUri 現算路徑）。
 export const saveCoverImage = (id: string, base64: string, mediaType: string | null): string => {
   const dir = coversDir();
   if (!dir.exists) dir.create({ intermediates: true });
@@ -153,7 +158,17 @@ export const saveCoverImage = (id: string, base64: string, mediaType: string | n
   if (file.exists) file.delete();
   file.create();
   file.write(base64ToBytes(base64));
-  return file.uri;
+  return file.name;
+};
+
+// 比照 getBookFileUri 的做法：每次都用目前這次執行的 coversDir() 現算完整路徑，
+// 不依賴存死的絕對路徑。若只有舊版留下的 coverUri（完整路徑），退而求其次取檔名部分
+// 拼回目前的 coversDir()，讓舊資料在 App 重新安裝後也有機會恢復顯示。
+export const getCoverUri = (record: BookRecord): string | null => {
+  const filename = record.coverFilename ?? record.coverUri?.split('/').pop();
+  if (!filename) return null;
+  const file = new File(coversDir(), filename);
+  return file.exists ? file.uri : null;
 };
 
 export const touchBook = (id: string) =>
