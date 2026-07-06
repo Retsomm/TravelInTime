@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Linking, Pressable, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
-import { IconBack, IconBookmarkFill, IconBookmarkOutline, IconChapters, IconNotes, IconSettings } from '../../components/icons';
+import { IconBack, IconBookmarkFill, IconBookmarkOutline, IconChapters, IconNotes, IconPause, IconPlay, IconReset, IconSettings, IconSleepTimer } from '../../components/icons';
 import ListPanel from '../../components/ListPanel';
 import SelectionBar from '../../components/SelectionBar';
 import SettingsPanel from '../../components/SettingsPanel';
@@ -60,6 +60,10 @@ const ReaderScreen = () => {
   const chapterTextResolverRef = useRef<((text: string) => void) | null>(null);
   const chapterTextTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const relocatedResolverRef = useRef<(() => void) | null>(null);
+  // 供 advanceToNextChapter 判斷「是否已經跨到新章節」／「是否已到書尾」，用 ref 而非
+  // state 是因為要在同一個非同步迴圈裡讀到最新值，不能等 re-render 後的閉包。
+  const currentHrefRef = useRef('');
+  const atEndRef = useRef(false);
   const tts = useTTS();
 
   useFocusEffect(
@@ -96,9 +100,12 @@ const ReaderScreen = () => {
 
   useEffect(() => {
     tts.reset();
+    webviewRef.current?.postMessage(JSON.stringify({ type: 'ttsStop' }));
     setToc([]);
     setCurrentCfi('');
     setCurrentHref('');
+    currentHrefRef.current = '';
+    atEndRef.current = false;
     setCurrentChapterTitle('');
     setPageInfo(null);
     setListPanelTab(null);
@@ -173,6 +180,8 @@ const ReaderScreen = () => {
         setLoading(false);
         setCurrentCfi(msg.cfi);
         setCurrentHref(msg.href);
+        currentHrefRef.current = msg.href;
+        atEndRef.current = msg.atEnd;
         setCurrentChapterTitle(msg.chapterTitle);
         setPageInfo(msg.page !== null && msg.total !== null ? { page: msg.page, total: msg.total, percentage: msg.percentage } : null);
         relocatedResolverRef.current?.();
@@ -276,28 +285,84 @@ const ReaderScreen = () => {
     });
   }, []);
 
-  // 朗讀完目前章節後，翻到下一頁／章節再繼續朗讀；已翻到書尾（抓不到文字）就自然停止。
-  // 這是簡化版的自動接續章節，沒有網頁版 useTTS.ts 那套精確字元位移與高亮同步（見
-  // RN_SETUP_GUIDE.md 第十二輪紀錄），只保證朗讀完一頁會自動接著念下一頁。
+  // 記住「這次 tts.speak() 開始朗讀時，畫面所在的章節 href」，advanceToNextChapter 用這個
+  // 當基準比對，而不是每次都重新取 currentHrefRef 的當下值——這個朗讀 session 期間畫面
+  // 可能已經被 WebView 端的自動跟讀翻頁（見下方註解）推進到新章節了，用「呼叫當下」的
+  // href 當基準會讓下面的迴圈誤判成「還沒跨到新章節」而多翻一次頁。
+  const readingHrefRef = useRef('');
+
+  // 朗讀進行中，WebView 端（reader-web/index.ts 的 handleTTSBoundary）會自己在快讀到目前
+  // 頁面底部時呼叫 turnPage('next') 把畫面翻到下一頁，不需要 RN 端介入——一個章節在
+  // paginated 模式下是同一份 iframe document 用 CSS 分欄呈現好幾頁，翻頁不會觸發新的
+  // chapterText，朗讀本身也不會中斷。這裡的 readNextAndContinue 只在「整章文字真的念完」
+  // 時才呼叫，負責跨到下一章：多數情況 WebView 端的自動跟讀翻頁早已把畫面翻到這章最後
+  // 一頁並跨過章節邊界（下面迴圈第一次檢查就會發現 href 已經變了，直接返回，不重複翻頁）；
+  // 只有在自動跟讀翻頁還沒來得及跟上（節流／提前量測誤差造成的些微落後）時才需要额外
+  // 呼叫 next() 補上，避免漏翻的頁面被跳過、也避免因為還停在同一章就重新抓到「同一份」
+  // 章節文字，變成整章從頭重念一次的無窮迴圈。
+  const advanceToNextChapter = useCallback(async (): Promise<boolean> => {
+    const startHref = readingHrefRef.current;
+    for (let i = 0; i < 50; i++) {
+      if (currentHrefRef.current !== startHref) return true;
+      if (atEndRef.current) return false;
+      webviewRef.current?.postMessage(JSON.stringify({ type: 'next' }));
+      await waitForRelocated();
+    }
+    return currentHrefRef.current !== startHref;
+  }, [waitForRelocated]);
+
   const continueReadingRef = useRef<() => void>(() => {});
   const readNextAndContinue = useCallback(async () => {
-    webviewRef.current?.postMessage(JSON.stringify({ type: 'next' }));
-    await waitForRelocated();
+    const advanced = await advanceToNextChapter();
+    if (!advanced) return;
     const text = await requestChapterText();
     if (!text.trim()) return;
-    tts.speak(text, () => continueReadingRef.current());
-  }, [requestChapterText, tts, waitForRelocated]);
+    readingHrefRef.current = currentHrefRef.current;
+    webviewRef.current?.postMessage(JSON.stringify({ type: 'ttsStart' }));
+    tts.speak(
+      text,
+      () => continueReadingRef.current(),
+      (charIndex) => webviewRef.current?.postMessage(JSON.stringify({ type: 'ttsBoundary', charIndex }))
+    );
+  }, [advanceToNextChapter, requestChapterText, tts]);
   useEffect(() => { continueReadingRef.current = readNextAndContinue; }, [readNextAndContinue]);
 
   const handleTTSPlay = useCallback(async () => {
     if (tts.paused) {
       tts.resume();
+      webviewRef.current?.postMessage(JSON.stringify({ type: 'ttsStart' }));
       return;
     }
     const text = await requestChapterText();
     if (!text.trim()) return;
-    tts.speak(text, () => continueReadingRef.current());
+    readingHrefRef.current = currentHrefRef.current;
+    webviewRef.current?.postMessage(JSON.stringify({ type: 'ttsStart' }));
+    tts.speak(
+      text,
+      () => continueReadingRef.current(),
+      (charIndex) => webviewRef.current?.postMessage(JSON.stringify({ type: 'ttsBoundary', charIndex }))
+    );
   }, [tts, requestChapterText]);
+
+  const handleTTSPause = useCallback(() => {
+    tts.pause();
+    webviewRef.current?.postMessage(JSON.stringify({ type: 'ttsStop' }));
+  }, [tts]);
+
+  const handleTTSReset = useCallback(() => {
+    tts.reset();
+    webviewRef.current?.postMessage(JSON.stringify({ type: 'ttsStop' }));
+  }, [tts]);
+
+  // 朗讀控制列上的睡眠計時是快速切換用途（跟設定面板裡完整的分段選單共用同一份
+  // tts.sleepMinutes／onSleepChange 狀態，不是獨立的第二套計時），每點一次照固定選項
+  // 循環切換，不需要另外彈出選單。
+  const SLEEP_CYCLE_OPTIONS = [0, 15, 30, 45, 60] as const;
+  const handleCycleSleep = useCallback(() => {
+    const idx = SLEEP_CYCLE_OPTIONS.indexOf(tts.sleepMinutes as (typeof SLEEP_CYCLE_OPTIONS)[number]);
+    const next = SLEEP_CYCLE_OPTIONS[(idx + 1) % SLEEP_CYCLE_OPTIONS.length];
+    tts.onSleepChange(next);
+  }, [tts]);
 
   const handleShouldStartLoadWithRequest = useCallback((request: { url: string }) => {
     const { url } = request;
@@ -573,8 +638,8 @@ const ReaderScreen = () => {
             ttsPlaying={tts.playing}
             ttsPaused={tts.paused}
             onTTSPlay={handleTTSPlay}
-            onTTSPause={tts.pause}
-            onTTSReset={tts.reset}
+            onTTSPause={handleTTSPause}
+            onTTSReset={handleTTSReset}
             ttsVoices={tts.voices}
             ttsSelectedVoice={tts.selectedVoice}
             onTTSVoiceChange={tts.setSelectedVoice}
@@ -618,6 +683,71 @@ const ReaderScreen = () => {
             onDelete={() => handleDeleteAnnotation(editingAnnotationId)}
           />
         )}
+        {/* 朗讀控制列：跟下面的頁碼列一樣固定高度、一律渲染（不論是否正在朗讀），放在內容
+            與底部頁碼列之間，屬於一般排版流（不是蓋在 WebView 上的 overlay），才不會遮到
+            正在閱讀的文字；也因為高度固定不隨播放狀態變動，不會觸發 WebView resize 讓
+            epub.js 重新分頁（見下面頁碼列註解，同一個理由）。 */}
+        <View
+          style={{
+            height: 52, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 20,
+            borderTopWidth: 1, borderTopColor: colors.borderColor,
+          }}
+        >
+          <Pressable
+            onPress={handleTTSReset}
+            disabled={!tts.playing && !tts.paused}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel="重置朗讀進度"
+            style={{
+              width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center',
+              backgroundColor: colors.paperBg2, borderWidth: 1, borderColor: colors.borderColor,
+              opacity: (!tts.playing && !tts.paused) ? 0.4 : 1,
+            }}
+          >
+            <IconReset color={colors.ink2} />
+          </Pressable>
+          <Pressable
+            onPress={tts.playing ? handleTTSPause : handleTTSPlay}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel={tts.playing ? '暫停朗讀' : '開始朗讀'}
+            style={{
+              width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center',
+              backgroundColor: tts.playing ? colors.progressFill : colors.ink,
+            }}
+          >
+            {tts.playing ? <IconPause color={colors.paperBg} /> : <IconPlay color={colors.paperBg} />}
+          </Pressable>
+          <View style={{ width: 34, alignItems: 'center' }}>
+            <Pressable
+              onPress={handleCycleSleep}
+              hitSlop={10}
+              accessibilityRole="button"
+              accessibilityLabel={
+                tts.sleepMinutes === 0
+                  ? '設定睡眠計時'
+                  : tts.sleepRemaining !== null
+                    ? `睡眠計時倒數 ${Math.floor(tts.sleepRemaining / 60)}分${tts.sleepRemaining % 60}秒`
+                    : `睡眠計時 ${tts.sleepMinutes} 分鐘`
+              }
+              style={{
+                width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center',
+                backgroundColor: tts.sleepMinutes > 0 ? colors.paperBg2 : 'transparent',
+                borderWidth: 1, borderColor: colors.borderColor,
+              }}
+            >
+              <IconSleepTimer color={tts.sleepMinutes > 0 ? colors.progressFill : colors.ink2} />
+            </Pressable>
+            {tts.sleepMinutes > 0 && (
+              <Text style={{ fontSize: 9, color: colors.ink3, marginTop: 2 }}>
+                {tts.sleepRemaining !== null
+                  ? `${String(Math.floor(tts.sleepRemaining / 60)).padStart(2, '0')}:${String(tts.sleepRemaining % 60).padStart(2, '0')}`
+                  : `${tts.sleepMinutes}分`}
+              </Text>
+            )}
+          </View>
+        </View>
         {/* 固定高度、一律渲染（即使 pageInfo 還是 null 也只是內容留白）：避免 pageInfo 從
             null 變有值時這塊區域才冒出來，導致 WebView 版面高度跟著變動——epub.js 的分頁是
             依照初次拿到的 viewer 尺寸算的，事後才緊縮 WebView 高度容易讓已渲染好的那一頁內容

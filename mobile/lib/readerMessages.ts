@@ -24,7 +24,10 @@ export type InboundMessage =
   | { type: 'getChapterText' }
   | { type: 'setAnnotations'; annotations: AnnotationMark[] }
   | { type: 'clearSelection' }
-  | { type: 'setAnnotationMode'; enabled: boolean };
+  | { type: 'setAnnotationMode'; enabled: boolean }
+  | { type: 'ttsStart' }
+  | { type: 'ttsBoundary'; charIndex: number }
+  | { type: 'ttsStop' };
 
 export type OutboundMessage =
   | { type: 'ready' }

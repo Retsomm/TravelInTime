@@ -116,6 +116,15 @@ export const IconReset = ({ size = 15, color = '#000' }: IconProps) => (
   </IconSvg>
 );
 
+// 朗讀睡眠計時按鈕用的時鐘圖示。原本用月亮圖示，但月亮在這個 App（以及一般 UI 慣例）
+// 太容易被誤認成「深色模式切換」，改用時鐘造型避免跟主題色切換混淆。
+export const IconSleepTimer = ({ size = 16, color = '#000' }: IconProps) => (
+  <IconSvg size={size} {...strokeIconProps(color, 1.8)}>
+    <Circle cx={12} cy={12} r={9} />
+    <Polyline points="12 7 12 12 15.5 14" />
+  </IconSvg>
+);
+
 export const IconCopy = ({ size = 14, color = '#000' }: IconProps) => (
   <IconSvg size={size} {...strokeIconProps(color)}>
     <Rect x={9} y={9} width={13} height={13} rx={2} />
