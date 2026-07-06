@@ -312,11 +312,8 @@ const ReaderScreen = () => {
   }, [waitForRelocated]);
 
   const continueReadingRef = useRef<() => void>(() => {});
-  const readNextAndContinue = useCallback(async () => {
-    const advanced = await advanceToNextChapter();
-    if (!advanced) return;
-    const { text, startOffset } = await requestChapterText();
-    if (!text.trim()) return;
+
+  const startSpeaking = useCallback((text: string, startOffset: number) => {
     readingHrefRef.current = currentHrefRef.current;
     webviewRef.current?.postMessage(JSON.stringify({ type: 'ttsStart' }));
     tts.speak(
@@ -325,7 +322,15 @@ const ReaderScreen = () => {
       (charIndex) =>
         webviewRef.current?.postMessage(JSON.stringify({ type: 'ttsBoundary', charIndex: charIndex + startOffset }))
     );
-  }, [advanceToNextChapter, requestChapterText, tts]);
+  }, [tts]);
+
+  const readNextAndContinue = useCallback(async () => {
+    const advanced = await advanceToNextChapter();
+    if (!advanced) return;
+    const { text, startOffset } = await requestChapterText();
+    if (!text.trim()) return;
+    startSpeaking(text, startOffset);
+  }, [advanceToNextChapter, requestChapterText, startSpeaking]);
   useEffect(() => { continueReadingRef.current = readNextAndContinue; }, [readNextAndContinue]);
 
   const handleTTSPlay = useCallback(async () => {
@@ -336,15 +341,8 @@ const ReaderScreen = () => {
     }
     const { text, startOffset } = await requestChapterText();
     if (!text.trim()) return;
-    readingHrefRef.current = currentHrefRef.current;
-    webviewRef.current?.postMessage(JSON.stringify({ type: 'ttsStart' }));
-    tts.speak(
-      text,
-      () => continueReadingRef.current(),
-      (charIndex) =>
-        webviewRef.current?.postMessage(JSON.stringify({ type: 'ttsBoundary', charIndex: charIndex + startOffset }))
-    );
-  }, [tts, requestChapterText]);
+    startSpeaking(text, startOffset);
+  }, [tts, requestChapterText, startSpeaking]);
 
   const handleTTSPause = useCallback(() => {
     tts.pause();
