@@ -52,6 +52,12 @@ const isInScriptOrStyle = (node: Node): boolean => {
   return false;
 };
 
+// 簡繁轉換等會直接改寫 Text.nodeValue 的操作要呼叫這個清掉快取，
+// 否則 getTextIndex().text 會回傳轉換前的舊文字。
+export const invalidateTextIndex = (doc: Document) => {
+  ttsTextIndexCache.delete(doc);
+};
+
 export const getTextIndex = (doc: Document): TextIndex | null => {
   const cached = ttsTextIndexCache.get(doc);
   if (cached) return cached;

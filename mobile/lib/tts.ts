@@ -247,8 +247,9 @@ export const useTTS = () => {
     onBoundaryRef.current = onBoundary;
     setPlaying(true);
     setPaused(false);
-    // 使用者可能在按下播放前就先選好睡眠計時，這裡補上啟動，避免預先選的分鐘數被忽略。
-    if (sleepMinutes > 0) startSleepTimer(sleepMinutes);
+    // 使用者可能在按下播放前就先選好睡眠計時，這裡補上啟動，避免預先選的分鐘數被忽略；
+    // 但如果計時已經在跑（例如跨章節自動接續朗讀），不能重新啟動，否則倒數會被每一章重置。
+    if (sleepMinutes > 0 && sleepDeadlineAtRef.current === null) startSleepTimer(sleepMinutes);
     speakChunk(generation);
   }, [speakChunk, sleepMinutes, startSleepTimer]);
 

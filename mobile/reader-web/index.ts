@@ -9,6 +9,7 @@ import {
   ensureTTSHighlightStyle,
   getBoundaryOffsetFromRange,
   getTextIndex,
+  invalidateTextIndex,
   paintTTSHighlightOverlay,
 } from './ttsHighlight';
 
@@ -161,6 +162,7 @@ const applyScriptToDoc = (doc: Document) => {
   } else {
     convertDoc(doc, typography.script === 'sc' ? getToSC() : getToTC());
   }
+  invalidateTextIndex(doc);
 };
 
 // 比照 renderer/src/components/Reader/readerStyles.ts 的字體/行距/字距覆寫邏輯，
