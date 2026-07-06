@@ -57,7 +57,7 @@ const ReaderScreen = () => {
   const [listPanelTab, setListPanelTab] = useState<'bookmarks' | 'chapters' | 'bookinfo' | 'notes' | null>(null);
   const settingsLoadedRef = useRef(false);
   const hadSavedSettingsRef = useRef(false);
-  const chapterTextResolverRef = useRef<((text: string) => void) | null>(null);
+  const chapterTextResolverRef = useRef<((result: { text: string; startOffset: number }) => void) | null>(null);
   const chapterTextTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const relocatedResolverRef = useRef<(() => void) | null>(null);
   // 供 advanceToNextChapter 判斷「是否已經跨到新章節」／「是否已到書尾」，用 ref 而非
@@ -205,7 +205,7 @@ const ReaderScreen = () => {
           clearTimeout(chapterTextTimeoutRef.current);
           chapterTextTimeoutRef.current = null;
         }
-        chapterTextResolverRef.current?.(msg.text);
+        chapterTextResolverRef.current?.({ text: msg.text, startOffset: msg.startOffset });
         chapterTextResolverRef.current = null;
         return;
       }
@@ -258,14 +258,14 @@ const ReaderScreen = () => {
   // 若已有一個 getChapterText 請求在飛行中，新請求直接回空字串，避免蓋掉前一個
   // resolver 導致前一個呼叫永遠 resolve 不到正確結果；並用逾時保護 WebView 沒回應時
   // 呼叫端不會卡死。
-  const requestChapterText = useCallback((): Promise<string> => {
-    if (chapterTextResolverRef.current) return Promise.resolve('');
+  const requestChapterText = useCallback((): Promise<{ text: string; startOffset: number }> => {
+    if (chapterTextResolverRef.current) return Promise.resolve({ text: '', startOffset: 0 });
     return new Promise((resolve) => {
       chapterTextResolverRef.current = resolve;
       chapterTextTimeoutRef.current = setTimeout(() => {
         chapterTextResolverRef.current = null;
         chapterTextTimeoutRef.current = null;
-        resolve('');
+        resolve({ text: '', startOffset: 0 });
       }, 5000);
       webviewRef.current?.postMessage(JSON.stringify({ type: 'getChapterText' }));
     });
@@ -315,14 +315,15 @@ const ReaderScreen = () => {
   const readNextAndContinue = useCallback(async () => {
     const advanced = await advanceToNextChapter();
     if (!advanced) return;
-    const text = await requestChapterText();
+    const { text, startOffset } = await requestChapterText();
     if (!text.trim()) return;
     readingHrefRef.current = currentHrefRef.current;
     webviewRef.current?.postMessage(JSON.stringify({ type: 'ttsStart' }));
     tts.speak(
       text,
       () => continueReadingRef.current(),
-      (charIndex) => webviewRef.current?.postMessage(JSON.stringify({ type: 'ttsBoundary', charIndex }))
+      (charIndex) =>
+        webviewRef.current?.postMessage(JSON.stringify({ type: 'ttsBoundary', charIndex: charIndex + startOffset }))
     );
   }, [advanceToNextChapter, requestChapterText, tts]);
   useEffect(() => { continueReadingRef.current = readNextAndContinue; }, [readNextAndContinue]);
@@ -333,14 +334,15 @@ const ReaderScreen = () => {
       webviewRef.current?.postMessage(JSON.stringify({ type: 'ttsStart' }));
       return;
     }
-    const text = await requestChapterText();
+    const { text, startOffset } = await requestChapterText();
     if (!text.trim()) return;
     readingHrefRef.current = currentHrefRef.current;
     webviewRef.current?.postMessage(JSON.stringify({ type: 'ttsStart' }));
     tts.speak(
       text,
       () => continueReadingRef.current(),
-      (charIndex) => webviewRef.current?.postMessage(JSON.stringify({ type: 'ttsBoundary', charIndex }))
+      (charIndex) =>
+        webviewRef.current?.postMessage(JSON.stringify({ type: 'ttsBoundary', charIndex: charIndex + startOffset }))
     );
   }, [tts, requestChapterText]);
 
