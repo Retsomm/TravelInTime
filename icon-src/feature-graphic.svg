@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 500" width="1024" height="500">
+  <defs>
+    <radialGradient id="bg" cx="30%" cy="38%" r="85%">
+      <stop offset="0%" stop-color="#c96a3a"/>
+      <stop offset="100%" stop-color="#6e2a0e"/>
+    </radialGradient>
+    <clipPath id="iconClip">
+      <rect x="0" y="0" width="320" height="320" rx="64"/>
+    </clipPath>
+  </defs>
+
+  <rect width="1024" height="500" fill="url(#bg)"/>
+
+  <!-- App icon, rounded square, left side -->
+  <g transform="translate(90,90)">
+    <g clip-path="url(#iconClip)">
+      <rect width="320" height="320" fill="#8a3c1c"/>
+      <g transform="translate(0,-8) scale(0.625)">
+        <path d="M256,138 C232,142 192,154 166,174 L166,362 C194,346 228,338 256,338 Z" fill="#faf6f0" opacity="0.97"/>
+        <path d="M256,138 C280,142 320,154 346,174 L346,362 C318,346 284,338 256,338 Z" fill="#f0e8de" opacity="0.97"/>
+        <rect x="252" y="136" width="8" height="204" rx="4" fill="#ffffff" opacity="0.45"/>
+        <line x1="192" y1="218" x2="244" y2="212" stroke="#c49070" stroke-width="3" stroke-linecap="round" opacity="0.55"/>
+        <line x1="189" y1="238" x2="244" y2="232" stroke="#c49070" stroke-width="3" stroke-linecap="round" opacity="0.55"/>
+        <line x1="190" y1="258" x2="244" y2="252" stroke="#c49070" stroke-width="3" stroke-linecap="round" opacity="0.55"/>
+        <line x1="191" y1="278" x2="243" y2="272" stroke="#c49070" stroke-width="3" stroke-linecap="round" opacity="0.40"/>
+        <line x1="192" y1="298" x2="238" y2="293" stroke="#c49070" stroke-width="3" stroke-linecap="round" opacity="0.30"/>
+        <line x1="268" y1="212" x2="320" y2="218" stroke="#b07858" stroke-width="3" stroke-linecap="round" opacity="0.55"/>
+        <line x1="268" y1="232" x2="323" y2="238" stroke="#b07858" stroke-width="3" stroke-linecap="round" opacity="0.55"/>
+        <line x1="268" y1="252" x2="322" y2="258" stroke="#b07858" stroke-width="3" stroke-linecap="round" opacity="0.55"/>
+        <line x1="269" y1="272" x2="321" y2="278" stroke="#b07858" stroke-width="3" stroke-linecap="round" opacity="0.40"/>
+        <line x1="270" y1="293" x2="316" y2="298" stroke="#b07858" stroke-width="3" stroke-linecap="round" opacity="0.30"/>
+        <circle cx="256" cy="148" r="38" fill="#1a1411" opacity="0.82"/>
+        <circle cx="256" cy="148" r="33" fill="none" stroke="#faf6f0" stroke-width="2.2" opacity="0.65"/>
+        <line x1="256" y1="118" x2="256" y2="123" stroke="#faf6f0" stroke-width="2" stroke-linecap="round" opacity="0.6"/>
+        <line x1="286" y1="148" x2="281" y2="148" stroke="#faf6f0" stroke-width="2" stroke-linecap="round" opacity="0.6"/>
+        <line x1="256" y1="178" x2="256" y2="173" stroke="#faf6f0" stroke-width="2" stroke-linecap="round" opacity="0.6"/>
+        <line x1="226" y1="148" x2="231" y2="148" stroke="#faf6f0" stroke-width="2" stroke-linecap="round" opacity="0.6"/>
+        <line x1="256" y1="148" x2="256" y2="130" stroke="#faf6f0" stroke-width="2.8" stroke-linecap="round"/>
+        <line x1="256" y1="148" x2="271" y2="156" stroke="#faf6f0" stroke-width="2.2" stroke-linecap="round"/>
+        <circle cx="256" cy="148" r="3.5" fill="#faf6f0"/>
+      </g>
+    </g>
+  </g>
+
+  <!-- App name + tagline, right side -->
+  <text x="470" y="255" font-size="76" font-weight="600" fill="#faf6f0" font-family="PingFang TC, Helvetica, sans-serif">Travel in Time</text>
+  <text x="472" y="315" font-size="34" fill="#f0ded0" font-family="PingFang TC, Helvetica, sans-serif" opacity="0.9">穿越時光．電子書閱讀器</text>
+</svg>

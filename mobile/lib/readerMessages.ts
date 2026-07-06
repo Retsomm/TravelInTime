@@ -35,7 +35,7 @@ export type OutboundMessage =
   | { type: 'error'; message: string }
   | { type: 'metaExtracted'; title: string; author: string; coverBase64: string | null; coverMediaType: string | null }
   | { type: 'metaError'; message: string }
-  | { type: 'chapterText'; text: string }
+  | { type: 'chapterText'; text: string; startOffset: number }
   | { type: 'bookLanguageDetected'; baseScript: Script }
   | { type: 'tocLoaded'; toc: TocItem[] }
   | { type: 'textSelected'; cfi: string; text: string }

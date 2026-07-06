@@ -1053,15 +1053,25 @@ const loadBook = async (base64: string, cfi: string | null, initialAnnotations: 
 
 // TTS 朗讀文字來源：目前顯示中章節的 iframe document.body 全文（paginated 模式下，
 // 一個章節的完整內容是渲染在同一份 document 裡用 CSS 分欄呈現，body.textContent 涵蓋整章，
-// 不只是目前可見的那一頁），一律從章節開頭朗讀。改用 getTextIndex() 而不是先前的
-// cloneNode+regex 正規化空白，是因為朗讀跟讀高亮需要拿 expo-speech 回報的 charIndex
-// （相對於這段文字的絕對位移）反查回真正的 DOM 文字節點畫底線——如果先把文字正規化
-// （空白合併、trim）,字元位移就會跟 getTextIndex() 量出來的原始 DOM 位移對不上，畫底線
-// 的位置也會跟著錯位。跟網頁版 Reader.tsx 的 speakCurrentPage 一樣直接用原始節點文字。
-const getChapterText = (): string => {
+// 不只是目前可見的那一頁）。改用 getTextIndex() 而不是先前的 cloneNode+regex 正規化空白，
+// 是因為朗讀跟讀高亮需要拿 expo-speech 回報的 charIndex（相對於這段文字的絕對位移）反查
+// 回真正的 DOM 文字節點畫底線——如果先把文字正規化（空白合併、trim）,字元位移就會跟
+// getTextIndex() 量出來的原始 DOM 位移對不上，畫底線的位置也會跟著錯位。跟網頁版
+// Reader.tsx 的 speakCurrentPage 一樣直接用原始節點文字。
+//
+// startOffset：目前可見那一頁在整章文字裡的起始字元位移，沿用 measurePageEdgeOffset
+// （原本只用來偵測「快讀到頁尾要自動翻頁」）算出目前頁面的起點 CFI 對應的位移，讓朗讀
+// 從使用者正在看的這一頁開始念，而不是永遠從章節第 0 個字開始；量不出來（例如還沒有
+// currentLocation）就退回 0，等同原本「從章節開頭」的行為。回傳的 text 已經是切過的
+// 「從當前頁開始」文字，RN 端呼叫 tts.speak() 時 expo-speech 回報的 charIndex 是相對於
+// 這段切過的文字，所以要送回 startOffset 讓呼叫端把 charIndex 加回去，才能對應到這裡
+// getTextIndex() 量出來、相對於整章文字的絕對位移（handleTTSBoundary 用的就是這個絕對值）。
+const getChapterText = (): { text: string; startOffset: number } => {
   const doc = getVisibleDoc();
-  if (!doc?.body) return '';
-  return getTextIndex(doc)?.text ?? '';
+  if (!doc?.body) return { text: '', startOffset: 0 };
+  const fullText = getTextIndex(doc)?.text ?? '';
+  const startOffset = measurePageEdgeOffset(doc, 'start') ?? 0;
+  return { text: fullText.slice(startOffset), startOffset };
 };
 
 const handleMessage = (event: MessageEvent<string>) => {
@@ -1081,7 +1091,10 @@ const handleMessage = (event: MessageEvent<string>) => {
     const { type: _type, ...settings } = msg;
     setTypography(settings);
   }
-  if (msg.type === 'getChapterText') post({ type: 'chapterText', text: getChapterText() });
+  if (msg.type === 'getChapterText') {
+    const { text, startOffset } = getChapterText();
+    post({ type: 'chapterText', text, startOffset });
+  }
   if (msg.type === 'setAnnotations') applyAnnotations(msg.annotations);
   if (msg.type === 'clearSelection') {
     debugLog('[clearSelection] 收到訊息');
