@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import Library from '@/page/Library'
 import Reader from '@/page/Reader'
+import Privacy from '@/page/Privacy'
 import { useLibrary } from '@/hooks/useLibrary'
 
 type View = 'library' | 'reader'
@@ -11,6 +12,16 @@ const App = () => {
   const [activeBookUrl, setActiveBookUrl] = useState<string | null>(null)
   const [activeBookId, setActiveBookId] = useState<string>('')
   const [darkMode, setDarkMode] = useState(true)
+
+  if (window.location.pathname === '/private') {
+    return (
+      <div className={darkMode ? 'dark' : ''}>
+        <div className="min-h-screen bg-stone-50 dark:bg-gray-900 transition-colors">
+          <Privacy darkMode={darkMode} onToggleDark={() => setDarkMode(!darkMode)} />
+        </div>
+      </div>
+    )
+  }
 
   const handleOpenBook = async (id: string) => {
     const url = await getBookUrl(id)
