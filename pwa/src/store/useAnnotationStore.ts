@@ -13,7 +13,7 @@ export interface Annotation {
 interface AnnotationStore {
   annotations: Annotation[]
   loadForBook: (annotations: Annotation[]) => void
-  addAnnotation: (a: Omit<Annotation, 'id' | 'createdAt'>) => void
+  addAnnotation: (a: Omit<Annotation, 'id' | 'createdAt'>) => string
   removeAnnotation: (id: string) => void
   updateColor: (id: string, color: string) => void
   updateNote: (id: string, note: string) => void
@@ -33,13 +33,16 @@ export const saveAnnotationsForBook = (bookId: string, annotations: Annotation[]
 export const useAnnotationStore = create<AnnotationStore>((set) => ({
   annotations: [],
   loadForBook: (annotations) => set({ annotations }),
-  addAnnotation: (a) =>
+  addAnnotation: (a) => {
+    const id = crypto.randomUUID()
     set((state) => ({
       annotations: [
         ...state.annotations,
-        { ...a, id: crypto.randomUUID(), createdAt: Date.now() },
+        { ...a, id, createdAt: Date.now() },
       ],
-    })),
+    }))
+    return id
+  },
   removeAnnotation: (id) =>
     set((state) => ({ annotations: state.annotations.filter((a) => a.id !== id) })),
   updateColor: (id, color) =>
