@@ -13,7 +13,7 @@ tags:
 
 1. ✅ **PWA**（`pwa/`）— 已完成
 2. ✅ **RENDERER**（`renderer/`）— 已完成
-3. ⬜ **RN / mobile**（`mobile/`）— 待開始
+3. 🔶 **RN / mobile**（`mobile/`）— 程式碼搬移完成，待使用者實機測試
 
 每完成一個版本先暫停，等使用者確認沒問題再進行下一個。
 
@@ -94,14 +94,45 @@ tags:
 
 ---
 
-## 3. RN / mobile（待開始）
+## 3. RN / mobile（程式碼搬移完成，待實機測試）
 
-目標目錄：`mobile/`（React Native + WebView 架構，與 PWA/RENDERER 完全不同）
+目標目錄：`mobile/`（Expo Router + react-native-webview + epub.js，是兩個獨立的 JS 世界：
+RN 端負責畫面與 AsyncStorage，WebView 端獨立打包一份 epub.js reader 邏輯）。
 
-- [ ] 先探索 mobile 版對應的 Reader 相關程式碼結構（WebView 架構下的 ACD 分層方式可能與 web 版差異很大）
-- [ ] 評估此架構下的動作/計算/資料分層策略
-- [ ] 執行重構
-- [ ] 驗證方式待定（RN 無法用 `yarn build` 驗證執行期行為，需实機/模擬器測試）
+### 已完成項目
+
+**RN 端**（`mobile/app/reader/[id].tsx` 從 788 行降至 383 行）：
+- [x] 新增 `mobile/lib/reader/calculations.ts`：書籤/註記陣列運算、睡眠計時循環選項、
+  URL scheme 判斷、頁碼百分比格式化，以及從 `lib/tts.ts` 搬過來的 `splitTextByLength`/
+  `withFriendlyLabels`/`dedupeByLanguage`（純函數，逐字搬移零行為改動）
+- [x] 抽出 `mobile/hooks/reader/useReaderEngine.ts`（WebView 訊息橋接、relocated/toc/選字狀態、
+  排版設定載入存檔）、`useBookmarks.ts`、`useAnnotations.ts`、`useTTSReading.ts`（朗讀跨章節跟讀）
+- [x] `mobile/lib/library.ts` 不動（書庫列表與 Reader 共用資料層，不在本次重構範圍）
+
+**WebView 端**（`mobile/reader-web/index.ts` 從 1132 行降至 692 行）：
+- [x] 新增 `tocLookup.ts`（TOC 查找）、`progressCalculations.ts`（頁碼/百分比換算純函數）、
+  `ttsFollowCalculations.ts`（朗讀跟讀「是否該自動翻頁」純判斷）、`scriptConversion.ts`（簡繁轉換）、
+  `readerStyles.ts`（排版/深色模式 DOM 樣式注入）、`annotationUtils.ts`（標記差異比對純函數
+  `diffAnnotations` + DOM 操作）
+- [x] `index.ts` 保留 module 狀態、book/rendition 生命週期、`handleMessage` dispatcher，
+  改為呼叫上述新模組
+
+### 驗證進度
+
+- [x] `cd mobile && npx tsc --noEmit` 型別檢查通過
+- [x] `yarn build:reader` 成功打包（esbuild 不做型別檢查，只驗證語法/bundle 成功）
+- [ ] **使用者實機/模擬器測試（尚未進行，我無法在此環境驗證 RN/WebView 執行期行為）**：
+  - [ ] 翻頁（含 RTL、tap-zone 點擊）
+  - [ ] 朗讀播放/暫停/繼續/跨章節自動翻頁跟讀
+  - [ ] 選字劃線（含劃線模式切換）/ 標記顏色編輯 / 刪除 / 筆記
+  - [ ] 書籤新增/刪除/跳轉
+  - [ ] 簡繁轉換（含書本原始語言偵測 baseScript）
+  - [ ] 深色模式
+  - [ ] 字體大小/字型/行距/字距設定
+  - [ ] 睡眠計時
+  - [ ] 章節背景掃描完成後頁碼校正正確
+
+**在使用者完成上述實機測試並回報無誤前，此階段不可視為完成。**
 
 ---
 
