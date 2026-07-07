@@ -1,5 +1,6 @@
 import type { Bookmark } from '@/hooks/useLibrary'
 import { MONO, SERIF } from '@/components/Reader/bookCoverStyles'
+import { formatBookmarkDate, sortBookmarksByAddedAt } from '@/components/Reader/bookmarkUtils'
 
 interface Props {
   bookmarks: Bookmark[]
@@ -31,12 +32,12 @@ const BookmarkPanel = ({ bookmarks, darkMode, pendingDeleteId, onClose, onNaviga
           <div style={{ padding: '32px 20px', textAlign: 'center', fontFamily: MONO, fontSize: 12, color: ink3Col, letterSpacing: '0.04em' }}>尚無書籤</div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column' }}>
-            {[...bookmarks].sort((a, b) => a.addedAt - b.addedAt).map((bm) => (
+            {sortBookmarksByAddedAt(bookmarks).map((bm) => (
               <div key={bm.id} className="no-drag" style={{ borderBottom: `1px solid ${borderCol}`, padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 6, cursor: 'pointer', transition: 'background .12s' }} onClick={() => onNavigate(bm)} onMouseEnter={(e) => (e.currentTarget.style.background = darkMode ? '#231f1c' : '#f1ede4')} onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}>
                 <div style={{ fontFamily: SERIF, fontSize: 13, color: inkCol, lineHeight: 1.5, wordBreak: 'break-all' }}>{bm.label}</div>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <span style={{ fontFamily: MONO, fontSize: 10, color: ink3Col, letterSpacing: '0.04em' }}>
-                    {new Date(bm.addedAt).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' })}
+                    {formatBookmarkDate(bm.addedAt)}
                   </span>
                   <button className="no-drag" onClick={(e) => { e.stopPropagation(); onDeleteRequest(pendingDeleteId === bm.id ? null : bm.id) }} style={{ fontFamily: MONO, fontSize: 10, color: pendingDeleteId === bm.id ? '#ef4444' : ink3Col, cursor: 'pointer', padding: '2px 6px', borderRadius: 4, transition: 'all .12s', background: pendingDeleteId === bm.id ? (darkMode ? '#3a1a1a' : '#fff0f0') : 'transparent' }} onMouseEnter={(e) => { e.currentTarget.style.color = '#ef4444'; e.currentTarget.style.background = darkMode ? '#3a1a1a' : '#fff0f0' }} onMouseLeave={(e) => { e.currentTarget.style.color = pendingDeleteId === bm.id ? '#ef4444' : ink3Col; e.currentTarget.style.background = pendingDeleteId === bm.id ? (darkMode ? '#3a1a1a' : '#fff0f0') : 'transparent' }} aria-label="移除書籤">
                     移除

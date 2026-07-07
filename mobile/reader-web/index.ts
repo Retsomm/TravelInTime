@@ -1,15 +1,18 @@
-import ePub, { EpubCFI } from 'epubjs';
+import ePub from 'epubjs';
 import type { Book, Rendition } from 'epubjs';
-import * as OpenCC from 'opencc-js';
 import type { AnnotationMark, InboundMessage, OutboundMessage, TocItem } from '../lib/readerMessages';
-import { DEFAULT_TYPOGRAPHY, normalizeFontFamily, type TypographySettings } from '../lib/readerSettings';
+import { DEFAULT_TYPOGRAPHY, type TypographySettings } from '../lib/readerSettings';
+import { addAnnotationMark, diffAnnotations, reinjectAllAnnotations, removeAnnotationMark, verifyAnnotationsRendered } from './annotationUtils';
+import { computeProgress } from './progressCalculations';
+import { applyDarkOverride, applyTypographyToDoc } from './readerStyles';
+import { buildToc, getChapterLabel, resolveNavTarget } from './tocLookup';
+import { shouldAutoAdvancePage } from './ttsFollowCalculations';
 import {
   clearTTSHighlight,
   createRangeFromTextOffset,
   ensureTTSHighlightStyle,
   getBoundaryOffsetFromRange,
   getTextIndex,
-  invalidateTextIndex,
   paintTTSHighlightOverlay,
 } from './ttsHighlight';
 
@@ -24,28 +27,12 @@ let rendition: Rendition | null = null;
 let darkMode = false;
 let typography: TypographySettings = DEFAULT_TYPOGRAPHY;
 // 書本本身原始使用的文字（依 epub metadata 的 language 判斷，比照網頁版 Reader.tsx 的
-// baseScriptRef）。轉換/還原都要拿這個當基準，不能寫死假設書本原始文字一定是繁體——
-// 上一版沒有偵測這個值，導致「書本原本就是簡體」時，切成「繁體」只會呼叫 restoreDoc()
-// 還原成書本原本的簡體文字，並不會真的轉換成繁體。
+// baseScriptRef）。轉換/還原都要拿這個當基準，不能寫死假設書本原始文字一定是繁體。
 let baseScript: TypographySettings['script'] = 'tc';
 const contentDocs = new Set<Document>();
 
-// 全書頁碼／精確進度百分比：比照網頁版 Reader.tsx 的 scanAllChapterPages/chapterPagesRef，
-// 背景用一個隱藏的 hiddenRendition 依序 display() 每個 spine 章節，讀 epub.js 真正算出來的
-// displayed.total（該章節在目前字級/行距/字距設定下的實際頁數，不是概算），加總起來就是全書
-// 精確頁數，章節內 displayed.page 本身就是使用者「翻一次就走一個真正的頁面」，因此全書頁碼也會
-// 精準跟著每次翻頁動作 1:1 增減。
-//
-// 中間踩過的坑：一開始改用 book.locations.generate(chars) 對整本書做「每 N 字元切一個位置」的
-// 概算索引，兩個副作用都不理想：(1) 概算的位置跟使用者實際看到的螢幕頁面不是 1:1（N 字元可能
-// 橫跨不只一個螢幕頁，使用者會覺得「翻好幾頁頁碼才跳一次」）；(2) 就算把 generate() 換到獨立的
-// book 實例上執行，Locations.generate() 內部逐 section 呼叫 section.load()/section.unload() 仍是
-// 吃 CPU 的背景工作，在 Android 模擬器上可能拖慢/干擾使用者正在操作的翻頁。改成這裡的
-// hiddenRendition 方案後，用的是 epub.js Rendition 本身既有的分頁結果（不是自己另外算的概算值），
-// 且 Rendition 導覽本身不會呼叫 section.unload()（只有 Locations 才會），兩個問題應該一併解決。
+// 全書頁碼／精確進度百分比背景掃描狀態，詳見 progressCalculations.ts 開頭的說明。
 let chapterPageCounts: Map<number, number> = new Map();
-// 背景章節掃描完成後才會是 true；完成前 relocated 事件送出的全書頁碼（page/total）為 null，
-// 畫面上先不顯示頁數，避免顯示還在累加中、之後會跳動的暫時值。
 let locationsReady = false;
 // 最近一次 relocated 事件的原始 loc 物件，供背景掃描跑完後主動重算一次全書頁碼並補送——若使用者
 // 開書後沒有繼續翻頁，光是掃描完成這件事本身不會觸發新的 relocated 事件，若不補送，頁數列會一直
@@ -53,185 +40,21 @@ let locationsReady = false;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let lastRelocatedLoc: any = null;
 // 全書最後一個 linear 章節的 spine index（由 scanAllChapterPages 設定）。postRelocated 的
-// stuck-CFI 校正只在這一章才會生效，見該處的說明。
+// stuck-CFI 校正只在這一章才會生效，見 progressCalculations.ts 的說明。
 let lastLinearSpineIndex: number | null = null;
 // 每次 loadBook 換書時遞增，scanAllChapterPages 完成時比對這個值，避免舊書的背景掃描
 // 在使用者已經換到新書之後才跑完，把新書的 chapterPageCounts 覆寫成舊書算出來的頁數。
 let loadGeneration = 0;
 
-// 章節目錄快取（目錄面板顯示用）與 spine href 順序（比照網頁版 Reader.tsx 的
-// getChapterTitle／getBookmarkLabel，用來把目前位置換算成章節標題）。
+// 章節目錄快取（目錄面板顯示用）與 spine href 順序，供 tocLookup.ts 的純函數查找章節標題用。
 let tocCache: TocItem[] = [];
 let spineHrefs: string[] = [];
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const buildToc = (items: any[]): TocItem[] =>
-  items.map((item) => ({
-    id: (item.href as string) || (item.label as string) || Math.random().toString(36).slice(2),
-    href: (item.href as string) ?? '',
-    label: (item.label as string)?.trim() ?? '',
-    subitems: item.subitems?.length ? buildToc(item.subitems) : undefined,
-  }));
-
-const hrefToSpineIndex = (href: string): number => {
-  const file = href.split('#')[0];
-  return spineHrefs.findIndex(
-    (h) => h === file || h === href || (Boolean(file) && (h.endsWith(`/${file}`) || file.endsWith(`/${h}`)))
-  );
-};
-
-// 同檔案完全相符、深度越深（越靠近葉節點）優先，比照網頁版 getChapterTitle。
-const findExactChapterLabel = (curFile: string): string => {
-  let bestLabel = '';
-  let bestDepth = -1;
-  const search = (items: TocItem[], depth: number) => {
-    for (const item of items) {
-      const itemFile = item.href.split('#')[0];
-      if (itemFile === curFile && depth > bestDepth) {
-        bestLabel = item.label;
-        bestDepth = depth;
-      }
-      if (item.subitems?.length) search(item.subitems, depth + 1);
-    }
-  };
-  search(tocCache, 0);
-  return bestLabel;
-};
-
-// 找不到精確相符時，退而求其次找 spine 索引最接近（但不超過）目前章節的目錄項目，
-// 比照網頁版 getBookmarkLabel 的 fallback 邏輯。
-const findNearestChapterLabel = (curSpineIdx: number): string => {
-  let bestLabel = '';
-  let bestIdx = -1;
-  const search = (items: TocItem[]) => {
-    for (const item of items) {
-      const si = hrefToSpineIndex(item.href);
-      if (si !== -1 && si <= curSpineIdx && si > bestIdx) {
-        bestLabel = item.label;
-        bestIdx = si;
-      }
-      if (item.subitems?.length) search(item.subitems);
-    }
-  };
-  search(tocCache);
-  return bestLabel;
-};
-
-const getChapterLabel = (href: string, spineIdx: number): string => {
-  const curFile = (href ?? '').split('#')[0];
-  return findExactChapterLabel(curFile) || findNearestChapterLabel(spineIdx) || '書籤';
-};
-
-// 比照 renderer/src/components/Reader/scriptConversion.ts：opencc-js 轉換器延遲建立，
-// originalTexts 記住轉換前的原始文字，切回原始 script 時可以還原（不必重新解析文件）。
-let toSC: ((s: string) => string) | null = null;
-let toTC: ((s: string) => string) | null = null;
-const getToSC = () => { if (!toSC) toSC = OpenCC.Converter({ from: 'tw', to: 'cn' }); return toSC; };
-const getToTC = () => { if (!toTC) toTC = OpenCC.Converter({ from: 'cn', to: 'tw' }); return toTC; };
-const originalTexts = new WeakMap<Node, string>();
-
-const convertDoc = (doc: Document, convert: (s: string) => string) => {
-  const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
-  let node: Node | null;
-  while ((node = walker.nextNode())) {
-    if (node.nodeValue && !originalTexts.has(node)) {
-      originalTexts.set(node, node.nodeValue);
-      node.nodeValue = convert(node.nodeValue);
-    }
-  }
-};
-
-const restoreDoc = (doc: Document) => {
-  const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
-  let node: Node | null;
-  while ((node = walker.nextNode())) {
-    const original = originalTexts.get(node);
-    if (original !== undefined) {
-      node.nodeValue = original;
-      originalTexts.delete(node);
-    }
-  }
-};
-
-// 只有「顯示腳本」跟「書本原始腳本」不同時才需要轉換；相同就還原成書本原文，
-// 比照網頁版 Reader.tsx 的 `if (scriptRef.current !== baseScriptRef.current)` 判斷。
-const applyScriptToDoc = (doc: Document) => {
-  if (!doc.body) return;
-  if (typography.script === baseScript) {
-    restoreDoc(doc);
-  } else {
-    convertDoc(doc, typography.script === 'sc' ? getToSC() : getToTC());
-  }
-  invalidateTextIndex(doc);
-};
-
-// 比照 renderer/src/components/Reader/readerStyles.ts 的字體/行距/字距覆寫邏輯，
-// 這幾個功能各自用獨立的 <style> id，互不干擾，也都要额外覆寫 inline style 才蓋得過書本內容。
-const WEB_FONT_URLS: Record<string, string> = {
-  Huninn: 'https://fonts.googleapis.com/css2?family=Huninn&display=swap',
-  'Noto Serif TC': 'https://fonts.googleapis.com/css2?family=Noto+Serif+TC&display=swap',
-  'Noto Sans TC': 'https://fonts.googleapis.com/css2?family=Noto+Sans+TC&display=swap',
-  'LXGW WenKai TC': 'https://fonts.googleapis.com/css2?family=LXGW+WenKai+TC&display=swap',
-};
-
-const injectWebFontLink = (doc: Document, href: string | null) => {
-  const id = 'tit-webfont-link';
-  let el = doc.getElementById(id) as HTMLLinkElement | null;
-  if (!href) { el?.remove(); return; }
-  if (!el) {
-    el = doc.createElement('link');
-    el.id = id;
-    el.rel = 'stylesheet';
-    doc.head?.appendChild(el);
-  }
-  el.href = href;
-};
-
-const applyFontFamilyOverride = (doc: Document, family: string) => {
-  const normalized = normalizeFontFamily(family);
-  injectStyle(doc, 'tit-font', `:root * { font-family: ${normalized} !important; }`);
-  const fontKey = Object.keys(WEB_FONT_URLS).find((k) => normalized.includes(k));
-  injectWebFontLink(doc, fontKey ? WEB_FONT_URLS[fontKey] : null);
-};
-
-const applyLineHeightOverride = (doc: Document, lh: number) => {
-  injectStyle(doc, 'tit-lh', `:root * { line-height: ${lh} !important; }`);
-};
-
-const applyLetterSpacingOverride = (doc: Document, ls: number) => {
-  injectStyle(doc, 'tit-ls', `:root * { letter-spacing: ${ls}em !important; }`);
-};
-
-const setInlineFontSize = (doc: Document, size: number) => {
-  doc.querySelectorAll('body, body *').forEach((el) => {
-    try {
-      const style = (el as HTMLElement).style;
-      if (style) style.setProperty('font-size', `${size}px`, 'important');
-    } catch {
-      /* SVG / MathML 等特殊元素略過 */
-    }
-  });
-};
-
-const applyFontSizeOverride = (doc: Document, size: number) => {
-  injectStyle(doc, 'tit-fs', `:root * { font-size: ${size}px !important; }`);
-  setInlineFontSize(doc, size);
-  setTimeout(() => setInlineFontSize(doc, size), 150);
-};
-
-const applyTypographyToDoc = (doc: Document) => {
-  applyFontFamilyOverride(doc, typography.fontFamily);
-  applyFontSizeOverride(doc, typography.fontSize);
-  applyLineHeightOverride(doc, typography.lineHeight);
-  applyLetterSpacingOverride(doc, typography.letterSpacing);
-  applyScriptToDoc(doc);
-};
-
-// contentDocs 只在 rendition.hooks.content 觸發時新增，epub.js 目前版本的 view manager
-// 從不 emit MANAGERS.REMOVED，hooks.unloaded 永遠不會觸發，所以無法用官方的卸載事件清掉
-// 舊 iframe 的 document；改成每次套用樣式前順手清掉已經卸載的 iframe（doc.defaultView 會
-// 在 iframe 從 DOM 移除後變成 null）。
 const pruneStaleContentDocs = () => {
+  // contentDocs 只在 rendition.hooks.content 觸發時新增，epub.js 目前版本的 view manager
+  // 從不 emit MANAGERS.REMOVED，hooks.unloaded 永遠不會觸發，所以無法用官方的卸載事件清掉
+  // 舊 iframe 的 document；改成每次套用樣式前順手清掉已經卸載的 iframe（doc.defaultView 會
+  // 在 iframe 從 DOM 移除後變成 null）。
   contentDocs.forEach((doc) => {
     if (!doc.defaultView) contentDocs.delete(doc);
   });
@@ -240,48 +63,7 @@ const pruneStaleContentDocs = () => {
 const setTypography = (next: TypographySettings) => {
   typography = next;
   pruneStaleContentDocs();
-  contentDocs.forEach((doc) => applyTypographyToDoc(doc));
-};
-
-// 比照 Electron 版 renderer/src/components/Reader/readerStyles.ts 的 applyDarkOverride：
-// CSS 注入蓋不過書本元素的 inline !important style，所以除了注入 <style> 還要逐一覆寫
-// 每個元素的 inline style（inline style 優先權比外部注入的 <style> 高）。
-const MEDIA_TAGS = new Set(['img', 'svg', 'canvas', 'video', 'picture']);
-
-const injectStyle = (doc: Document, id: string, css: string) => {
-  let el = doc.getElementById(id) as HTMLStyleElement | null;
-  if (!el) {
-    el = doc.createElement('style');
-    el.id = id;
-    doc.head?.appendChild(el);
-  }
-  el.textContent = css;
-};
-
-const applyDarkOverride = (doc: Document, isDark: boolean) => {
-  const bg = isDark ? '#1a1816' : '#f9f7f2';
-  const color = isDark ? '#e8e0d4' : '#2a2420';
-  injectStyle(
-    doc,
-    'tit-dark',
-    [
-      `html, body { background-color: ${bg} !important; color: ${color} !important; }`,
-      `* { color: ${color} !important; background-color: ${bg} !important; }`,
-      `img, svg, canvas, video, picture { background-color: transparent !important; }`,
-    ].join(' ')
-  );
-  doc.querySelectorAll('body, body *').forEach((el) => {
-    try {
-      const style = (el as HTMLElement).style;
-      if (!style) return;
-      if (!MEDIA_TAGS.has((el as HTMLElement).tagName?.toLowerCase())) {
-        style.setProperty('background-color', bg, 'important');
-      }
-      style.setProperty('color', color, 'important');
-    } catch {
-      /* SVG / MathML 等特殊元素略過 */
-    }
-  });
+  contentDocs.forEach((doc) => applyTypographyToDoc(doc, typography, baseScript));
 };
 
 const applyDarkModeToOuterPage = (isDark: boolean) => {
@@ -345,7 +127,7 @@ const unlockNavSoon = () => {
 
 // 記錄剛剛呼叫的是 prev 還是 next，供 postRelocated 判斷「呼叫了 next() 但 CFI 完全沒變」這種
 // epub.js 量測出來的 displayed.total 比實際能翻到的頁面多 1（常發生在全書最後一章結尾）的情況——
-// 見 postRelocated 內 confirmedBookEnd 的說明。
+// 見 progressCalculations.ts 內 stuck-CFI 校正的說明。
 let lastNavDirection: 'prev' | 'next' | null = null;
 
 const turnPage = (direction: 'prev' | 'next') => {
@@ -374,8 +156,6 @@ let ttsPageEndOffset: number | null = null;
 let ttsAutoFollowBusy = false;
 let ttsAutoFollowLastAt = 0;
 let ttsAutoFollowFallbackTimer: ReturnType<typeof setTimeout> | null = null;
-// 觸發翻頁的位移量比頁尾實際字元位移提前一點點，讓翻頁動作跟朗讀到頁尾幾乎同時完成，
-// 而不是朗讀完頁尾最後一個字才觸發（會感覺翻頁慢半拍）。
 const TTS_PAGE_END_LEAD = 8;
 const TTS_AUTO_FOLLOW_THROTTLE = 650;
 
@@ -429,17 +209,20 @@ const handleTTSBoundary = (charIndex: number) => {
   const range = createRangeFromTextOffset(ttsDoc, charIndex);
   if (range) paintTTSHighlightOverlay(ttsDoc, range);
 
-  // 使用者若在朗讀中手動跳去別的章節，目前可見的 document 已經不是朗讀中的 ttsDoc，
-  // 不應該再自動翻頁去追朗讀進度（那樣會把使用者剛跳去的畫面搶走）。
-  if (getVisibleDoc() !== ttsDoc) return;
-  if (ttsAutoFollowBusy) return;
-  if (ttsPageEndOffset === null) return;
-  const turnAt = Math.max(ttsPageStartOffset ?? 0, ttsPageEndOffset - TTS_PAGE_END_LEAD);
-  if (charIndex < turnAt) return;
+  const shouldAdvance = shouldAutoAdvancePage({
+    charIndex,
+    isVisibleDocMatch: getVisibleDoc() === ttsDoc,
+    autoFollowBusy: ttsAutoFollowBusy,
+    pageStartOffset: ttsPageStartOffset,
+    pageEndOffset: ttsPageEndOffset,
+    lead: TTS_PAGE_END_LEAD,
+    now: Date.now(),
+    lastFollowAt: ttsAutoFollowLastAt,
+    throttleMs: TTS_AUTO_FOLLOW_THROTTLE,
+  });
+  if (!shouldAdvance) return;
 
-  const now = Date.now();
-  if (now - ttsAutoFollowLastAt < TTS_AUTO_FOLLOW_THROTTLE) return;
-  ttsAutoFollowLastAt = now;
+  ttsAutoFollowLastAt = Date.now();
   ttsAutoFollowBusy = true;
   turnPage('next');
   // 正常情況下下面 rendition.on('relocated') 的處理會在翻頁完成後立刻解鎖並重新量測頁面
@@ -452,47 +235,17 @@ const handleTTSBoundary = (charIndex: number) => {
   }, 2000);
 };
 
-// 章節目錄的 href 格式常常跟 spine item 的 href 對不上：epub.js 的 Navigation 解析器完全不會
-// 正規化 nav/ncx 檔案裡寫的 href（見 node_modules/epubjs/src/navigation.js，沒有傳入 resolver），
-// 而 nav.xhtml／toc.ncx 常常跟內容檔案放在不同資料夾，導致目錄裡的 href 是相對於 nav 檔案自己的
-// 路徑（例如 `../Text/Section0055.xhtml`），跟 spine.get() 用來比對的 spine item href（相對於
-// OPF 解析出來的路徑，例如 `Text/Section0055.xhtml`）對不起來，`rendition.display()` 因此拋出
-// `No Section Found`，實測就是「點目錄章節沒反應」的真正根因。網頁版 Reader.tsx 的
-// handleNavigateToChapter 已經解過這題：改用檔名比對 spine.items 找出對應項目，拿它「自己的」
-// href 去 display()，這裡照抄同一招。CFI（書籤用）本身就是 spine 索引編碼過的字串，不需要這段
-// 正規化，用 epubcfi( 開頭這個簡單特徵判斷就好。
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const resolveNavTarget = (target: string): string => {
-  if (/^epubcfi\(/i.test(target) || !book) return target;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const spineItems = ((book.spine as any)?.items ?? []) as any[];
-  const cleanHref = target.split('#')[0];
-  const filename = cleanHref.split('/').pop() ?? '';
-  const spineItem = spineItems.find((item) =>
-    item.href === target ||
-    item.href === cleanHref ||
-    item.idref === cleanHref ||
-    item.idref === filename ||
-    (filename && item.href?.endsWith('/' + filename)) ||
-    (filename && item.href === filename)
-  );
-  if (!spineItem) return target;
-  // target 可能帶有目錄錨點（例如 `../Text/Section0055.xhtml#anchor-id`），上面只拿
-  // 檔名比對找出 spine item 自己的 href，這裡要把原本的錨點片段接回去，否則章節內的
-  // 精確跳轉位置會遺失，只跳到章節開頭。
-  const fragment = target.includes('#') ? target.slice(target.indexOf('#')) : '';
-  return spineItem.href + fragment;
-};
-
 // 目錄／書籤跳轉：直接呼叫 rendition.display(target)。
 // 踩過的坑：先前這裡完全沒有經過 navBusy 忙碌鎖，如果使用者剛翻頁、忙碌鎖還沒解開（
 // unlockNavSoon 的 250ms 緩衝內）就馬上點目錄章節，會變成 display() 跟前一次 next()/prev()
-// 同時操作 epub.js 內部狀態——這正是 navBusy 鎖原本要擋的那種情況（見 turnPage 上方的說明），
-// 表現出來就是「點章節沒反應／跳轉失敗」。改成用短輪詢等待目前的忙碌鎖解開後才真的執行，
-// 而不是直接略過——章節/書籤跳轉是使用者明確的單次意圖，不應該像翻頁那樣「忙碌中就丟棄」。
+// 同時操作 epub.js 內部狀態——這正是 navBusy 鎖原本要擋的那種情況，表現出來就是「點章節
+// 沒反應／跳轉失敗」。改成用短輪詢等待目前的忙碌鎖解開後才真的執行，而不是直接略過——
+// 章節/書籤跳轉是使用者明確的單次意圖，不應該像翻頁那樣「忙碌中就丟棄」。
 const gotoTarget = async (rawTarget: string) => {
   if (!rendition) return;
-  const target = resolveNavTarget(rawTarget);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const spineItems = book ? (((book.spine as any)?.items ?? []) as any[]) : [];
+  const target = book ? resolveNavTarget(spineItems, rawTarget) : rawTarget;
   let waited = 0;
   while (navBusy && waited < 2000) {
     await new Promise<void>((r) => setTimeout(r, 50));
@@ -500,30 +253,24 @@ const gotoTarget = async (rawTarget: string) => {
   }
   lockNav();
   Promise.resolve(rendition.display(target))
-    .then(() => unlockNavSoon())
+    .then(() => {
+      unlockNavSoon();
+      // 書籤／目錄／註記清單點擊觸發的跳轉是這裡唯一的入口。epub.js 的 DefaultViewManager
+      // 在「目標章節其實就是目前已經顯示中的那個 view」時（例如跳去同一章節裡的另一個
+      // 註記位置），會直接呼叫 scrollTo()/moveTo() 而完全不重建 view，因此不會觸發
+      // hooks.render／hooks.content（Annotations 类别就是掛在這兩個 hook 上自動重掛標記
+      // 的），rendition 的 'relocated' 事件雖然還是會照常發出，但畫面上原本就該有的標記
+      // 如果因為某次「真正」的章節切換而被 detach 過，就再也沒有機會被自動補回來。改成
+      // 每次明確跳轉完成後都直接強制 reinject 目前可見章節的所有標記（不是「檢查缺漏才
+      // 補」，因為這條路徑無法保證缺漏檢查一定跑得到），確保只要有標記資料，跳轉過去就
+      // 一定看得到。
+      setTimeout(() => reinjectAllAnnotations(rendition, debugLog, 'goto'), 350);
+    })
     .catch(() => unlockNav());
 };
 
 // 翻頁手勢：點擊畫面最外層（非 epub.js 內容 iframe）的左三分之一／右三分之一區塊翻頁，
-// 中間三分之一保留給文字選取／未來註記手勢使用。
-//
-// 原本用滑動手勢翻頁，但滑動跟未來要加的劃詞註記手勢會衝突（使用者想選字時容易誤觸翻頁）。
-// 而更早之前用過的「畫面左右 30% 點擊翻頁」在 epub.js 內容 iframe 上失敗，是因為 iOS WKWebView
-// 裡該 iframe 的 window.innerWidth／touch clientX 回報的不是單頁可視寬度，而是整個（可能橫跨
-// 多章節、經過捲動位移的）內容畫布寬度與座標（實測數值高達數千 px），拿這組座標去算「左 30%／
-// 右 30%」完全不可靠。這次改把點擊區塊做成蓋在 #viewer 最上層、屬於最外層文件的透明 div
-// （見 build-reader-html.js 的 #tap-zone-prev / #tap-zone-next），點擊事件直接發生在最外層文件，
-// 不會經過 iframe 內部那套失準的座標系，兩平台都可靠。
-// 右→左（RTL）閱讀方向下，畫面左側該觸發下一頁、右側觸發上一頁，跟 LTR 相反
-// （比照網頁版 Reader.tsx 的翻頁箭頭在 rtl 時互換 prevPage/nextPage 的邏輯）。
-// 劃線模式：使用者實測回報「畫面中間三分之一窄帶長按選字仍然沒有反應」，log 顯示內容 iframe
-// 有收到 touchstart，但完全沒有進入 selectionchange／rendition 的 selected 事件，研判長按手勢
-// 常常會在按住/微調過程中位移超出中間那條窄帶（滑進左右 tap-zone 範圍），這兩塊 tap-zone 是
-// 蓋在最上層、不透明地攔截觸控的 div（見 registerTapZone 上方註解），只要手勢途中掃到那塊區域
-// 就會被攔截、選字手勢跟著中斷。與其要求使用者精準壓在窄帶不動，改成使用者可以主動切換「劃線
-// 模式」：開啟時把左右兩塊 tap-zone 的 pointer-events 關掉，讓觸控整個穿透到底下的 epub 內容
-// iframe（等於畫面全寬都能長按選字），代價是這段期間點擊畫面左右兩側不會翻頁，需要使用者自己
-// 切回一般模式才能繼續用點擊翻頁——這是刻意的取捨，避免翻頁跟選字手勢互搶同一塊觸控區域。
+// 中間三分之一保留給文字選取／劃線註記手勢使用（見 setAnnotationMode 的說明）。
 const setAnnotationMode = (enabled: boolean) => {
   debugLog('[setAnnotationMode]', enabled);
   ['tap-zone-prev', 'tap-zone-next'].forEach((id) => {
@@ -544,124 +291,12 @@ const registerTapZone = (id: string, baseDirection: 'prev' | 'next') => {
   });
 };
 
-// 劃線註記：用 epub.js 內建的 annotations API（'underline' 型別，SVG 標記，不修改 DOM 文字節點）。
-// RN 端才是唯一的資料來源（annotations 陣列存在 AsyncStorage），這裡只負責「把目前這份清單
-// 渲染成畫面上的標記」——每次收到 setAnnotations（或換書時 load 訊息附帶的初始清單）都整批
-// 比對一次：清單裡消失的 id 移除標記、新出現的 id 新增標記、顏色變了的先移除再重新加上
-// （epub.js 的 annotations.add 沒有提供改色 API，只能整個換掉）。
+// 劃線註記：WebView 端只負責「畫出目前這份清單長什麼樣子」，annotations 陣列本身以 RN 端／
+// AsyncStorage 為唯一資料來源；每次新增/改色/刪除都整批送一次目前完整清單，讓這裡的
+// applyAnnotations() 用 diffAnnotations() 比對差異決定要新增/移除哪些標記。
 // rendition.annotations 內部會在 hooks.render 自動把已加入的標記重新套用到每個新渲染的
 // 章節/頁面 iframe，不需要在換頁時手動重掛。
 let renderedAnnotations = new Map<string, AnnotationMark>();
-
-// 比照網頁版 Reader.tsx 的 addEpubAnnotation：epub.js 的 Annotations 類別是在
-// `rendition.hooks.render.register(this.inject.bind(this))` 掛上去的（見
-// node_modules/epubjs/src/annotations.js），而 hooks.render 有時候會比 iframe 的 contents
-// （真正的 document/尺寸）就緒得早，導致 marks-pane 拿到的量測基準還沒準備好，SVG 標記
-// 因此可能「呼叫沒有拋例外，但畫面上什麼都沒畫出來」。網頁版原本就用「呼叫完成後延遲檢查
-// DOM 裡有沒有真的生出這個標記的元素，沒有就強制 clear()+inject() 重新掛一次」這招頂著，
-// 這裡照抄同一個保險機制，順便加 log 記錄 SVG 標記實際的量測結果，方便下次如果還是沒畫出來時
-// 判斷是「完全沒生成標記元素」還是「元素生成了但位置/尺寸算錯變成看不到」兩種不同情況。
-const logMarkGeometry = (id: string, label: string) => {
-  const markEl = document.querySelector(`.ann-${id}`);
-  if (!markEl) {
-    debugLog(`[markGeometry:${label}]`, id, '在最外層 document 找不到 .ann-<id> 元素');
-    return;
-  }
-  const svg = markEl.closest('svg');
-  const markRect = markEl.getBoundingClientRect();
-  const svgRect = svg?.getBoundingClientRect();
-  const iframe = document.querySelector('#viewer iframe') as HTMLIFrameElement | null;
-  const iframeRect = iframe?.getBoundingClientRect();
-  debugLog(
-    `[markGeometry:${label}]`, id,
-    'mark=', { w: Math.round(markRect.width), h: Math.round(markRect.height), x: Math.round(markRect.x), y: Math.round(markRect.y) },
-    'svg=', svgRect ? { w: Math.round(svgRect.width), h: Math.round(svgRect.height) } : 'no-svg',
-    'iframe=', iframeRect ? { w: Math.round(iframeRect.width), h: Math.round(iframeRect.height), x: Math.round(iframeRect.x), y: Math.round(iframeRect.y) } : 'no-iframe',
-    'iframeScroll=', { w: iframe?.contentWindow?.innerWidth, scrollW: iframe?.contentDocument?.documentElement?.scrollWidth }
-  );
-};
-
-// 強制重新掛所有目前的 annotation（clear + inject），共用給「新增標記後檢查」跟「每次新內容
-// 渲染後檢查」兩個呼叫點。
-const reinjectAllAnnotations = (label: string) => {
-  if (!rendition) return;
-  debugLog('[reinjectAllAnnotations]', label);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const annApi = rendition.annotations as any;
-  rendition.views().forEach((view: unknown) => {
-    annApi.clear(view);
-    annApi.inject(view);
-  });
-};
-
-// 檢查目前應該顯示的標記，DOM 裡是不是真的都有對應的 <line> 元素；缺漏就整批強制重掛一次。
-// renderedAnnotations 是整本書的標記清單，但畫面上（DOM）任何時刻只會有目前顯示中章節的
-// 標記被實際掛出來——只比對「目前可見章節」涵蓋到的標記，避免把其他章節本來就不該出現在
-// DOM 裡的標記誤判成「缺漏」，觸發不必要的 reinjectAllAnnotations。
-const verifyAnnotationsRendered = (label: string) => {
-  if (renderedAnnotations.size === 0 || !rendition) return;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const contents = ((rendition as any).getContents?.() ?? []) as { sectionIndex: number }[];
-  const visibleSections = new Set(contents.map((c) => c.sectionIndex));
-  if (visibleSections.size === 0) return;
-  const expected = [...renderedAnnotations.values()].filter((ann) => {
-    try {
-      return visibleSections.has(new EpubCFI(ann.cfi).spinePos);
-    } catch {
-      return false;
-    }
-  });
-  if (expected.length === 0) return;
-  const missing = expected.filter((ann) => !document.querySelector(`.ann-${ann.id} line`));
-  debugLog('[verifyAnnotationsRendered]', label, '目前章節應顯示', expected.length, '筆，缺少', missing.length, '筆', missing.map((a) => a.id));
-  if (missing.length > 0) reinjectAllAnnotations(`verify:${label}`);
-};
-
-const addAnnotationMark = (ann: AnnotationMark): boolean => {
-  if (!rendition) {
-    debugLog('[addAnnotationMark] 略過：rendition 尚未就緒', ann.id);
-    return false;
-  }
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result = (rendition.annotations as any).underline(
-      ann.cfi,
-      {},
-      () => {
-        debugLog('[annotationTapped]', ann.id);
-        post({ type: 'annotationTapped', id: ann.id });
-      },
-      `ann-${ann.id}`,
-      { stroke: ann.color, 'stroke-opacity': '1', 'stroke-width': '3', fill: 'none' }
-    );
-    debugLog('[addAnnotationMark] underline() 呼叫完成', ann.id, 'cfi=', ann.cfi.slice(0, 40), 'result=', result ? 'ok' : 'undefined/null');
-    logMarkGeometry(ann.id, 'immediately-after-call');
-    setTimeout(() => {
-      logMarkGeometry(ann.id, '300ms-later');
-      const line = document.querySelector(`.ann-${ann.id} line`);
-      if (!line) {
-        debugLog('[addAnnotationMark] 300ms 後仍找不到 <line> 元素，強制 clear+inject 重新掛一次', ann.id);
-        reinjectAllAnnotations(`create:${ann.id}`);
-        setTimeout(() => logMarkGeometry(ann.id, 'after-reinject'), 100);
-      }
-    }, 300);
-    return true;
-  } catch (err) {
-    debugLog('[addAnnotationMark] underline() 拋出例外', ann.id, err instanceof Error ? err.message : String(err));
-    return false;
-  }
-};
-
-const removeAnnotationMark = (ann: AnnotationMark) => {
-  if (!rendition) return;
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (rendition.annotations as any).remove(ann.cfi, 'underline');
-    debugLog('[removeAnnotationMark] 已移除', ann.id);
-  } catch (err) {
-    debugLog('[removeAnnotationMark] 拋出例外', ann.id, err instanceof Error ? err.message : String(err));
-  }
-};
 
 const applyAnnotations = (list: AnnotationMark[]) => {
   debugLog('[applyAnnotations] 收到清單，共', list.length, '筆，目前畫面上有', renderedAnnotations.size, '筆');
@@ -669,22 +304,14 @@ const applyAnnotations = (list: AnnotationMark[]) => {
     debugLog('[applyAnnotations] 略過：rendition 尚未就緒');
     return;
   }
-  const nextIds = new Set(list.map((a) => a.id));
-  renderedAnnotations.forEach((prev, id) => {
-    if (!nextIds.has(id)) removeAnnotationMark(prev);
-  });
+  const { toRemove, toAdd } = diffAnnotations(renderedAnnotations, list);
+  toRemove.forEach((ann) => removeAnnotationMark(rendition, debugLog, ann));
   // 只有 addAnnotationMark 回報成功（underline() 沒有拋例外）的標記才記進
   // renderedAnnotations；underline() 失敗時若仍記成「已渲染」，下次 applyAnnotations 收到
   // 同一份未變更的標記會誤判成「已存在且沒變」而完全跳過重試，永遠補不回來。
   const failedIds = new Set<string>();
-  list.forEach((ann) => {
-    const prev = renderedAnnotations.get(ann.id);
-    if (!prev) {
-      if (!addAnnotationMark(ann)) failedIds.add(ann.id);
-    } else if (prev.color !== ann.color || prev.cfi !== ann.cfi) {
-      removeAnnotationMark(prev);
-      if (!addAnnotationMark(ann)) failedIds.add(ann.id);
-    }
+  toAdd.forEach((ann) => {
+    if (!addAnnotationMark(rendition, post, debugLog, ann)) failedIds.add(ann.id);
   });
   renderedAnnotations = new Map(list.filter((a) => !failedIds.has(a.id)).map((a) => [a.id, a]));
 };
@@ -741,15 +368,13 @@ const extractMeta = async (base64: string) => {
 
 // 背景逐章渲染取得精確全書頁數（比照網頁版 Reader.tsx 的 scanAllChapterPages）：用一個隱藏、
 // 不會顯示在畫面上的 hiddenRendition（跟主 rendition 共用同一個 book 實例——Rendition 導覽不會
-// 呼叫 section.unload()，只有 Locations.generate() 才會，所以共用 book 不會干擾主 rendition，
-// 這跟之前踩過的 Locations 那顆坑不是同一回事），依序 display() 每個 spine 章節，讀 epub.js 算出
-// 來的 displayed.total（該章節在目前排版設定下的真實頁數）加總，取代原本用字元數概算的作法。
+// 呼叫 section.unload()，只有 Locations.generate() 才會，所以共用 book 不會干擾主 rendition），
+// 依序 display() 每個 spine 章節，讀 epub.js 算出來的 displayed.total（該章節在目前排版設定下
+// 的真實頁數）加總，取代原本用字元數概算的作法。
 //
 // 只掃描 item.linear === 'yes' 的章節：epub.js 的 rendition.next()/prev() 實際上只會在
-// linear 章節之間移動（見 epubjs/src/spine.js 的 item.next()/prev()，non-linear 章節會被完全
-// 跳過，使用者靠翻頁永遠到不了）。epub 常見會把版權頁/附錄等標成 linear="no"，先前沒有排除
-// 這些章節，導致全書總頁數把使用者翻頁永遠碰不到的頁面也算進去，翻到真正的最後一頁時「第 X
-// 頁」永遠比「共 Y 頁」少（Y 多算了那些 non-linear 章節的頁數）。
+// linear 章節之間移動，non-linear 章節（例如版權頁/附錄）會被完全跳過，使用者靠翻頁永遠
+// 到不了，若不排除會讓全書總頁數把使用者翻頁永遠碰不到的頁面也算進去。
 const scanAllChapterPages = async (generation: number, targetBook: Book) => {
   if (!book || book !== targetBook) return;
   const viewer = document.getElementById('viewer');
@@ -765,9 +390,8 @@ const scanAllChapterPages = async (generation: number, targetBook: Book) => {
   lastLinearSpineIndex = lastLinearItem.index as number;
 
   // 隱藏掃描用的 rendition 只是背景讀取分頁結果，使用者看不到也不會互動，預設不需要
-  // 執行書本內容裡的腳本（allowScriptedContent 開著等於讓不受信任的 EPUB 內容在背景
-  // 平白多一次執行腳本的機會）。極少數 EPUB 版面完全靠腳本才能正確分頁、關閉腳本會讓
-  // 每一章都掃不出頁數，這種情況才退回開著腳本重掃一次。
+  // 執行書本內容裡的腳本。極少數 EPUB 版面完全靠腳本才能正確分頁、關閉腳本會讓每一章
+  // 都掃不出頁數，這種情況才退回開著腳本重掃一次。
   const runScan = async (allowScriptedContent: boolean) => {
     const hiddenEl = document.createElement('div');
     Object.assign(hiddenEl.style, {
@@ -783,7 +407,7 @@ const scanAllChapterPages = async (generation: number, targetBook: Book) => {
     });
     hiddenRendition.hooks.content.register((contents: unknown) => {
       const doc = (contents as { document: Document }).document;
-      if (doc) applyTypographyToDoc(doc);
+      if (doc) applyTypographyToDoc(doc, typography, baseScript);
     });
 
     const scanCounts = new Map<number, number>();
@@ -797,15 +421,6 @@ const scanAllChapterPages = async (generation: number, targetBook: Book) => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const loc = (hiddenRendition as any).currentLocation?.();
           const d = loc?.start?.displayed as { page: number; total: number } | undefined;
-          // 曾經在這裡加過「對最後一章逐頁模擬 next() 驗證真實可翻到的頁數」的邏輯，想解決
-          // epub.js 量測出的 displayed.total 有時比實際可翻到的頁數多 1 的問題。拿掉的原因：
-          // 這段驗證需要等待 hiddenRendition 的 relocated 事件，Android 上曾經因為事件遲遲不來
-          // （逾時或時序問題）讓驗證迴圈在還沒真的翻完就提早中止，反而把這一章的頁數嚴重低估
-          // （曾經整章只算出 1 頁），比原本「多算 1 頁」的問題更嚴重。改成完全信任 epub.js
-          // 量出來的 displayed.total，多算的那 1 頁改交給 postRelocated 的 stuck-CFI 校正
-          // （使用者翻到書尾、next() 真的卡住時才觸發，見該處說明）在使用者實際翻到那裡時修正，
-          // 不在背景用模擬導覽的方式先驗證——代價是使用者翻到書尾要多按一次「下一頁」數字才會
-          // 校正一致，但不會有把整章頁數算到只剩 1 頁這種更嚴重的錯誤。
           if (d) scanCounts.set(idx, d.total);
         } catch {
           /* 這一章渲染失敗就略過，最後用已知章節的平均值當缺值的替代 */
@@ -862,8 +477,7 @@ const loadBook = async (base64: string, cfi: string | null, initialAnnotations: 
       flow: 'paginated',
       // epub.js 預設把內容 iframe 的 sandbox 設為只有 allow-same-origin（沒有 allow-scripts）。
       // 在 iOS 的 WKWebView 上，這會連帶擋掉從外層掛在該 iframe document 上的事件監聽器
-      // （touchstart/touchend、pointerdown/pointerup）被呼叫，導致滑動翻頁完全沒反應
-      // （Safari Web Inspector 主控台會看到 "Blocked script execution in 'about:srcdoc'..."）。
+      // （touchstart/touchend、pointerdown/pointerup）被呼叫，導致滑動翻頁完全沒反應。
       // Android 的 WebView（Chromium）沒有這個限制。
       allowScriptedContent: true,
     });
@@ -875,83 +489,46 @@ const loadBook = async (base64: string, cfi: string | null, initialAnnotations: 
       if (!doc) return;
       contentDocs.add(doc);
       applyDarkOverride(doc, darkMode);
-      applyTypographyToDoc(doc);
-      // epub.js 的 Contents 類別本身只在「選取範圍非空」時才會 emit 'selected'（見
-      // node_modules/epubjs/src/contents.js 的 triggerSelectedEvent），使用者點掉選取／
-      // 選取範圍收合完全沒有對應事件可以監聽，因此另外自己掛一個 selectionchange，
-      // 只在偵測到「收合」時回報給 RN 端關閉選取操作列，不跟 epub.js 內建的 250ms
-      // debounce 邏輯衝突（各自關注不同的狀態轉換）。
+      applyTypographyToDoc(doc, typography, baseScript);
+      // epub.js 的 Contents 類別本身只在「選取範圍非空」時才會 emit 'selected'，使用者點掉
+      // 選取／選取範圍收合完全沒有對應事件可以監聽，因此另外自己掛一個 selectionchange，
+      // 只在偵測到「收合」時回報給 RN 端關閉選取操作列，不跟 epub.js 內建的 250ms debounce
+      // 邏輯衝突（各自關注不同的狀態轉換）。
       doc.addEventListener('selectionchange', () => {
         const sel = doc.defaultView?.getSelection();
         debugLog('[selectionchange]', 'collapsed=', sel?.isCollapsed ?? 'no-selection', 'text=', sel?.toString().slice(0, 20) ?? '');
         if (!sel || sel.isCollapsed) post({ type: 'selectionCleared' });
       });
-      // 確認觸控事件本身有沒有傳到這份 content document（排除 tap-zone 疊在上層整個
-      // 擋掉觸控、或 iframe sandbox 權限問題導致內容 iframe 根本收不到觸控的可能性）。
       doc.addEventListener('touchstart', (e: TouchEvent) => {
         const t = e.touches[0];
         debugLog('[content touchstart]', 'x=', Math.round(t?.clientX ?? -1), 'y=', Math.round(t?.clientY ?? -1));
       });
       // 每次新章節/頁面內容渲染完，順便確認這一頁該顯示的標記是不是真的有畫出來——
-      // epub.js 的 Annotations 類別本身也是掛在 hooks.render 自動重掛標記，但跟這裡的
-      // hooks.content 一樣可能有「render 觸發時 contents 還沒完全就緒」的競態，見
-      // addAnnotationMark 上方的說明，這裡用同一套 verify+reinject 補一次保險。
-      setTimeout(() => verifyAnnotationsRendered('content-rendered'), 300);
+      // epub.js 的 Annotations 類別本身也是掛在 hooks.render 自動重掛標記，可能有「render
+      // 觸發時 contents 還沒完全就緒」的競態，這裡用同一套 verify+reinject 補一次保險。
+      setTimeout(() => verifyAnnotationsRendered(rendition, debugLog, renderedAnnotations, 'content-rendered'), 300);
     });
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const postRelocated = (l: any, previousCfi: string | null) => {
       const displayed = l?.start?.displayed as { page: number; total: number } | undefined;
       if (!l?.start?.cfi || !displayed || !book) return;
-
-      // l.start.displayed 的 page/total 只是「目前這個章節（spine item）」內部的頁碼，
-      // 不是全書頁碼——書快翻到某一章結尾時 page 就會等於 total，導致每章結尾都會被
-      // RN 端誤判成「整本書讀完」而顯示 100%／讀畢。過渡值（chapterPageCounts 還沒掃完前）用
-      // 「章節索引 + 章內頁碼比例」概算，掃完後之後的 relocated 事件就會換成精確值。
       // epubjs 的 Spine 型別定義沒有列出 length（實際上 unpack() 時有設定這個欄位），只能用 any 存取。
       const spineLength = (book.spine as any).length as number;
-      const fallbackPercentage = (l.start.index + (displayed.page - 1) / Math.max(displayed.total, 1)) / Math.max(spineLength, 1);
 
-      // 全書頁碼／精確進度百分比：累加「目前章節之前」每一章已知的真實頁數（來自背景
-      // scanAllChapterPages() 的 chapterPageCounts），加上目前章節內的 displayed.page——
-      // 跟網頁版 Reader.tsx 的 accuratePage 計算方式一致，數值上會跟使用者實際翻頁動作 1:1。
-      let page: number | null = null;
-      let pageTotal: number | null = null;
-      if (locationsReady) {
-        // chapterPageCounts 現在只收錄 linear 章節（見 scanAllChapterPages 的說明），
-        // non-linear 章節的 index 在這裡直接 ?? 0，不會計入頁碼／總頁數。
-        let priorPages = 0;
-        for (let i = 0; i < l.start.index; i++) priorPages += chapterPageCounts.get(i) ?? 0;
-        page = priorPages + displayed.page;
-        let totalPages = 0;
-        for (let i = 0; i < spineLength; i++) totalPages += chapterPageCounts.get(i) ?? 0;
-        pageTotal = Math.max(totalPages, page);
-        // 保險 1：epub.js 自己判斷「已經到書尾」的 atEnd 旗標，真的到書尾時強制讓頁碼等於總頁數。
-        if (l.atEnd) page = pageTotal;
-        // 保險 2（實測抓到的真正情況）：epub.js 對同一章節，hiddenRendition 背景掃描量出來的
-        // displayed.total 有時會比「使用者實際呼叫 next() 能翻到的最後位置」多 1 頁——這一章結尾
-        // 可能有一段極短/空白內容，epub.js 的分頁量測演算法認為那還算一頁，但 next() 實際上翻不
-        // 過去（CFI 完全沒變），此時 atEnd 也不會是 true（因為 epub.js 認為 displayed.page 還沒
-        // 追上它自己量出的 displayed.total），使用者會卡在「第 315 頁／共 316 頁」翻不動也翻不完。
-        // 偵測方式：剛剛呼叫的是 next()，但這次 relocated 的 cfi 跟呼叫前完全一樣，代表沒有真的
-        // 翻動——這種情況下 page 已經是使用者能到達的最大值，把 pageTotal 降到跟 page 一致（而不是
-        // 硬把 page 往上推，因為使用者手上的畫面內容就是停在這裡，沒有更多可以顯示的頁面了）。
-        //
-        // 只在「全書最後一個 linear 章節」才套用這個校正：實測發現 Android 上翻頁跨章節時，
-        // 偶爾會有 relocated 事件回報跟前一次一樣的 CFI（不是真的卡住，馬上再翻一次就正常前進），
-        // 如果不限制章節，這個校正會在書中間被誤觸發，把 pageTotal 錯誤地永久鎖死在當下頁碼，
-        // 造成「畫面明明翻得動，但頁碼/總頁數卡住不動」的錯誤顯示（跟真正翻不到書尾是不同問題，
-        // 這裡只處理真正的書尾情境）。
-        if (
-          lastNavDirection === 'next' &&
-          previousCfi !== null &&
-          l.start.cfi === previousCfi &&
-          l.start.index === lastLinearSpineIndex
-        ) {
-          pageTotal = page;
-        }
-      }
-      const percentage = page !== null && pageTotal !== null ? (page - 1) / Math.max(pageTotal - 1, 1) : fallbackPercentage;
+      const { page, pageTotal, percentage } = computeProgress({
+        startIndex: l.start.index,
+        startCfi: l.start.cfi,
+        displayedPage: displayed.page,
+        displayedTotal: displayed.total,
+        atEnd: Boolean(l.atEnd),
+        spineLength,
+        chapterPageCounts,
+        locationsReady,
+        lastNavDirection,
+        previousCfi,
+        lastLinearSpineIndex,
+      });
 
       post({
         type: 'relocated',
@@ -959,10 +536,10 @@ const loadBook = async (base64: string, cfi: string | null, initialAnnotations: 
         href: l.start.href ?? '',
         page,
         total: pageTotal,
-        percentage: Math.max(0, Math.min(1, percentage)),
+        percentage,
         atStart: Boolean(l.atStart),
         atEnd: Boolean(l.atEnd),
-        chapterTitle: getChapterLabel(l.start.href ?? '', l.start.index),
+        chapterTitle: getChapterLabel(tocCache, spineHrefs, l.start.href ?? '', l.start.index),
       });
     };
 
@@ -972,6 +549,14 @@ const loadBook = async (base64: string, cfi: string | null, initialAnnotations: 
       const previousCfi = (lastRelocatedLoc as any)?.start?.cfi ?? null;
       lastRelocatedLoc = loc;
       postRelocated(loc, previousCfi);
+      // 從書籤／目錄／註記清單等其他畫面跳轉（gotoTarget → rendition.display(cfi)）時，
+      // 若目標落在目前已經渲染過、epub.js 判斷不需要重建 iframe 內容的章節（例如相鄰的
+      // 預先渲染 view），hooks.content 就不會再觸發，上面掛在 hooks.content 裡的
+      // verify+reinject 保險完全不會執行到，導致跳轉過去卻看不到既有的劃線標記（比照
+      // Electron 版 renderer/src/hooks/reader/useReaderEngine.ts 踩過的同一顆坑，這裡補上
+      // 同樣綁在 relocated 事件的補救檢查——不論這次換位置有沒有重新渲染 iframe，只要
+      // 「目前所在章節」變了就再檢查一次）。
+      setTimeout(() => verifyAnnotationsRendered(rendition, debugLog, renderedAnnotations, 'relocated'), 300);
       // 朗讀中的章節如果還是目前可見章節，翻頁完成後重新量測新頁面的字元邊界，並解除
       // 自動翻頁的忙碌鎖（不論這次翻頁是自動跟讀觸發還是使用者手動翻頁都要重新量測，
       // 因為兩種情況下「目前頁面」都變了）；如果朗讀中的章節已經不是目前可見章節
@@ -991,10 +576,8 @@ const loadBook = async (base64: string, cfi: string | null, initialAnnotations: 
     });
 
     // 文字選取 → 劃線註記的第一步：epub.js 已經幫忙把選取範圍換算成 CFI 字串，
-    // 不需要自己手動用 range.getBoundingClientRect() 去換算螢幕座標——epub.js 內容
-    // iframe 在部分手機瀏覽器（尤其先前踩過的 iOS WKWebView）匯報的內部座標系不可靠
-    // （見 registerTapZone 上方註解），選取彈出操作列改用畫面底部固定列（見 RN 端
-    // SelectionBar），完全不需要精確定位在選取文字旁邊，順便避開這整類座標問題。
+    // 不需要自己手動用 range.getBoundingClientRect() 去換算螢幕座標——選取彈出操作列
+    // 改用畫面底部固定列（見 RN 端 SelectionBar），完全不需要精確定位在選取文字旁邊。
     rendition.on('selected', (cfiRange: string, contents: unknown) => {
       debugLog('[rendition selected]', 'cfiRange=', cfiRange.slice(0, 40));
       const c = contents as { window: Window };
@@ -1039,7 +622,7 @@ const loadBook = async (base64: string, cfi: string | null, initialAnnotations: 
         await scanAllChapterPages(generation, currentBook);
         if (generation !== loadGeneration) return;
         // 主動用最近一次的位置重算並補送一次 relocated，避免使用者開書後沒有繼續翻頁
-        // 就看不到頁數列（見上方 lastRelocatedLoc 宣告處的說明）。
+        // 就看不到頁數列。
         if (lastRelocatedLoc) postRelocated(lastRelocatedLoc, null);
       } catch {
         /* 背景掃描失敗不影響閱讀本身，忽略即可，頂多進度概算比較粗略，全書頁碼也會持續顯示為空 */
@@ -1053,19 +636,16 @@ const loadBook = async (base64: string, cfi: string | null, initialAnnotations: 
 
 // TTS 朗讀文字來源：目前顯示中章節的 iframe document.body 全文（paginated 模式下，
 // 一個章節的完整內容是渲染在同一份 document 裡用 CSS 分欄呈現，body.textContent 涵蓋整章，
-// 不只是目前可見的那一頁）。改用 getTextIndex() 而不是先前的 cloneNode+regex 正規化空白，
-// 是因為朗讀跟讀高亮需要拿 expo-speech 回報的 charIndex（相對於這段文字的絕對位移）反查
-// 回真正的 DOM 文字節點畫底線——如果先把文字正規化（空白合併、trim）,字元位移就會跟
-// getTextIndex() 量出來的原始 DOM 位移對不上，畫底線的位置也會跟著錯位。跟網頁版
-// Reader.tsx 的 speakCurrentPage 一樣直接用原始節點文字。
+// 不只是目前可見的那一頁）。用 getTextIndex() 而不是 cloneNode+regex 正規化空白，是因為朗讀
+// 跟讀高亮需要拿 expo-speech 回報的 charIndex（相對於這段文字的絕對位移）反查回真正的 DOM
+// 文字節點畫底線——如果先把文字正規化，字元位移就會跟 getTextIndex() 量出來的原始 DOM 位移
+// 對不上，畫底線的位置也會跟著錯位。
 //
-// startOffset：目前可見那一頁在整章文字裡的起始字元位移，沿用 measurePageEdgeOffset
-// （原本只用來偵測「快讀到頁尾要自動翻頁」）算出目前頁面的起點 CFI 對應的位移，讓朗讀
-// 從使用者正在看的這一頁開始念，而不是永遠從章節第 0 個字開始；量不出來（例如還沒有
-// currentLocation）就退回 0，等同原本「從章節開頭」的行為。回傳的 text 已經是切過的
-// 「從當前頁開始」文字，RN 端呼叫 tts.speak() 時 expo-speech 回報的 charIndex 是相對於
-// 這段切過的文字，所以要送回 startOffset 讓呼叫端把 charIndex 加回去，才能對應到這裡
-// getTextIndex() 量出來、相對於整章文字的絕對位移（handleTTSBoundary 用的就是這個絕對值）。
+// startOffset：目前可見那一頁在整章文字裡的起始字元位移，讓朗讀從使用者正在看的這一頁開始
+// 念，而不是永遠從章節第 0 個字開始；量不出來就退回 0。回傳的 text 已經是切過的「從當前頁
+// 開始」文字，RN 端呼叫 tts.speak() 時 expo-speech 回報的 charIndex 是相對於這段切過的文字，
+// 所以要送回 startOffset 讓呼叫端把 charIndex 加回去，才能對應到這裡量出、相對於整章文字的
+// 絕對位移（handleTTSBoundary 用的就是這個絕對值）。
 const getChapterText = (): { text: string; startOffset: number } => {
   const doc = getVisibleDoc();
   if (!doc?.body) return { text: '', startOffset: 0 };

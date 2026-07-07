@@ -12,8 +12,8 @@ tags:
 ## 整體順序
 
 1. ✅ **PWA**（`pwa/`）— 已完成
-2. ⬜ **RENDERER**（`renderer/`）— 待開始
-3. ⬜ **RN / mobile**（`mobile/`）— 待開始
+2. ✅ **RENDERER**（`renderer/`）— 已完成
+3. 🔶 **RN / mobile**（`mobile/`）— 程式碼搬移完成，待使用者實機測試
 
 每完成一個版本先暫停，等使用者確認沒問題再進行下一個。
 
@@ -54,28 +54,85 @@ tags:
 
 ---
 
-## 2. RENDERER（待開始）
+## 2. RENDERER（已完成）
 
-目標檔案：`renderer/src/page/Reader.tsx`
+目標檔案：`renderer/src/page/Reader.tsx`（原始 1850 行，重構後 314 行）
 
-**注意**：`renderer` 目前程式碼已與 `pwa` 分岔，功能不完全相同（例如少了書籤功能、annotation popup 拆成獨立的 `BookmarkPanel.tsx` / `HighlightPopup.tsx` 元件）。不能直接複製 PWA 版的重構結果，需要重新評估：
+**更正**：舊版本文件寫「renderer 少了書籤功能」已過期——renderer 其實已有完整書籤功能與更早就元件化的 `BookmarkPanel.tsx` / `HighlightPopup.tsx`，只是書籤/annotation/TTS 邏輯尚未抽成純函數 + hooks。
 
-- [ ] 比對 `renderer` 與 `pwa` 的 `Reader.tsx` 差異，確認哪些抽出的邏輯可以共用、哪些需要為 renderer 版本量身設計
-- [ ] 決定是否要與 PWA 共用同一份純計算檔案（若邏輯完全一致）
-- [ ] 依同樣的 ACD 原則拆分 renderer 版 `Reader.tsx`
-- [ ] `cd renderer && yarn build` 驗證
-- [ ] 列出需使用者實測的項目（Electron 環境特有行為）
+### 已完成項目
+
+- [x] 新增 4 個純計算檔案（`renderer/src/components/Reader/`，與 pwa 共用同一份邏輯，逐字搬移）：
+  - `progressCalculations.ts`、`tocLookup.ts`、`bookmarkUtils.ts`、`ttsFollowCalculations.ts`
+- [x] 抽出 `useBookmarks.ts`、`useChapterPageScan.ts`、`useAnnotationPopups.ts`、`useReaderEngine.ts`（`renderer/src/hooks/reader/`）
+  - `useAnnotationPopups.ts` 依 renderer 現有 `HighlightPopup.tsx` 介面調整為 `{x, y}` 座標（不採用 pwa 版的 `{left, top}` clamp 寫法）
+  - `useReaderEngine.ts` 以 renderer 原有邏輯為底重新組織（而非直接搬 pwa 版），刻意保留 renderer 特有行為：
+    - TTS 高亮改用 renderer 原有的 CSS Custom Highlight API 直接繪製（不採用 pwa 版新增的 DOM overlay fallback，那是獨立的行為改動，超出本次重構範圍）
+    - 不引入 pwa 版新增的行動裝置專屬邏輯（觸控 selectionchange 選字路徑、iOS selectionchange 轉發、`getVisibleContentDocument` 多 iframe 命中測試）——Electron 桌面版不需要
+  - 同步修正 `renderer/src/store/useAnnotationStore.ts` 的 `addAnnotation`，改為回傳新建立的 id（比照 pwa 版介面，讓 `useAnnotationPopups.ts` 可直接使用回傳值）
+  - 修掉章節掃描 bug：背景掃描改用獨立的 `ePub(buffer.slice(0))` 實例（`useChapterPageScan.ts`），不再複用主 `book` 建立第二個 rendition，避免掃描完成時偶爾清空主渲染器 annotation 的問題
+- [x] `Reader.tsx` 從 1850 行降至 314 行
+- [x] `cd renderer && yarn build` 驗證型別/編譯無誤
+
+### 使用者實測結果（已通過）
+
+- [x] 翻頁、鍵盤左右鍵翻頁
+- [x] 朗讀播放/暫停/繼續/跨章節自動翻頁
+- [x] 選字高亮 popup 位置（新增/編輯/刪除標記）
+- [x] 書籤新增/刪除/跳轉
+- [x] 簡繁轉換、深色模式、字體大小/字型/行距/字距設定
+- [x] 睡眠計時器
+- [x] 章節掃描：切換字體大小後多次翻頁，頁碼校正正確且高亮標記不會被意外清除
+
+### 實測中發現並修正的問題
+
+- [x] **朗讀跟隨螢光色閃爍、同時出現在目標與非目標句子**：`renderer/src/hooks/useTTS.ts` 仍保留舊版「估算進度計時器」（每 250ms 用預估字速推進高亮位置），與真實 `onboundary` 事件互相搶跑造成閃爍。比照 pwa 版已驗證過的修法，移除估算計時器，高亮改成只跟隨真實 boundary 事件。
+- [x] **註記跳轉後不顯示**：在 `useReaderEngine.ts` 的 `relocated` 事件中新增補救邏輯——每次換頁/跳轉後延遲檢查當前章節的既有註記是否有對應 SVG 底線，缺漏則重新呼叫 `addEpubAnnotation` 補畫（epub.js 的 `annotations.inject(view)` 在 contents 尚未完全就緒時偶爾會失敗）。
+- [x] **書庫排序按鈕（最近閱讀/書名/進度）點擊無效**：與本次 Reader 重構無關的既有 bug——`Library.tsx` 外層有 `drag-region`（Electron 視窗可拖曳區域），`SortControl.tsx` 的按鈕缺少 `no-drag` class，導致點擊被系統拖曳行為吃掉。已補上 `no-drag`。
+
+**RENDERER 重構已通過完整實測，可視為此階段完成。**
 
 ---
 
-## 3. RN / mobile（待開始）
+## 3. RN / mobile（程式碼搬移完成，待實機測試）
 
-目標目錄：`mobile/`（React Native + WebView 架構，與 PWA/RENDERER 完全不同）
+目標目錄：`mobile/`（Expo Router + react-native-webview + epub.js，是兩個獨立的 JS 世界：
+RN 端負責畫面與 AsyncStorage，WebView 端獨立打包一份 epub.js reader 邏輯）。
 
-- [ ] 先探索 mobile 版對應的 Reader 相關程式碼結構（WebView 架構下的 ACD 分層方式可能與 web 版差異很大）
-- [ ] 評估此架構下的動作/計算/資料分層策略
-- [ ] 執行重構
-- [ ] 驗證方式待定（RN 無法用 `yarn build` 驗證執行期行為，需实機/模擬器測試）
+### 已完成項目
+
+**RN 端**（`mobile/app/reader/[id].tsx` 從 788 行降至 383 行）：
+- [x] 新增 `mobile/lib/reader/calculations.ts`：書籤/註記陣列運算、睡眠計時循環選項、
+  URL scheme 判斷、頁碼百分比格式化，以及從 `lib/tts.ts` 搬過來的 `splitTextByLength`/
+  `withFriendlyLabels`/`dedupeByLanguage`（純函數，逐字搬移零行為改動）
+- [x] 抽出 `mobile/hooks/reader/useReaderEngine.ts`（WebView 訊息橋接、relocated/toc/選字狀態、
+  排版設定載入存檔）、`useBookmarks.ts`、`useAnnotations.ts`、`useTTSReading.ts`（朗讀跨章節跟讀）
+- [x] `mobile/lib/library.ts` 不動（書庫列表與 Reader 共用資料層，不在本次重構範圍）
+
+**WebView 端**（`mobile/reader-web/index.ts` 從 1132 行降至 692 行）：
+- [x] 新增 `tocLookup.ts`（TOC 查找）、`progressCalculations.ts`（頁碼/百分比換算純函數）、
+  `ttsFollowCalculations.ts`（朗讀跟讀「是否該自動翻頁」純判斷）、`scriptConversion.ts`（簡繁轉換）、
+  `readerStyles.ts`（排版/深色模式 DOM 樣式注入）、`annotationUtils.ts`（標記差異比對純函數
+  `diffAnnotations` + DOM 操作）
+- [x] `index.ts` 保留 module 狀態、book/rendition 生命週期、`handleMessage` dispatcher，
+  改為呼叫上述新模組
+
+### 驗證進度
+
+- [x] `cd mobile && npx tsc --noEmit` 型別檢查通過
+- [x] `yarn build:reader` 成功打包（esbuild 不做型別檢查，只驗證語法/bundle 成功）
+- [ ] **使用者實機/模擬器測試（尚未進行，我無法在此環境驗證 RN/WebView 執行期行為）**：
+  - [ ] 翻頁（含 RTL、tap-zone 點擊）
+  - [ ] 朗讀播放/暫停/繼續/跨章節自動翻頁跟讀
+  - [ ] 選字劃線（含劃線模式切換）/ 標記顏色編輯 / 刪除 / 筆記
+  - [ ] 書籤新增/刪除/跳轉
+  - [ ] 簡繁轉換（含書本原始語言偵測 baseScript）
+  - [ ] 深色模式
+  - [ ] 字體大小/字型/行距/字距設定
+  - [ ] 睡眠計時
+  - [ ] 章節背景掃描完成後頁碼校正正確
+
+**在使用者完成上述實機測試並回報無誤前，此階段不可視為完成。**
 
 ---
 

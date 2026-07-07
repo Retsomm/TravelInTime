@@ -22,7 +22,7 @@ const SortControl = ({ count, sort, paperBg, paperBg2, borderCol, inkCol, ink3Co
       </span>
     </div>
 
-    <div className="flex items-center gap-0.5 p-0.5 rounded-lg" style={{ background: paperBg2, border: `1px solid ${borderCol}` }}>
+    <div className="no-drag flex items-center gap-0.5 p-0.5 rounded-lg" style={{ background: paperBg2, border: `1px solid ${borderCol}` }}>
       {(['recent', 'title', 'progress'] as SortKey[]).map((key) => (
         <button
           key={key}
