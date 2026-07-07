@@ -45,7 +45,6 @@ const useTTS = () => {
 
   // iOS keepalive timer ref
   const keepaliveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const progressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => { rateRef.current = rate }, [rate])
   useEffect(() => { selectedVoiceRef.current = selectedVoice }, [selectedVoice])
@@ -89,19 +88,6 @@ const useTTS = () => {
       }
     }
     onBoundaryRef.current?.(safePos, source)
-  }
-
-  const stopProgressTimer = () => {
-    if (progressTimerRef.current !== null) {
-      clearInterval(progressTimerRef.current)
-      progressTimerRef.current = null
-    }
-  }
-
-  const startProgressTimer = () => {
-    stopProgressTimer()
-    // 朗讀高亮必須只跟隨系統 boundary。估算進度會在第一個 boundary 前先往前推，
-    // 隨後 boundary 又回到真實位置，造成高亮立即閃爍與跳到非朗讀文字。
   }
 
   useEffect(() => {
@@ -157,7 +143,6 @@ const useTTS = () => {
 
   const finishPlayback = () => {
     stopKeepalive()
-    stopProgressTimer()
     playingRef.current = false
     setPlaying(false)
     pausedRef.current = false
@@ -184,7 +169,6 @@ const useTTS = () => {
       currentUtteranceStartAtRef.current = Date.now()
       currentUtteranceLastBoundaryAtRef.current = currentUtteranceStartAtRef.current
       currentUtteranceLastBoundaryIndexRef.current = 0
-      startProgressTimer()
       pausedRef.current = false
       setPaused(false)
       console.log('[TTS] onstart', { generation, textLength: text.length, offset: textOffsetRef.current })
@@ -219,7 +203,6 @@ const useTTS = () => {
     }
     utterance.onend = () => {
       if (generationRef.current !== generation) return
-      stopProgressTimer()
       const totalChars = currentTextRef.current.length
       const utteranceEnd = textOffsetRef.current + text.length
       const boundaryEnd = textOffsetRef.current + charIndexRef.current
@@ -266,7 +249,6 @@ const useTTS = () => {
       }
 
       stopKeepalive()
-      stopProgressTimer()
       playingRef.current = false
       setPlaying(false)
       pausedRef.current = false
@@ -300,7 +282,6 @@ const useTTS = () => {
     console.log('[TTS] stop() 被呼叫', { generation: generationRef.current })
     generationRef.current++ // 令所有舊 callback 失效
     stopKeepalive()
-    stopProgressTimer()
     window.speechSynthesis.cancel()
     utteranceRef.current = null
     playingRef.current = false
@@ -330,7 +311,6 @@ const useTTS = () => {
     })
     generationRef.current++ // 使用者暫停後，舊 utterance 的 onend/onerror/recovery 不可再恢復播放
     stopKeepalive()
-    stopProgressTimer()
     window.speechSynthesis.cancel()
     utteranceRef.current = null
     textOffsetRef.current = absolutePos

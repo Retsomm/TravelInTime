@@ -89,9 +89,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
   const {
     popup, setPopup,
     editPopup, setEditPopup,
-    pendingAnnotationCfiRef,
     addEpubAnnotation,
-    removePendingAnnotation,
     handleHighlight,
     handleSearchSelectedText,
     handleCopySelectedText,
@@ -117,7 +115,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     playing, ttsPaused, speak, pause, resume, stop, resetTTS, ttsActiveRef,
     pageInfo, setPageInfo,
     chapterPagesRef, currentChapterPageRef, bookBufferRef, scanAllChapterPages, triggerScan, cancelScan, resetScanState,
-    setPopup, setEditPopup, pendingAnnotationCfiRef, addEpubAnnotation, removePendingAnnotation,
+    setPopup, setEditPopup, addEpubAnnotation,
     loadForBook, clearAnnotations, resetBookmarks,
   })
 

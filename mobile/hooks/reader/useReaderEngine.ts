@@ -194,18 +194,18 @@ export const useReaderEngine = (id: string | undefined, darkMode: boolean, optio
         return;
       }
       if (msg.type === 'selectionCleared') {
-        console.log('[reader] selectionCleared 收到');
+        if (__DEV__) console.log('[reader] selectionCleared 收到');
         setSelection(null);
         return;
       }
       if (msg.type === 'annotationTapped') {
-        console.log('[reader] annotationTapped 收到', msg.id);
+        if (__DEV__) console.log('[reader] annotationTapped 收到', msg.id);
         setSelection(null);
         setEditingAnnotationId(msg.id);
         return;
       }
       if (msg.type === 'debug') {
-        console.log('[reader-web debug]', msg.message);
+        if (__DEV__) console.log('[reader-web debug]', msg.message);
         return;
       }
       if (msg.type === 'bookLanguageDetected') {

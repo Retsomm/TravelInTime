@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useState } from 'react'
 import type { Rendition } from 'epubjs'
 import { useAnnotationStore } from '@/store/useAnnotationStore'
 import { copyTextToClipboard } from '@/components/Reader/annotationUtils'
@@ -15,7 +15,6 @@ export const useAnnotationPopups = (params: {
   const { renditionRef, viewerRef, lastIframeClickRef, getChapterTitle } = params
   const [popup, setPopup] = useState<PopupState>(null)
   const [editPopup, setEditPopup] = useState<EditPopupState>(null)
-  const pendingAnnotationCfiRef = useRef<string | null>(null)
   const addAnnotation = useAnnotationStore((s) => s.addAnnotation)
   const updateColor = useAnnotationStore((s) => s.updateColor)
   const removeAnnotation = useAnnotationStore((s) => s.removeAnnotation)
@@ -68,12 +67,6 @@ export const useAnnotationPopups = (params: {
       } catch { /* rendition 可能已被銷毀，忽略 */ }
     }, 300)
   }, [lastIframeClickRef])
-
-  const removePendingAnnotation = useCallback((rendition: Rendition) => {
-    if (!pendingAnnotationCfiRef.current) return
-    try { rendition.annotations.remove(pendingAnnotationCfiRef.current, 'underline') } catch {}
-    pendingAnnotationCfiRef.current = null
-  }, [])
 
   const handleHighlight = (color: string) => {
     if (!popup) return
@@ -145,9 +138,7 @@ export const useAnnotationPopups = (params: {
   return {
     popup, setPopup,
     editPopup, setEditPopup,
-    pendingAnnotationCfiRef,
     addEpubAnnotation,
-    removePendingAnnotation,
     handleHighlight,
     handleSearchSelectedText,
     handleCopySelectedText,

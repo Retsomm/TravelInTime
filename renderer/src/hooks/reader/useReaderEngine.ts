@@ -72,9 +72,7 @@ export const useReaderEngine = (params: {
 
   setPopup: (v: PopupState) => void
   setEditPopup: (v: EditPopupState) => void
-  pendingAnnotationCfiRef: { current: string | null }
   addEpubAnnotation: (rendition: Rendition, ann: { cfi: string; color: string; id: string }) => void
-  removePendingAnnotation: (rendition: Rendition) => void
 
   pageInfo: PageInfo | null
   setPageInfo: (updater: PageInfo | null | ((prev: PageInfo | null) => PageInfo | null)) => void
@@ -91,7 +89,7 @@ export const useReaderEngine = (params: {
     fontSizeRef, fontFamilyRef, lineHeightRef, letterSpacingRef,
     playing, ttsPaused, speak, pause, resume, stop, resetTTS, ttsActiveRef,
     chapterPagesRef, currentChapterPageRef, bookBufferRef, scanAllChapterPages, triggerScan, cancelScan, resetScanState,
-    setPopup, setEditPopup, pendingAnnotationCfiRef, addEpubAnnotation, removePendingAnnotation,
+    setPopup, setEditPopup, addEpubAnnotation,
     pageInfo, setPageInfo,
     loadForBook, clearAnnotations, resetBookmarks,
   } = params
@@ -276,7 +274,6 @@ export const useReaderEngine = (params: {
           })
           // mousedown 關閉現有 popup
           doc.addEventListener('mousedown', () => {
-            if (renditionRef.current) removePendingAnnotation(renditionRef.current)
             noteUserInteraction()
             setPopup(null)
             setEditPopup(null)
@@ -328,11 +325,6 @@ export const useReaderEngine = (params: {
         })
 
         rendition.on('relocated', (loc: unknown) => {
-          // 頁面跳轉時立即清除暫時高亮，防止舊 CFI 在新章節 inject 時污染 annotation pane
-          if (pendingAnnotationCfiRef.current && renditionRef.current) {
-            removePendingAnnotation(renditionRef.current)
-            setPopup(null)
-          }
           const l = loc as AnyLoc
           setCurrentHref((l?.start?.href ?? '').split('#')[0])
           if (l?.start?.cfi) {
@@ -1293,7 +1285,6 @@ export const useReaderEngine = (params: {
   }
 
   const handleTTSPlay = () => {
-    if (renditionRef.current) removePendingAnnotation(renditionRef.current)
     setPopup(null)
     ttsManualNavigationUntilRef.current = 0
     cancelScan()
