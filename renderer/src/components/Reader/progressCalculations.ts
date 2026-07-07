@@ -1,5 +1,6 @@
 export const computeChapterAverage = (known: Map<number, number>): number => {
   const knownValues = [...known.values()]
+  if (knownValues.length === 0) return 0
   return knownValues.reduce((a, b) => a + b, 0) / knownValues.length
 }
 

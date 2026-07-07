@@ -13,15 +13,19 @@ export const useBookmarks = (bookId: string) => {
   const isBookmarked = (cfi: string) => bookmarks.some((b) => b.cfi === cfi)
 
   const toggle = (cfi: string, label: string) => {
-    const next = toggleBookmark(bookmarks, cfi, label, crypto.randomUUID(), Date.now())
-    saveBookmarks(bookId, next)
-    setBookmarks(next)
+    setBookmarks((prev) => {
+      const next = toggleBookmark(prev, cfi, label, crypto.randomUUID(), Date.now())
+      saveBookmarks(bookId, next)
+      return next
+    })
   }
 
   const remove = (id: string) => {
-    const next = removeBookmarkById(bookmarks, id)
-    saveBookmarks(bookId, next)
-    setBookmarks(next)
+    setBookmarks((prev) => {
+      const next = removeBookmarkById(prev, id)
+      saveBookmarks(bookId, next)
+      return next
+    })
   }
 
   const reset = () => {

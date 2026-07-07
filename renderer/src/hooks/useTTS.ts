@@ -13,7 +13,7 @@ const MAX_UTTERANCE_LENGTH = 3000
 const DEFAULT_CHARS_PER_SECOND = 6.2
 const DEBUG_TTS_PROGRESS = false
 
-export type TTSProgressSource = 'boundary' | 'estimate'
+export type TTSProgressSource = 'boundary'
 
 const useTTS = () => {
   const [playing, setPlaying] = useState(false)
@@ -98,7 +98,7 @@ const useTTS = () => {
     }
   }
 
-  const startProgressTimer = (_textLength: number) => {
+  const startProgressTimer = () => {
     stopProgressTimer()
     // 朗讀高亮必須只跟隨系統 boundary。估算進度會在第一個 boundary 前先往前推，
     // 隨後 boundary 又回到真實位置，造成高亮立即閃爍與跳到非朗讀文字。
@@ -184,7 +184,7 @@ const useTTS = () => {
       currentUtteranceStartAtRef.current = Date.now()
       currentUtteranceLastBoundaryAtRef.current = currentUtteranceStartAtRef.current
       currentUtteranceLastBoundaryIndexRef.current = 0
-      startProgressTimer(text.length)
+      startProgressTimer()
       pausedRef.current = false
       setPaused(false)
       console.log('[TTS] onstart', { generation, textLength: text.length, offset: textOffsetRef.current })

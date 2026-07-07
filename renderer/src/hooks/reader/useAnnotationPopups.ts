@@ -16,7 +16,9 @@ export const useAnnotationPopups = (params: {
   const [popup, setPopup] = useState<PopupState>(null)
   const [editPopup, setEditPopup] = useState<EditPopupState>(null)
   const pendingAnnotationCfiRef = useRef<string | null>(null)
-  const { addAnnotation, updateColor, removeAnnotation } = useAnnotationStore()
+  const addAnnotation = useAnnotationStore((s) => s.addAnnotation)
+  const updateColor = useAnnotationStore((s) => s.updateColor)
+  const removeAnnotation = useAnnotationStore((s) => s.removeAnnotation)
 
   // 建立 annotation SVG 標記的 helper（使用 epub.js 內建 annotations，不修改 DOM 文字節點）
   const addEpubAnnotation = useCallback((
@@ -54,27 +56,18 @@ export const useAnnotationPopups = (params: {
     } catch { /* ignore */ }
     // hooks.render 比 contents 就緒早，可能 inject 失敗；延遲以 clear+inject 補渲染
     setTimeout(() => {
-      if (!document.querySelector(`g.ann-${ann.id} line`)) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const annApi = rendition.annotations as any
-        rendition.views().forEach((view: unknown) => {
-          annApi.clear(view)
-          annApi.inject(view)
-        })
-      }
+      try {
+        if (!document.querySelector(`g.ann-${ann.id} line`)) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const annApi = rendition.annotations as any
+          rendition.views().forEach((view: unknown) => {
+            annApi.clear(view)
+            annApi.inject(view)
+          })
+        }
+      } catch { /* rendition 可能已被銷毀，忽略 */ }
     }, 300)
   }, [lastIframeClickRef])
-
-  const addPendingAnnotation = useCallback((rendition: Rendition, cfi: string) => {
-    if (pendingAnnotationCfiRef.current) {
-      try { rendition.annotations.remove(pendingAnnotationCfiRef.current, 'underline') } catch {}
-    }
-    pendingAnnotationCfiRef.current = cfi
-    try {
-      rendition.annotations.add('underline', cfi, {}, undefined, 'tit-pending',
-        { stroke: '#6366f1', 'stroke-opacity': '0.8', 'stroke-width': '2.5', fill: 'none' })
-    } catch {}
-  }, [])
 
   const removePendingAnnotation = useCallback((rendition: Rendition) => {
     if (!pendingAnnotationCfiRef.current) return
@@ -154,7 +147,6 @@ export const useAnnotationPopups = (params: {
     editPopup, setEditPopup,
     pendingAnnotationCfiRef,
     addEpubAnnotation,
-    addPendingAnnotation,
     removePendingAnnotation,
     handleHighlight,
     handleSearchSelectedText,

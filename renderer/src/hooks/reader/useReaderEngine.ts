@@ -537,6 +537,10 @@ export const useReaderEngine = (params: {
       setChapterRemaining(null)
       setAtStart(false)
       setAtEnd(false)
+      if (sleepIntervalRef.current !== null) {
+        clearInterval(sleepIntervalRef.current)
+        sleepIntervalRef.current = null
+      }
       stopRef.current()
       unsubAnnotations() // 先 unsub，再 clearAll，避免儲存空陣列覆蓋 localStorage
       clearAnnotations()
@@ -1016,7 +1020,6 @@ export const useReaderEngine = (params: {
       pageTurnOffset,
       continuousPage,
       currentPage,
-      source,
       // 主要觸發：TTS 位置的文字已超出視窗範圍（epub.js column layout 下一頁在視窗右側）
       // 注意：不能用 !hasUsableRect，因為欄外文字仍有合法 clientRect，只是 outsidePage
       outsidePage: geometry?.outsidePage ?? false,

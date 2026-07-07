@@ -1,5 +1,3 @@
-import type { TTSProgressSource } from '@/hooks/useTTS'
-
 export const computeContinuousPage = (absoluteOffset: number, textLength: number, totalPages: number): number =>
   absoluteOffset / textLength * totalPages + 1
 
@@ -16,7 +14,6 @@ export type ShouldAdvanceParams = {
   pageTurnOffset: number | null
   continuousPage: number
   currentPage: number
-  source: TTSProgressSource
   outsidePage: boolean
   pageEntryGuard: number
 }
@@ -30,7 +27,7 @@ export type ShouldAdvanceResult = {
 
 // 完整搬移自 Reader.tsx 舊版 followTTSRange 的翻頁判斷區塊，邏輯不變。
 export const shouldAdvanceTTSPage = (params: ShouldAdvanceParams): ShouldAdvanceResult => {
-  const { absoluteOffset, pageStartOffset, pageEndOffset, pageTurnOffset, continuousPage, currentPage, source, outsidePage, pageEntryGuard } = params
+  const { absoluteOffset, pageStartOffset, pageEndOffset, pageTurnOffset, continuousPage, currentPage, outsidePage, pageEntryGuard } = params
   const distanceToPageEnd = pageTurnOffset === null ? null : pageTurnOffset - absoluteOffset
   const beforeCurrentPageGuard = pageStartOffset !== null && absoluteOffset < pageStartOffset - 2
   const insideNewPageGuard =
@@ -42,8 +39,7 @@ export const shouldAdvanceTTSPage = (params: ShouldAdvanceParams): ShouldAdvance
     !insideNewPageGuard &&
     pageEndOffset === null && (
       outsidePage ||
-      (source === 'boundary' && continuousPage >= currentPage + 1.05) ||
-      (continuousPage >= currentPage + 1.12)
+      continuousPage >= currentPage + 1.05
     )
   const measuredPageEndReached =
     !beforeCurrentPageGuard &&
