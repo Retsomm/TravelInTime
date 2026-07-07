@@ -61,7 +61,7 @@ const SettingsPanel = ({
         <div style={{ fontFamily: SERIF, fontSize: 17, fontWeight: 500, letterSpacing: '0.01em', color: inkCol }}>排版與語音</div>
       </div>
 
-      <div style={{ flex: 1, overflowY: 'auto', padding: 20, display: 'flex', flexDirection: 'column', gap: 24 }}>
+      <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, padding: 20, display: 'flex', flexDirection: 'column', gap: 24 }}>
 
         {/* ── 字體 ── */}
         <section>
