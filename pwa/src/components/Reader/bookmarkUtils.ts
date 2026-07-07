@@ -6,11 +6,11 @@ export const sortBookmarksByAddedAt = (bookmarks: Bookmark[]): Bookmark[] =>
 export const removeBookmarkById = (bookmarks: Bookmark[], id: string): Bookmark[] =>
   bookmarks.filter((b) => b.id !== id)
 
-export const toggleBookmark = (bookmarks: Bookmark[], cfi: string, label: string): Bookmark[] => {
+export const toggleBookmark = (bookmarks: Bookmark[], cfi: string, label: string, id: string, addedAt: number): Bookmark[] => {
   if (bookmarks.some((b) => b.cfi === cfi)) {
     return bookmarks.filter((b) => b.cfi !== cfi)
   }
-  return [...bookmarks, { id: crypto.randomUUID(), cfi, label, addedAt: Date.now() }]
+  return [...bookmarks, { id, cfi, label, addedAt }]
 }
 
 export const formatBookmarkDate = (addedAt: number): string =>

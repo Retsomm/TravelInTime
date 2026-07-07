@@ -17,6 +17,8 @@ import { computeAccurateTotal, computeChapterAverage, computeGlobalPage, clampPr
 import { resolveSpineTarget } from '@/components/Reader/tocLookup'
 import { computeApproxOffsetFromPercentage, computeContinuousPage, computePageEntryGuard, computePageTurnOffset, locateApproxOffsetByFuzzyMatch, shouldAdvanceTTSPage, snapOffsetToWordStart } from '@/components/Reader/ttsFollowCalculations'
 
+const DEBUG_READER_LOG = false
+
 type PageInfo = { page: number; total: number }
 type PopupState = { left: number; top: number; cfi: string; text: string } | null
 type EditPopupState = { left: number; top: number; annotationId: string } | null
@@ -170,13 +172,13 @@ export const useReaderEngine = (params: {
     const knownChapters = chapterPagesRef.current.size
     if (knownChapters < spineTotal) {
       // 掃描尚未完成，估算不可靠，跳過存入避免覆蓋 Library 正確進度
-      console.log('[Progress] 跳過存入（掃描中）', { knownChapters, spineTotal, estimatedPct: `${Math.round(pageInfo.page / pageInfo.total * 100)}%` })
+      if (DEBUG_READER_LOG) console.log('[Progress] 跳過存入（掃描中）', { knownChapters, spineTotal, estimatedPct: `${Math.round(pageInfo.page / pageInfo.total * 100)}%` })
       return
     }
     const rawRatio = pageInfo.page / pageInfo.total
     // 朗讀播放中，視覺頁碼可能超前於音訊，避免提早存入 100%
     const ratio = clampProgressRatio(rawRatio, ttsActiveRef.current)
-    console.log('[Progress] 存入 Library', {
+    if (DEBUG_READER_LOG) console.log('[Progress] 存入 Library', {
       page: pageInfo.page,
       total: pageInfo.total,
       pct: `${Math.round(rawRatio * 100)}%`,
@@ -208,10 +210,10 @@ export const useReaderEngine = (params: {
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'hidden') {
-        console.log('[Reader] 頁面進入背景，取消待處理的異步操作')
+        if (DEBUG_READER_LOG) console.log('[Reader] 頁面進入背景，取消待處理的異步操作')
         loadingAbortRef.current.aborted = true
       } else {
-        console.log('[Reader] 頁面回到前台，重置操作取消標誌')
+        if (DEBUG_READER_LOG) console.log('[Reader] 頁面回到前台，重置操作取消標誌')
         loadingAbortRef.current.aborted = false
       }
     }
@@ -261,7 +263,10 @@ export const useReaderEngine = (params: {
     })
 
     fetch(bookPath)
-      .then((res) => res.arrayBuffer())
+      .then((res) => {
+        if (!res.ok) throw new Error(`載入書本檔案失敗: ${res.status} ${res.statusText}`)
+        return res.arrayBuffer()
+      })
       .then((buffer) => {
         if (destroyed) return
 
@@ -499,7 +504,7 @@ export const useReaderEngine = (params: {
             const known = chapterPagesRef.current
             const avg = computeChapterAverage(known)
             const page = computeGlobalPage(spineIdx, d.page, known, avg)
-            console.log('[Progress] relocated 頁碼計算', {
+            if (DEBUG_READER_LOG) console.log('[Progress] relocated 頁碼計算', {
               spineIdx,
               spineTotal,
               chapterPage: d.page,
@@ -754,7 +759,7 @@ export const useReaderEngine = (params: {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const curHeight = (rendition as any).settings?.height
       if (Math.abs(curWidth - newWidth) > 2 || Math.abs(curHeight - newHeight) > 2) {
-        console.log('[Reader] activePanel 變更，重設 rendition 尺寸', { curWidth, curHeight, newWidth, newHeight })
+        if (DEBUG_READER_LOG) console.log('[Reader] activePanel 變更，重設 rendition 尺寸', { curWidth, curHeight, newWidth, newHeight })
         try { rendition.resize(newWidth, newHeight) } catch { /* ignore */ }
         triggerScan()
       }

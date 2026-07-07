@@ -16,8 +16,6 @@ export const useAnnotationPopups = (params: {
   const [popup, setPopup] = useState<PopupState>(null)
   const [editPopup, setEditPopup] = useState<EditPopupState>(null)
   const pendingAnnotationCfiRef = useRef<string | null>(null)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const addEpubAnnotationRef = useRef<((r: any, ann: { cfi: string; color: string; id: string }) => void) | null>(null)
   const { addAnnotation, updateColor, removeAnnotation } = useAnnotationStore()
 
   // 建立 annotation SVG 標記的 helper（使用 epub.js 內建 annotations，不修改 DOM 文字節點）
@@ -26,7 +24,6 @@ export const useAnnotationPopups = (params: {
     ann: { cfi: string; color: string; id: string }
   ) => {
     const annotationId = ann.id // closure 確保 id 可用，不依賴 callback 參數
-    console.log('[Ann:add] annotations.add 呼叫 id=', ann.id, 'cfi=', ann.cfi.substring(0, 60))
     try {
       rendition.annotations.add(
         'underline',
@@ -58,9 +55,7 @@ export const useAnnotationPopups = (params: {
         `ann-${ann.id}`,
         { stroke: ann.color, 'stroke-opacity': '1', 'stroke-width': '1.5', fill: 'none' }
       )
-    } catch (e) {
-      console.error('[Ann:add] annotations.add 拋出例外:', e)
-    }
+    } catch { /* ignore */ }
     // hooks.render 比 contents 就緒早，可能 inject 失敗；延遲以 clear+inject 補渲染
     setTimeout(() => {
       if (!document.querySelector(`g.ann-${ann.id} line`)) {
@@ -73,7 +68,6 @@ export const useAnnotationPopups = (params: {
       }
     }, 300)
   }, [lastIframeClickRef])
-  addEpubAnnotationRef.current = addEpubAnnotation
 
   const addPendingAnnotation = useCallback((rendition: Rendition, cfi: string) => {
     if (pendingAnnotationCfiRef.current) {
@@ -100,8 +94,7 @@ export const useAnnotationPopups = (params: {
     if (renditionRef.current) removePendingAnnotation(renditionRef.current)
 
     const ann = { cfi: popup.cfi, text: popup.text, color, chapter: getChapterTitle() }
-    addAnnotation(ann)
-    const id = useAnnotationStore.getState().annotations.at(-1)?.id ?? crypto.randomUUID()
+    const id = addAnnotation(ann)
 
     if (renditionRef.current) {
       addEpubAnnotation(renditionRef.current, { cfi: popup.cfi, color, id })
@@ -137,7 +130,7 @@ export const useAnnotationPopups = (params: {
   const handleChangeColor = (id: string, color: string) => {
     const ann = useAnnotationStore.getState().annotations.find((a) => a.id === id)
     if (ann && renditionRef.current) {
-      renditionRef.current.annotations.remove(ann.cfi, 'underline')
+      try { renditionRef.current.annotations.remove(ann.cfi, 'underline') } catch { /* ignore */ }
       addEpubAnnotation(renditionRef.current, { cfi: ann.cfi, color, id })
     }
     updateColor(id, color)
@@ -146,7 +139,7 @@ export const useAnnotationPopups = (params: {
   const handleDeleteMark = (id: string) => {
     const ann = useAnnotationStore.getState().annotations.find((a) => a.id === id)
     if (ann) {
-      renditionRef.current?.annotations.remove(ann.cfi, 'underline')
+      try { renditionRef.current?.annotations.remove(ann.cfi, 'underline') } catch { /* ignore */ }
     }
     removeAnnotation(id)
     setEditPopup(null)
@@ -167,7 +160,6 @@ export const useAnnotationPopups = (params: {
     popup, setPopup,
     editPopup, setEditPopup,
     pendingAnnotationCfiRef,
-    addEpubAnnotationRef,
     addEpubAnnotation,
     addPendingAnnotation,
     removePendingAnnotation,

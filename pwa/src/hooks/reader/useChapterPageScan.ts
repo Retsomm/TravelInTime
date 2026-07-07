@@ -77,58 +77,43 @@ export const useChapterPageScan = (params: {
     })
 
     const spineTotal = spineItems.length
+    let completedNormally = true
     try {
       for (const item of spineItems) {
-        if (token.aborted || ttsActiveRef.current) break
+        if (token.aborted || ttsActiveRef.current) { completedNormally = false; break }
         const href = item.href as string | undefined
         if (!href) continue
         try {
           await hiddenRendition.display(href)
-          if (token.aborted || ttsActiveRef.current) break
+          if (token.aborted || ttsActiveRef.current) { completedNormally = false; break }
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const loc = (hiddenRendition as any).currentLocation?.()
           const d = loc?.start?.displayed as { page: number; total: number } | undefined
           const idx = item.index as number | undefined
           if (d && idx !== undefined) {
             chapterPagesRef.current = new Map(chapterPagesRef.current).set(idx, d.total)
-            // 掃描全部完成才更新 total，避免 avg 隨掃描進度改變造成總頁數持續跳動
-            const scannedCount = chapterPagesRef.current.size
-            if (scannedCount === spineTotal) {
-              const known = chapterPagesRef.current
-              const avg = computeChapterAverage(known)
-              const accurateTotal = computeAccurateTotal(spineTotal, known, avg)
-              console.log('[Progress] 掃描完成，更新 total', {
-                spineTotal,
-                chapterPageCounts: Object.fromEntries(known),
-                accurateTotal,
-              })
-              // 直接從主渲染器讀取即時位置，避免 ref 快取和 scanner/主渲染器章節數差異問題
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const mainLoc = (renditionRef.current as any)?.currentLocation?.()
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const mainD = mainLoc?.start?.displayed as { page: number; total: number } | undefined
-              const mainSpineIdx = mainLoc?.start?.index as number | undefined
-              setPageInfo(prev => {
-                if (!prev) return prev
-                const accuratePage = (mainD && mainSpineIdx !== undefined)
-                  ? computeGlobalPage(mainSpineIdx, mainD.page, known, avg)
-                  : prev.page
-                console.log('[Progress] setPageInfo（掃描後）', {
-                  prevPage: prev.page,
-                  prevTotal: prev.total,
-                  mainSpineIdx,
-                  mainChapterPage: mainD?.page,
-                  accuratePage,
-                  accurateTotal,
-                  prevPct: `${Math.round(prev.page / prev.total * 100)}%`,
-                  newPct: `${Math.round(accuratePage / accurateTotal * 100)}%`,
-                })
-                return { page: accuratePage, total: Math.max(accurateTotal, accuratePage) }
-              })
-            }
           }
         } catch { /* 略過無法渲染的章節 */ }
         await new Promise<void>(r => setTimeout(r, 0)) // 讓 UI 有機會更新
+      }
+      // 掃描全部完成（含跳過無法渲染的章節）才更新 total，避免中途 abort 造成 avg 用不完整資料計算
+      if (completedNormally && !token.aborted) {
+        const known = chapterPagesRef.current
+        const avg = computeChapterAverage(known)
+        const accurateTotal = computeAccurateTotal(spineTotal, known, avg)
+        // 直接從主渲染器讀取即時位置，避免 ref 快取和 scanner/主渲染器章節數差異問題
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const mainLoc = (renditionRef.current as any)?.currentLocation?.()
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const mainD = mainLoc?.start?.displayed as { page: number; total: number } | undefined
+        const mainSpineIdx = mainLoc?.start?.index as number | undefined
+        setPageInfo(prev => {
+          if (!prev) return prev
+          const accuratePage = (mainD && mainSpineIdx !== undefined)
+            ? computeGlobalPage(mainSpineIdx, mainD.page, known, avg)
+            : prev.page
+          return { page: accuratePage, total: Math.max(accurateTotal, accuratePage) }
+        })
       }
     } finally {
       hiddenEl.remove()
