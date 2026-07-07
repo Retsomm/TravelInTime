@@ -16,7 +16,7 @@ const App = () => {
   if (window.location.pathname === '/private') {
     return (
       <div className={darkMode ? 'dark' : ''}>
-        <div className="min-h-screen bg-stone-50 dark:bg-gray-900 transition-colors">
+        <div className="h-dvh overflow-y-auto bg-stone-50 dark:bg-gray-900 transition-colors">
           <Privacy darkMode={darkMode} onToggleDark={() => setDarkMode(!darkMode)} />
         </div>
       </div>
@@ -69,7 +69,7 @@ const App = () => {
 
   return (
     <div className={darkMode ? 'dark' : ''}>
-      <div className="min-h-screen bg-stone-50 dark:bg-gray-900 transition-colors">
+      <div className="h-dvh overflow-hidden bg-stone-50 dark:bg-gray-900 transition-colors">
         {view === 'library' && (
           <Library
             records={records}

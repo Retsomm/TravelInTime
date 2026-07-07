@@ -67,7 +67,7 @@ const Library = ({ records, getCoverDataUrl, onAddBooks, onOpenBook, onRemoveBoo
 
   if (records.length === 0) {
     return (
-      <div className="flex flex-col min-h-screen" style={{ background: paperBg, color: inkCol }}>
+      <div className="flex flex-col h-full" style={{ background: paperBg, color: inkCol }}>
         <div className="flex items-center justify-between px-4 py-3" style={{ paddingTop: 'max(env(safe-area-inset-top), 12px)' }}>
           <div className="flex-1" />
           <button className="p-2 rounded-full transition" style={{ color: ink3Col }} onClick={onToggleDark}>
@@ -109,7 +109,7 @@ const Library = ({ records, getCoverDataUrl, onAddBooks, onOpenBook, onRemoveBoo
     <>
       {pendingRemove && <ConfirmModal bookTitle={pendingRemove.title} onConfirm={handleConfirmRemove} onCancel={handleCancelRemove} />}
 
-      <div className="flex flex-col min-h-screen" style={{ background: paperBg, color: inkCol }}>
+      <div className="flex flex-col h-full" style={{ background: paperBg, color: inkCol }}>
 
         {/* ── Header ── */}
         <div style={{ borderBottom: `1px solid ${borderCol}`, background: paperBg, paddingTop: 'env(safe-area-inset-top)' }}>
