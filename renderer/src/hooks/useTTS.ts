@@ -10,9 +10,7 @@ const IOS_KEEPALIVE_INTERVAL = 10000
 
 // 手機版朗讀文本長度上限（某些行動浏覽器限制 utterance 文字長度）
 const MAX_UTTERANCE_LENGTH = 3000
-const PROGRESS_TICK_INTERVAL = 250
 const DEFAULT_CHARS_PER_SECOND = 6.2
-const MAX_ESTIMATED_BOUNDARY_LEAD = 90
 const DEBUG_TTS_PROGRESS = false
 
 export type TTSProgressSource = 'boundary' | 'estimate'
@@ -100,19 +98,10 @@ const useTTS = () => {
     }
   }
 
-  const startProgressTimer = (textLength: number) => {
+  const startProgressTimer = (_textLength: number) => {
     stopProgressTimer()
-    progressTimerRef.current = setInterval(() => {
-      if (!playingRef.current || pausedRef.current) return
-      const now = Date.now()
-      const elapsedSeconds = Math.max(0, (now - currentUtteranceStartAtRef.current) / 1000)
-      const estimatedInUtterance = Math.floor(elapsedSeconds * estimatedCharsPerSecondRef.current)
-      const maxEstimatedIndex = currentUtteranceLastBoundaryIndexRef.current + MAX_ESTIMATED_BOUNDARY_LEAD
-      const nextCharIndex = Math.max(charIndexRef.current, Math.min(textLength, estimatedInUtterance, maxEstimatedIndex))
-      if (nextCharIndex <= charIndexRef.current) return
-      charIndexRef.current = nextCharIndex
-      emitProgress(textOffsetRef.current + nextCharIndex, 'estimate')
-    }, PROGRESS_TICK_INTERVAL)
+    // 朗讀高亮必須只跟隨系統 boundary。估算進度會在第一個 boundary 前先往前推，
+    // 隨後 boundary 又回到真實位置，造成高亮立即閃爍與跳到非朗讀文字。
   }
 
   useEffect(() => {
