@@ -162,7 +162,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
 
   return (
     <div
-      className="flex flex-col h-screen"
+      className="flex flex-col h-full"
       style={{ background: darkMode ? '#1a1816' : '#f9f7f2' }}
       onPointerDownCapture={noteUserInteraction}
       onTouchStartCapture={noteUserInteraction}
