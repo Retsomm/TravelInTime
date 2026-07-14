@@ -1,4 +1,5 @@
 # Travel in Time — 沉靜式電子書閱讀器
+<img width="1024" height="500" alt="feature-graphic-1024x500" src="https://github.com/user-attachments/assets/68c29c2f-2af5-4088-81f8-815b1df115c3" />
 
 一款以 Electron + React 打造的跨平台桌面 EPUB 閱讀器，同時提供 PWA 網頁版，可直接在瀏覽器使用並安裝至桌面。
 專注於沉靜、專注的閱讀體驗，支援語音朗讀、畫線註記、繁簡轉換，所有資料完全儲存於本機，無需帳號或網路連線。
