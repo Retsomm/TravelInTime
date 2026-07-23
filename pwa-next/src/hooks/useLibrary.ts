@@ -98,13 +98,35 @@ export const useLibrary = () => {
     const buffer = await file.arrayBuffer()
     const id = await hashFileContent(buffer)
 
-    // 同一份內容已經存在本機（例如重複匯入、或找回遺失的書本），
-    // 直接接回既有紀錄，不覆蓋既有進度/書籤/註記。
-    const alreadyExists = (await idbGet('files', id)) !== null
-    if (alreadyExists) {
+    const existingRecord = loadMeta().find((r) => r.id === id)
+    const fileExists = (await idbGet('files', id)) !== null
+
+    if (existingRecord && fileExists) {
+      // 重複匯入同一本書：資料都在，直接接回既有紀錄，不覆蓋既有進度/書籤/註記。
       touchBook(id)
-      const existing = loadMeta().find((r) => r.id === id)
-      if (existing) syncBook(id, existing.title, existing.author, existing.filename)
+      syncBook(id, existingRecord.title, existingRecord.author, existingRecord.filename)
+      return id
+    }
+
+    if (existingRecord && !fileExists) {
+      // 書本檔案遺失後的復原匯入：書庫清單裡的紀錄還在，只是 IndexedDB 裡的檔案內容不見了，
+      // 這裡只補回檔案本體，不能再走下面「新書」的路徑，否則會產生重複的書庫項目。
+      await idbPut('files', id, buffer)
+      touchBook(id)
+      syncBook(id, existingRecord.title, existingRecord.author, existingRecord.filename)
+
+      // 封面圖存在同一個 IndexedDB 資料庫的另一個 store，檔案遺失時很可能也一併消失了，
+      // 這裡重新萃取補回，避免 hasCover 是 true 但實際讀不到封面圖。
+      extractMeta(buffer, file.name).then(({ coverDataUrl }) => {
+        if (!coverDataUrl) return
+        idbPut('covers', id, coverDataUrl)
+        setRecords((prev) => {
+          const next = prev.map((r) => (r.id === id ? { ...r, hasCover: true } : r))
+          saveMeta(next)
+          return next
+        })
+      })
+
       return id
     }
 

@@ -1,9 +1,10 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useUser } from '@clerk/nextjs'
 import Library from '@/page/Library'
 import Reader from '@/page/Reader'
+import MissingBookModal from '@/components/Library/MissingBookModal'
 import { useLibrary, loadBookmarks, loadProgress } from '@/hooks/useLibrary'
 import { loadAnnotationsForBook } from '@/store/useAnnotationStore'
 import { syncBook, syncProgress, syncBookmarks, syncAnnotations } from '@/utils/cloudSync'
@@ -16,6 +17,8 @@ const App = () => {
   const [activeBookUrl, setActiveBookUrl] = useState<string | null>(null)
   const [activeBookId, setActiveBookId] = useState<string>('')
   const [darkMode, setDarkMode] = useState(true)
+  const [missingBook, setMissingBook] = useState<{ id: string; title: string } | null>(null)
+  const recoverFileInputRef = useRef<HTMLInputElement>(null)
   const { isSignedIn } = useUser()
 
   // 登入當下，把本機既有的書本/進度/書籤/註記全部背景推一次到雲端——
@@ -38,7 +41,11 @@ const App = () => {
 
   const handleOpenBook = async (id: string) => {
     const url = await getBookUrl(id)
-    if (!url) return
+    if (!url) {
+      const record = records.find((r) => r.id === id)
+      setMissingBook({ id, title: record?.title ?? '這本書' })
+      return
+    }
     touchBook(id)
     setActiveBookUrl(url)
     setActiveBookId(id)
@@ -47,6 +54,20 @@ const App = () => {
 
   const handleAddBooks = async (files: File[]) => {
     await Promise.allSettled(files.map((file) => addBook(file)))
+  }
+
+  const handleRecoverFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (recoverFileInputRef.current) recoverFileInputRef.current.value = ''
+    if (!file || !missingBook) return
+
+    const targetId = missingBook.id
+    const restoredId = await addBook(file)
+    setMissingBook(null)
+
+    // 內容 hash 相符才代表真的是同一本書，直接接著打開；
+    // 選錯檔案的話 restoredId 會是另一個 id（已被當成新書匯入），這裡不強行打開。
+    if (restoredId === targetId) handleOpenBook(restoredId)
   }
 
   const backToLibrary = () => {
@@ -108,6 +129,20 @@ const App = () => {
             onApplyLatestVersion={handleApplyLatestVersion}
           />
         )}
+        {missingBook && (
+          <MissingBookModal
+            bookTitle={missingBook.title}
+            onReimport={() => recoverFileInputRef.current?.click()}
+            onCancel={() => setMissingBook(null)}
+          />
+        )}
+        <input
+          ref={recoverFileInputRef}
+          type="file"
+          accept=".epub"
+          className="hidden"
+          onChange={handleRecoverFileChange}
+        />
       </div>
     </div>
   )
