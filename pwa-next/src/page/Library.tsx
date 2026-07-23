@@ -5,7 +5,6 @@ import { IconMoon, IconNote, IconPlus, IconRefresh, IconSearch, IconSun } from '
 import BookCard from '@/components/Library/BookCard'
 import ConfirmModal from '@/components/Library/ConfirmModal'
 import AuthStatus from '@/components/Library/AuthStatus'
-import { MONO, SERIF } from '@/components/Library/coverStyles'
 
 interface Props {
   records: BookRecord[]
@@ -65,44 +64,28 @@ const Library = ({ records, getCoverDataUrl, onAddBooks, onOpenBook, onRemoveBoo
     return r
   }, [records, query, sort])
 
-  const paperBg   = darkMode ? '#1a1816' : '#f9f7f2'
-  const paperBg2  = darkMode ? '#231f1c' : '#f1ede4'
-  const borderCol = darkMode ? '#3a3430' : '#e4ddd0'
-  const inkCol    = darkMode ? '#e8e0d4' : '#2a2420'
-  const ink3Col   = darkMode ? '#8a7f74' : '#9a8f80'
-
   if (records.length === 0) {
     return (
-      <div className="flex flex-col h-full" style={{ background: paperBg, color: inkCol }}>
-        <div className="flex items-center justify-between px-4 py-3" style={{ paddingTop: 'max(env(safe-area-inset-top), 12px)' }}>
+      <div className="flex flex-col h-full bg-paper text-ink">
+        <div className="flex items-center justify-between px-4 py-3 pt-[max(env(safe-area-inset-top),12px)]">
           <div className="flex-1" />
           <div className="flex items-center gap-1">
-            <AuthStatus inkCol={inkCol} ink3Col={ink3Col} />
-            <button className="p-2 rounded-full transition" style={{ color: ink3Col }} onClick={onToggleDark} aria-label={darkMode ? '切換為淺色主題' : '切換為深色主題'}>
+            <AuthStatus />
+            <button className={`p-2 rounded-full transition text-ink-3`} onClick={onToggleDark} aria-label={darkMode ? '切換為淺色主題' : '切換為深色主題'}>
               {darkMode ? <IconSun /> : <IconMoon />}
             </button>
           </div>
         </div>
         <div className="flex flex-col items-center justify-center flex-1 p-8 text-center">
-          <div style={{
-            width: 56, height: 56, borderRadius: 10, marginBottom: 28,
-            background: inkCol, color: paperBg,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontFamily: SERIF, fontStyle: 'italic', fontWeight: 700, fontSize: 28,
-          }}>T</div>
-          <h1 style={{ fontFamily: SERIF, fontSize: 32, fontWeight: 400, letterSpacing: '-0.01em', marginBottom: 12 }}>
+          <div className="w-14 h-14 rounded-[10px] mb-7 bg-ink text-paper flex items-center justify-center font-ui-serif italic font-bold text-[28px]">T</div>
+          <h1 className="font-ui-serif text-[32px] font-normal tracking-[-0.01em] mb-3">
             一段靜謐的閱讀旅程
           </h1>
-          <p style={{ color: ink3Col, fontSize: 14, lineHeight: 1.65, maxWidth: 340, marginBottom: 28 }}>
+          <p className={`text-ink-3 text-sm leading-[1.65] max-w-85 mb-7`}>
             匯入您的 ePub 書籍，在字裡行間緩步前行。<br />所有內容僅保存在您的裝置。
           </p>
           <button
-            className="flex items-center gap-2 transition"
-            style={{
-              height: 44, padding: '0 22px', borderRadius: 10,
-              background: inkCol, color: paperBg,
-              fontFamily: 'inherit', fontSize: 14, fontWeight: 500,
-            }}
+            className="flex items-center gap-2 transition h-11 px-5.5 rounded-[10px] bg-ink text-paper font-[inherit] text-sm font-medium"
             onClick={() => fileInputRef.current?.click()}
             disabled={loading}
           >
@@ -118,58 +101,37 @@ const Library = ({ records, getCoverDataUrl, onAddBooks, onOpenBook, onRemoveBoo
     <>
       {pendingRemove && <ConfirmModal bookTitle={pendingRemove.title} onConfirm={handleConfirmRemove} onCancel={handleCancelRemove} />}
 
-      <div className="flex flex-col h-full" style={{ background: paperBg, color: inkCol }}>
+      <div className="flex flex-col h-full bg-paper text-ink">
 
         {/* ── Header ── */}
-        <div style={{ borderBottom: `1px solid ${borderCol}`, background: paperBg, paddingTop: 'env(safe-area-inset-top)' }}>
+        <div className="border-b border-border bg-paper pt-[env(safe-area-inset-top)]">
           {/* 第一行：Logo + 標題 + 操作按鈕 */}
           <div className="flex items-center gap-2 px-4 pt-3 pb-2">
-            <div ref={logoMenuRef} style={{ position: 'relative', flexShrink: 0 }}>
+            <div ref={logoMenuRef} className="relative shrink-0">
               <button
                 onClick={() => setLogoMenuOpen((open) => !open)}
-                style={{
-                  width: 26, height: 26, borderRadius: 6,
-                  background: logoMenuOpen ? paperBg2 : inkCol,
-                  color: logoMenuOpen ? inkCol : paperBg,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontFamily: SERIF, fontStyle: 'italic', fontWeight: 700, fontSize: 14,
-                  cursor: 'pointer',
-                }}
+                className={`w-6.5 h-6.5 rounded-md flex items-center justify-center font-ui-serif italic font-bold text-sm cursor-pointer ${
+                  logoMenuOpen ? 'bg-paper-2 text-ink' : 'bg-ink text-paper'
+                }`}
                 aria-label="Travel in Time 選單"
               >
                 T
               </button>
               {logoMenuOpen && (
-                <div
-                  style={{
-                    position: 'absolute', left: 0, top: 32, zIndex: 60,
-                    width: 178, padding: 6, borderRadius: 8,
-                    background: paperBg, border: `1px solid ${borderCol}`,
-                    boxShadow: '0 14px 32px -14px rgba(0,0,0,0.45)',
-                  }}
-                >
+                <div className="absolute left-0 top-8 z-60 w-44.5 p-1.5 rounded-lg bg-paper border border-border shadow-[0_14px_32px_-14px_rgba(0,0,0,0.45)]">
                   <button
                     onClick={handleApplyLatestVersion}
                     disabled={applyingUpdate}
-                    style={{
-                      width: '100%', minHeight: 34, borderRadius: 6, padding: '8px 10px',
-                      display: 'flex', alignItems: 'center', gap: 8,
-                      color: applyingUpdate ? ink3Col : inkCol,
-                      fontFamily: 'inherit', fontSize: 13, textAlign: 'left',
-                      cursor: applyingUpdate ? 'default' : 'pointer',
-                      opacity: applyingUpdate ? 0.7 : 1,
-                    }}
+                    className={`w-full min-h-8.5 rounded-md py-2 px-2.5 flex items-center gap-2 font-[inherit] text-[13px] text-left ${
+                      applyingUpdate ? `text-ink-3 cursor-default opacity-70` : 'text-ink cursor-pointer opacity-100'
+                    }`}
                   >
                     <IconRefresh />
                     <span>{applyingUpdate ? '更新中…' : '套用最新版'}</span>
                   </button>
                   <Link
                     href="/notes"
-                    style={{
-                      width: '100%', minHeight: 34, borderRadius: 6, padding: '8px 10px',
-                      display: 'flex', alignItems: 'center', gap: 8,
-                      color: inkCol, fontFamily: 'inherit', fontSize: 13, textAlign: 'left',
-                    }}
+                    className="w-full min-h-8.5 rounded-md py-2 px-2.5 flex items-center gap-2 text-ink font-[inherit] text-[13px] text-left"
                   >
                     <IconNote />
                     <span>我的筆記</span>
@@ -177,39 +139,30 @@ const Library = ({ records, getCoverDataUrl, onAddBooks, onOpenBook, onRemoveBoo
                 </div>
               )}
             </div>
-            <span style={{ fontFamily: SERIF, fontSize: 16, fontWeight: 500, letterSpacing: '0.01em' }}>Travel in Time</span>
-            <span style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', color: ink3Col }}>Library</span>
+            <span className="font-ui-serif text-base font-medium tracking-[0.01em]">Travel in Time</span>
+            <span className={`font-ui-mono text-[10px] tracking-[0.12em] uppercase text-ink-3`}>Library</span>
 
             {/* 桌面版搜尋框（同行居中） */}
             <div className="hidden md:flex flex-1 justify-center">
-              <div className="flex items-center gap-2" style={{
-                height: 32, padding: '0 12px', borderRadius: 999,
-                background: paperBg2, border: `1px solid ${borderCol}`,
-                width: 300, maxWidth: '100%',
-              }}>
-                <span style={{ color: ink3Col, flexShrink: 0 }}><IconSearch /></span>
+              <div className="flex items-center gap-2 h-8 px-3 rounded-full bg-paper-2 border border-border w-75 max-w-full">
+                <span className={`text-ink-3 shrink-0`}><IconSearch /></span>
                 <input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="搜尋書名、作者…"
-                  style={{ flex: 1, background: 'transparent', border: 0, outline: 0, color: inkCol, fontSize: 13, fontFamily: 'inherit' }}
+                  className="flex-1 bg-transparent border-0 outline-0 text-ink text-[13px] font-[inherit]"
                 />
-                {query && <button style={{ color: ink3Col, fontSize: 11 }} onClick={() => setQuery('')} aria-label="清除搜尋">✕</button>}
+                {query && <button className={`text-ink-3 text-[11px]`} onClick={() => setQuery('')} aria-label="清除搜尋">✕</button>}
               </div>
             </div>
 
-            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
-              <AuthStatus inkCol={inkCol} ink3Col={ink3Col} />
-              <button className="p-2 rounded-full transition" style={{ color: ink3Col }} onClick={onToggleDark} title={darkMode ? '淺色' : '深色'} aria-label={darkMode ? '切換為淺色主題' : '切換為深色主題'}>
+            <div className="ml-auto flex items-center gap-2">
+              <AuthStatus />
+              <button className={`p-2 rounded-full transition text-ink-3`} onClick={onToggleDark} title={darkMode ? '淺色' : '深色'} aria-label={darkMode ? '切換為淺色主題' : '切換為深色主題'}>
                 {darkMode ? <IconSun /> : <IconMoon />}
               </button>
               <button
-                className="flex items-center gap-1.5 transition"
-                style={{
-                  height: 32, padding: '0 12px', borderRadius: 8,
-                  background: inkCol, color: paperBg,
-                  fontFamily: 'inherit', fontSize: 13, fontWeight: 500,
-                }}
+                className="flex items-center gap-1.5 transition h-8 px-3 rounded-lg bg-ink text-paper font-[inherit] text-[13px] font-medium"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={loading}
                 aria-label={loading ? '載入中' : '匯入 ePub'}
@@ -222,44 +175,35 @@ const Library = ({ records, getCoverDataUrl, onAddBooks, onOpenBook, onRemoveBoo
 
           {/* 第二行：手機版搜尋框（獨立一行） */}
           <div className="md:hidden px-4 pb-3">
-            <div className="flex items-center gap-2" style={{
-              height: 34, padding: '0 12px', borderRadius: 999,
-              background: paperBg2, border: `1px solid ${borderCol}`,
-              width: '100%',
-            }}>
-              <span style={{ color: ink3Col, flexShrink: 0 }}><IconSearch /></span>
+            <div className="flex items-center gap-2 h-8.5 px-3 rounded-full bg-paper-2 border border-border w-full">
+              <span className={`text-ink-3 shrink-0`}><IconSearch /></span>
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="搜尋書名、作者…"
-                style={{ flex: 1, background: 'transparent', border: 0, outline: 0, color: inkCol, fontSize: 13, fontFamily: 'inherit' }}
+                className="flex-1 bg-transparent border-0 outline-0 text-ink text-[13px] font-[inherit]"
               />
-              {query && <button style={{ color: ink3Col, fontSize: 11 }} onClick={() => setQuery('')}>✕</button>}
+              {query && <button className={`text-ink-3 text-[11px]`} onClick={() => setQuery('')} aria-label="清除搜尋">✕</button>}
             </div>
           </div>
         </div>
 
         {/* ── Section heading + sort ── */}
-        <div className="flex items-baseline justify-between flex-wrap gap-3" style={{ padding: '18px 20px 12px' }}>
+        <div className="flex items-baseline justify-between flex-wrap gap-3 pt-4.5 px-5 pb-3">
           <div>
-            <span style={{ fontFamily: SERIF, fontSize: 22, fontWeight: 400, letterSpacing: '-0.005em' }}>書庫</span>
-            <span style={{ fontFamily: MONO, fontSize: 11, letterSpacing: '0.08em', marginLeft: 8, color: ink3Col }}>
+            <span className="font-ui-serif text-[22px] font-normal tracking-[-0.005em]">書庫</span>
+            <span className={`font-ui-mono text-[11px] tracking-[0.08em] ml-2 text-ink-3`}>
               {String(shown.length).padStart(2, '0')} VOLUMES
             </span>
           </div>
-          <div className="flex items-center gap-0.5 p-0.5 rounded-lg" style={{ background: paperBg2, border: `1px solid ${borderCol}` }}>
+          <div className="flex items-center gap-0.5 p-0.5 rounded-lg bg-paper-2 border border-border">
             {(['recent', 'title', 'progress'] as SortKey[]).map((key) => (
               <button
                 key={key}
                 onClick={() => setSort(key)}
-                style={{
-                  height: 26, padding: '0 10px', borderRadius: 6,
-                  fontFamily: 'inherit', fontSize: 12,
-                  background: sort === key ? paperBg : 'transparent',
-                  color: sort === key ? inkCol : ink3Col,
-                  boxShadow: sort === key ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
-                  transition: 'all .15s',
-                }}
+                className={`h-6.5 px-2.5 rounded-md font-[inherit] text-xs transition-all duration-150 ${
+                  sort === key ? 'bg-paper text-ink shadow-[0_1px_2px_rgba(0,0,0,0.06)]' : `bg-transparent text-ink-3 shadow-none`
+                }`}
               >
                 {key === 'recent' ? '最近閱讀' : key === 'title' ? '書名' : '進度'}
               </button>
@@ -268,18 +212,14 @@ const Library = ({ records, getCoverDataUrl, onAddBooks, onOpenBook, onRemoveBoo
         </div>
 
         {/* ── Book grid ── */}
-        <div className="flex-1 overflow-y-auto" style={{ padding: '4px 20px 60px' }}>
+        <div className="flex-1 overflow-y-auto pt-1 px-5 pb-15">
           {shown.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-20" style={{ color: ink3Col }}>
+            <div className={`flex flex-col items-center justify-center py-20 text-ink-3`}>
               <p className="text-sm">找不到符合「{query}」的書籍</p>
               <button className="mt-3 text-xs underline" onClick={() => setQuery('')}>清除搜尋</button>
             </div>
           ) : (
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))',
-              gap: '28px 18px',
-            }}>
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(130px,1fr))] gap-x-4.5 gap-y-7">
               {shown.map((r) => (
                 <BookCard key={r.id} record={r} getCoverDataUrl={getCoverDataUrl} onOpen={onOpenBook} onRemove={handleRemoveRequest} />
               ))}

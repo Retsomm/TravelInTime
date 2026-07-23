@@ -1,6 +1,4 @@
 import { useState } from 'react'
-import { SERIF, MONO } from '@/constants/fonts'
-import { useThemeColors } from '@/hooks/useThemeColors'
 
 export interface TocItem {
   id: string
@@ -15,11 +13,6 @@ interface RowProps {
   index: number
   activeHref: string | null
   onNavigate: (href: string) => void
-  inkCol: string
-  ink2Col: string
-  ink3Col: string
-  paperBg2: string
-  accentCol: string
 }
 
 const findBestMatch = (items: TocItem[], file: string): string | null => {
@@ -33,7 +26,7 @@ const findBestMatch = (items: TocItem[], file: string): string | null => {
   return null
 }
 
-const TocRow = ({ item, depth, index, activeHref, onNavigate, inkCol, ink2Col, ink3Col, paperBg2, accentCol }: RowProps) => {
+const TocRow = ({ item, depth, index, activeHref, onNavigate }: RowProps) => {
   const [open, setOpen] = useState(true)
   const hasChildren = (item.subitems?.length ?? 0) > 0
   const isActive = item.href === activeHref
@@ -41,20 +34,15 @@ const TocRow = ({ item, depth, index, activeHref, onNavigate, inkCol, ink2Col, i
   return (
     <>
       <li
-        style={{
-          display: 'flex', alignItems: 'center', width: '100%',
-          paddingRight: 16 + depth * 12,
-          background: isActive ? paperBg2 : 'transparent',
-          color: isActive ? inkCol : depth > 0 ? ink3Col : ink2Col,
-          transition: 'background .12s',
-        }}
-        onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = paperBg2 }}
-        onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = 'transparent' }}
+        style={{ paddingRight: 16 + depth * 12 }}
+        className={`flex items-center w-full transition-colors duration-120 ${
+          isActive ? 'bg-paper-2 text-ink' : depth > 0 ? 'text-ink-3 hover:bg-paper-2' : 'text-ink-2 hover:bg-paper-2'
+        }`}
       >
         {hasChildren && (
           <button
             type="button"
-            style={{ padding: '10px 4px 10px 20px', color: ink3Col, fontSize: 10, lineHeight: 1, flexShrink: 0, cursor: 'pointer' }}
+            className="pt-2.5 pr-1 pb-2.5 pl-5 text-ink-3 text-[10px] leading-none shrink-0 cursor-pointer"
             onClick={(e) => { e.stopPropagation(); setOpen(!open) }}
             aria-label={open ? '收合' : '展開'}
           >
@@ -63,25 +51,21 @@ const TocRow = ({ item, depth, index, activeHref, onNavigate, inkCol, ink2Col, i
         )}
         <button
           type="button"
-          style={{
-            display: 'flex', alignItems: 'center', flex: 1, minWidth: 0,
-            padding: `10px 0 10px ${hasChildren ? 0 : 20}px`,
-            textAlign: 'left', background: 'transparent', color: 'inherit',
-          }}
+          className={`flex items-center flex-1 min-w-0 py-2.5 text-left bg-transparent text-inherit ${hasChildren ? 'pl-0' : 'pl-5'}`}
           onClick={() => onNavigate(item.href)}
         >
           {isActive ? (
-            <span style={{ width: 6, height: 6, borderRadius: '50%', background: accentCol, flexShrink: 0, marginRight: 12 }} />
+            <span className="w-1.5 h-1.5 rounded-full bg-accent shrink-0 mr-3" />
           ) : (
-            <span style={{ fontFamily: MONO, fontSize: 10, color: ink3Col, width: 18, textAlign: 'right', marginRight: 10, flexShrink: 0, letterSpacing: '0.04em' }}>
+            <span className="font-ui-mono text-[10px] text-ink-3 w-4.5 text-right mr-2.5 shrink-0 tracking-[0.04em]">
               {String(index + 1).padStart(2, '0')}
             </span>
           )}
-          <span style={{ flex: 1, fontFamily: SERIF, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <span className="flex-1 font-ui-serif text-sm overflow-hidden text-ellipsis whitespace-nowrap">
             {item.label}
           </span>
           {isActive && (
-            <span style={{ fontFamily: MONO, fontSize: 10, color: ink3Col, letterSpacing: '0.06em', flexShrink: 0, marginLeft: 8 }}>
+            <span className="font-ui-mono text-[10px] text-ink-3 tracking-[0.06em] shrink-0 ml-2">
               正在閱讀
             </span>
           )}
@@ -93,8 +77,6 @@ const TocRow = ({ item, depth, index, activeHref, onNavigate, inkCol, ink2Col, i
             key={sub.id || sub.href}
             item={sub} depth={depth + 1} index={si}
             activeHref={activeHref} onNavigate={onNavigate}
-            inkCol={inkCol} ink2Col={ink2Col} ink3Col={ink3Col}
-            paperBg2={paperBg2} accentCol={accentCol}
           />
         ))
       }
@@ -106,27 +88,23 @@ interface Props {
   toc: TocItem[]
   currentHref: string
   onNavigate: (href: string) => void
-  darkMode?: boolean
   embedded?: boolean
 }
 
-const ChapterPanel = ({ toc, currentHref, onNavigate, darkMode, embedded }: Props) => {
+const ChapterPanel = ({ toc, currentHref, onNavigate, embedded }: Props) => {
   const activeHref = findBestMatch(toc, currentHref)
-  const { paperBg, paperBg2, borderCol, inkCol, ink2Col, ink3Col, accentCol } = useThemeColors(darkMode)
 
   const listContent = (
-    <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
+    <div className="flex-1 overflow-y-auto min-h-0">
       {toc.length === 0 ? (
-        <p style={{ padding: 20, fontSize: 13, color: ink3Col, fontFamily: SERIF }}>此書籍無目錄資料</p>
+        <p className="p-5 text-[13px] text-ink-3 font-ui-serif">此書籍無目錄資料</p>
       ) : (
-        <ul style={{ listStyle: 'none', margin: 0, padding: '6px 0' }}>
+        <ul className="list-none m-0 py-1.5">
           {toc.map((item, i) => (
             <TocRow
               key={item.id || item.href}
               item={item} depth={0} index={i}
               activeHref={activeHref} onNavigate={onNavigate}
-              inkCol={inkCol} ink2Col={ink2Col} ink3Col={ink3Col}
-              paperBg2={paperBg2} accentCol={accentCol}
             />
           ))}
         </ul>
@@ -137,15 +115,10 @@ const ChapterPanel = ({ toc, currentHref, onNavigate, darkMode, embedded }: Prop
   if (embedded) return listContent
 
   return (
-    <div style={{
-      width: 320, flexShrink: 0, height: '100%',
-      borderLeft: `1px solid ${borderCol}`,
-      background: paperBg,
-      display: 'flex', flexDirection: 'column', overflow: 'hidden',
-    }}>
-      <div style={{ padding: '16px 20px', borderBottom: `1px solid ${borderCol}`, flexShrink: 0 }}>
-        <div style={{ fontFamily: SERIF, fontSize: 17, fontWeight: 500, letterSpacing: '0.01em', color: inkCol }}>目錄</div>
-        <div style={{ fontFamily: MONO, fontSize: 10, color: ink3Col, letterSpacing: '0.12em', textTransform: 'uppercase', marginTop: 4 }}>
+    <div className="w-80 shrink-0 h-full border-l border-border bg-paper flex flex-col overflow-hidden">
+      <div className="px-5 py-4 border-b border-border shrink-0">
+        <div className="font-ui-serif text-[17px] font-medium tracking-[0.01em] text-ink">目錄</div>
+        <div className="font-ui-mono text-[10px] text-ink-3 tracking-[0.12em] uppercase mt-1">
           {toc.length} 章節
         </div>
       </div>

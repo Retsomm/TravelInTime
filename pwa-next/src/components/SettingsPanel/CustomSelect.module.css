@@ -7,9 +7,9 @@
   padding: 6px 10px;
   border-radius: 8px;
   text-align: left;
-  background: var(--paper-bg-2);
-  border: 1px solid var(--border-col);
-  color: var(--ink-col);
+  background: var(--color-paper-2);
+  border: 1px solid var(--color-border);
+  color: var(--color-ink);
   font-family: inherit;
   cursor: pointer;
 }
@@ -23,12 +23,12 @@
 .chevron {
   flex-shrink: 0;
   margin-left: 4px;
-  color: var(--ink3-col);
+  color: var(--color-ink-3);
 }
 
 .listbox {
-  background: var(--paper-bg);
-  border: 1px solid var(--border-col);
+  background: var(--color-paper);
+  border: 1px solid var(--color-border);
   border-radius: 8px;
   box-shadow: 0 8px 24px -8px rgba(0, 0, 0, 0.2);
   overflow-y: auto;
@@ -41,15 +41,15 @@
   font-size: 13px;
   cursor: pointer;
   background: transparent;
-  color: var(--ink3-col);
+  color: var(--color-ink-3);
   font-family: inherit;
 }
 
 .option[data-selected],
 .option[data-active] {
-  background: var(--paper-bg-2);
+  background: var(--color-paper-2);
 }
 
 .option[data-selected] {
-  color: var(--ink-col);
+  color: var(--color-ink);
 }

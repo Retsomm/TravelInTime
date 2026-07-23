@@ -1,5 +1,4 @@
 import { useId } from 'react'
-import { SERIF } from '@/components/Library/coverStyles'
 import { useModalA11y } from '@/hooks/useModalA11y'
 
 interface Props {
@@ -23,7 +22,7 @@ const MissingBookModal = ({ bookTitle, onReimport, onCancel }: Props) => {
         className="bg-white dark:bg-stone-800 rounded-2xl shadow-xl p-6 w-80 max-w-full mx-4"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 id={titleId} style={{ fontFamily: SERIF }} className="text-base font-semibold text-stone-800 dark:text-stone-100 mb-2">找不到書本內容</h2>
+        <h2 id={titleId} className="font-ui-serif text-base font-semibold text-stone-800 dark:text-stone-100 mb-2">找不到書本內容</h2>
         <p className="text-sm text-stone-500 dark:text-stone-400 mb-6 leading-relaxed">
           《{bookTitle}》的檔案內容不見了，可能是瀏覽器儲存被清除。<br />
           請重新匯入同一份 epub 檔案，閱讀進度、書籤、註記都還在，不會遺失。

@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import styles from './CustomSelect.module.css'
 
 interface SelectOption { label: string; value: string }
@@ -8,17 +8,9 @@ interface CustomSelectProps {
   options: SelectOption[]
   onChange: (v: string) => void
   ariaLabel?: string
-  borderCol: string
-  inkCol: string
-  ink3Col: string
-  paperBg: string
-  paperBg2: string
 }
 
-const CustomSelect = ({
-  value, options, onChange, ariaLabel,
-  borderCol, inkCol, ink3Col, paperBg, paperBg2,
-}: CustomSelectProps) => {
+const CustomSelect = ({ value, options, onChange, ariaLabel }: CustomSelectProps) => {
   const [open, setOpen] = useState(false)
   const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({})
   const [activeIndex, setActiveIndex] = useState(-1)
@@ -84,12 +76,11 @@ const CustomSelect = ({
   }, [open])
 
   return (
-    <div style={{ position: 'relative', width: '100%' }}>
+    <div className="relative w-full">
       <button
         ref={triggerRef}
         type="button"
         className={styles.trigger}
-        style={{ '--paper-bg-2': paperBg2, '--border-col': borderCol, '--ink-col': inkCol, '--ink3-col': ink3Col } as CSSProperties}
         onClick={() => open ? setOpen(false) : openDropdown()}
         onKeyDown={handleTriggerKeyDown}
         role="combobox"
@@ -109,7 +100,7 @@ const CustomSelect = ({
           ref={listRef}
           id={listboxId}
           className={styles.listbox}
-          style={{ ...dropdownStyle, '--paper-bg': paperBg, '--paper-bg-2': paperBg2, '--border-col': borderCol, '--ink-col': inkCol, '--ink3-col': ink3Col } as CSSProperties}
+          style={dropdownStyle}
           role="listbox"
         >
           {options.map((o, i) => (

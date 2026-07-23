@@ -1,5 +1,4 @@
 import { IconMoon, IconSun } from '@/components/Library/icons'
-import { MONO, SERIF } from '@/components/Library/coverStyles'
 
 interface Props {
   darkMode: boolean
@@ -99,22 +98,12 @@ const SECTIONS: { title: string; paragraphs: string[] }[] = [
 ]
 
 const Privacy = ({ darkMode, onToggleDark }: Props) => {
-  const paperBg   = darkMode ? '#1a1816' : '#f9f7f2'
-  const paperBg2  = darkMode ? '#231f1c' : '#f1ede4'
-  const borderCol = darkMode ? '#3a3430' : '#e4ddd0'
-  const inkCol    = darkMode ? '#e8e0d4' : '#2a2420'
-  const ink3Col   = darkMode ? '#8a7f74' : '#5a5044'
-
   return (
-    <div className="flex flex-col min-h-screen" style={{ background: paperBg, color: inkCol }}>
-      <div
-        className="flex items-center gap-2 px-4 py-3"
-        style={{ borderBottom: `1px solid ${borderCol}`, paddingTop: 'max(env(safe-area-inset-top), 12px)' }}
-      >
-        <span style={{ fontFamily: SERIF, fontSize: 16, fontWeight: 500 }}>隱私權政策</span>
+    <div className="flex flex-col min-h-screen bg-paper text-ink">
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-border pt-[max(env(safe-area-inset-top),12px)]">
+        <span className="font-ui-serif text-base font-medium">隱私權政策</span>
         <button
-          className="p-2 rounded-full transition ml-auto focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
-          style={{ color: ink3Col }}
+          className="p-2 rounded-full transition ml-auto focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 text-ink-3"
           onClick={onToggleDark}
           aria-label={darkMode ? '切換為淺色主題' : '切換為深色主題'}
           aria-pressed={darkMode}
@@ -124,27 +113,21 @@ const Privacy = ({ darkMode, onToggleDark }: Props) => {
       </div>
 
       <div className="flex-1 flex items-center justify-center overflow-y-auto px-4 py-10">
-        <div
-          style={{
-            width: '100%', maxWidth: 640,
-            background: paperBg2, border: `1px solid ${borderCol}`,
-            borderRadius: 12, padding: '32px 28px',
-          }}
-        >
-          <h1 style={{ fontFamily: SERIF, fontSize: 26, fontWeight: 400, marginBottom: 6, textAlign: 'center' }}>
+        <div className="w-full max-w-160 bg-paper-2 border border-border rounded-xl py-8 px-7">
+          <h1 className="font-ui-serif text-[26px] font-normal mb-1.5 text-center">
             隱私權政策
           </h1>
-          <p style={{ fontFamily: MONO, fontSize: 11, letterSpacing: '0.08em', color: ink3Col, textAlign: 'center', marginBottom: 28 }}>
+          <p className={`font-ui-mono text-[11px] tracking-[0.08em] text-center mb-7 text-ink-3`}>
             TRAVEL IN TIME · 生效日期 2026-07-07
           </p>
 
           {SECTIONS.map((section) => (
-            <div key={section.title} style={{ marginBottom: 22 }}>
-              <h2 style={{ fontFamily: SERIF, fontSize: 16, fontWeight: 500, marginBottom: 8 }}>
+            <div key={section.title} className="mb-5.5">
+              <h2 className="font-ui-serif text-base font-medium mb-2">
                 {section.title}
               </h2>
               {section.paragraphs.map((p, i) => (
-                <p key={i} style={{ fontSize: 13, lineHeight: 1.75, color: inkCol, marginBottom: 8 }}>
+                <p key={i} className="text-[13px] leading-[1.75] text-ink mb-2">
                   {p}
                 </p>
               ))}

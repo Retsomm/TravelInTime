@@ -1,5 +1,4 @@
 import { useId } from 'react'
-import { SERIF } from '@/components/Library/coverStyles'
 import { useModalA11y } from '@/hooks/useModalA11y'
 
 const ConfirmModal = ({ bookTitle, onConfirm, onCancel }: { bookTitle: string; onConfirm: () => void; onCancel: () => void }) => {
@@ -15,7 +14,7 @@ const ConfirmModal = ({ bookTitle, onConfirm, onCancel }: { bookTitle: string; o
         className="bg-white dark:bg-stone-800 rounded-2xl shadow-xl p-6 w-80 max-w-full mx-4"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 id={titleId} style={{ fontFamily: SERIF }} className="text-base font-semibold text-stone-800 dark:text-stone-100 mb-2">確認刪除書籍</h2>
+        <h2 id={titleId} className="font-ui-serif text-base font-semibold text-stone-800 dark:text-stone-100 mb-2">確認刪除書籍</h2>
         <p className="text-sm text-stone-500 dark:text-stone-400 mb-6 leading-relaxed">
           確定要刪除《{bookTitle}》？<br />書籍與所有相關註解將一併移除，無法復原。
         </p>

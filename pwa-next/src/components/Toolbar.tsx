@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
 import { SERIF, MONO } from '@/constants/fonts'
-import { useThemeColors } from '@/hooks/useThemeColors'
 
 const IconRefresh = () => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -145,11 +144,6 @@ const Toolbar = ({
   const [applyingUpdate, setApplyingUpdate] = useState(false)
   const logoMenuRef = useRef<HTMLDivElement>(null)
 
-  const { paperBg, borderCol, inkCol, ink3Col } = useThemeColors(darkMode)
-  const hoverBg   = darkMode ? '#231f1c' : '#f1ede4'
-  const accentBg  = darkMode ? 'rgba(180,100,60,0.18)' : 'rgba(180,100,60,0.10)'
-  const accentCol = 'oklch(0.62 0.14 40)'
-
   const pct = pageInfo && pageInfo.total > 0
     ? Math.round(pageInfo.page / pageInfo.total * 100)
     : null
@@ -179,19 +173,12 @@ const Toolbar = ({
     onClick: () => void,
     children: React.ReactNode,
     ariaLabel: string,
-    extraStyle?: React.CSSProperties,
+    extraClassName?: string,
   ) => (
     <button
-      style={{
-        width: 34, height: 34, borderRadius: 8, cursor: 'pointer', transition: 'background .12s',
-        color: isActive ? accentCol : ink3Col,
-        background: isActive ? accentBg : 'transparent',
-        display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-        touchAction: 'manipulation',
-        ...extraStyle,
-      }}
-      onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = hoverBg }}
-      onMouseLeave={(e) => { e.currentTarget.style.background = isActive ? accentBg : 'transparent' }}
+      className={`w-8.5 h-8.5 rounded-lg cursor-pointer transition-colors duration-120 flex items-center justify-center shrink-0 touch-manipulation ${
+        isActive ? 'text-accent bg-[rgba(180,100,60,0.10)] dark:bg-[rgba(180,100,60,0.18)]' : `text-ink-3 bg-transparent hover:bg-paper-2 ${extraClassName ?? ''}`
+      }`}
       onTouchEnd={(e) => { e.preventDefault(); onClick() }}
       onClick={onClick}
       aria-label={ariaLabel}
@@ -202,61 +189,36 @@ const Toolbar = ({
   )
 
   return (
-    <div style={{
-      background: paperBg, flexShrink: 0,
-      borderBottom: `1px solid ${borderCol}`,
-      paddingTop: 'env(safe-area-inset-top)',
-    }}>
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 2, padding: '0 10px',
-      height: 56,
-    }}>
+    <div className="bg-paper shrink-0 border-b border-border pt-[env(safe-area-inset-top)]">
+    <div className="flex items-center gap-0.5 px-2.5 h-14">
       {/* 左：返回 + 書名作者（固定寬度區塊） */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
-        {btn(false, onBack, <IconBack />, '返回書庫', { color: inkCol })}
+      <div className="flex items-center gap-1 shrink-0">
+        {btn(false, onBack, <IconBack />, '返回書庫', 'text-ink')}
         {/* T logo + 套用最新版選單：桌面版才顯示，行動版空間不足故隱藏 */}
-        <div ref={logoMenuRef} className="hidden md:block" style={{ position: 'relative', flexShrink: 0 }}>
+        <div ref={logoMenuRef} className="hidden md:block relative shrink-0">
           <button
             onClick={(e) => { e.stopPropagation(); setLogoMenuOpen((open) => !open) }}
             onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); setLogoMenuOpen((open) => !open) }}
             aria-label="Travel in Time 選單"
             title="Travel in Time"
-            style={{
-              width: 34, height: 34, borderRadius: 8,
-              background: logoMenuOpen ? accentBg : inkCol,
-              color: logoMenuOpen ? accentCol : paperBg,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontFamily: SERIF, fontStyle: 'italic', fontWeight: 700, fontSize: 17,
-              cursor: 'pointer', touchAction: 'manipulation',
-            }}
+            className={`w-8.5 h-8.5 rounded-lg flex items-center justify-center font-ui-serif italic font-bold text-[17px] cursor-pointer touch-manipulation ${
+              logoMenuOpen ? 'bg-[rgba(180,100,60,0.10)] dark:bg-[rgba(180,100,60,0.18)] text-accent' : 'bg-ink text-paper'
+            }`}
           >
             T
           </button>
           {logoMenuOpen && (
             <div
-              style={{
-                position: 'absolute', left: 0, top: 40, zIndex: 60,
-                width: 178, padding: 6, borderRadius: 8,
-                background: paperBg, border: `1px solid ${borderCol}`,
-                boxShadow: '0 14px 32px -14px rgba(0,0,0,0.45)',
-              }}
+              className="absolute left-0 top-10 z-60 w-44.5 p-1.5 rounded-lg bg-paper border border-border shadow-[0_14px_32px_-14px_rgba(0,0,0,0.45)]"
               onClick={(e) => e.stopPropagation()}
               onTouchStart={(e) => e.stopPropagation()}
             >
               <button
                 onClick={handleApplyLatestVersion}
                 disabled={applyingUpdate}
-                style={{
-                  width: '100%', minHeight: 34, borderRadius: 6, padding: '8px 10px',
-                  display: 'flex', alignItems: 'center', gap: 8,
-                  color: applyingUpdate ? ink3Col : inkCol,
-                  background: 'transparent',
-                  fontFamily: 'inherit', fontSize: 13, textAlign: 'left',
-                  cursor: applyingUpdate ? 'default' : 'pointer',
-                  opacity: applyingUpdate ? 0.7 : 1,
-                }}
-                onMouseEnter={(e) => { if (!applyingUpdate) e.currentTarget.style.background = hoverBg }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+                className={`w-full min-h-8.5 rounded-md py-2 px-2.5 flex items-center gap-2 bg-transparent font-[inherit] text-[13px] text-left transition-colors duration-120 hover:bg-paper-2 ${
+                  applyingUpdate ? 'text-ink-3 cursor-default opacity-70' : 'text-ink cursor-pointer opacity-100'
+                }`}
               >
                 <IconRefresh />
                 <span>{applyingUpdate ? '更新中…' : '套用最新版'}</span>
@@ -265,12 +227,12 @@ const Toolbar = ({
           )}
         </div>
         {bookTitle && (
-          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', width: 150 }}>
-            <div style={{ fontFamily: SERIF, fontSize: 13, color: inkCol, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: 1.3 }}>
+          <div className="flex flex-col justify-center w-37.5">
+            <div className="font-ui-serif text-[13px] text-ink overflow-hidden text-ellipsis whitespace-nowrap leading-[1.3]">
               {bookTitle}
             </div>
             {bookAuthor && (
-              <div style={{ fontFamily: MONO, fontSize: 10, color: ink3Col, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '0.04em', lineHeight: 1.3 }}>
+              <div className="font-ui-mono text-[10px] text-ink-3 overflow-hidden text-ellipsis whitespace-nowrap tracking-[0.04em] leading-[1.3]">
                 {bookAuthor}
               </div>
             )}
@@ -279,26 +241,26 @@ const Toolbar = ({
       </div>
 
       {/* 中：進度條（桌面版才顯示） */}
-      <div className="hidden md:flex" style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8, padding: '0 8px', minWidth: 0, overflow: 'hidden' }}>
+      <div className="hidden md:flex flex-1 items-center justify-center gap-2 px-2 min-w-0 overflow-hidden">
         {pageInfo && pct !== null && (
           <>
-            <span style={{ fontFamily: MONO, fontSize: 10, color: ink3Col, whiteSpace: 'nowrap', letterSpacing: '0.04em', flexShrink: 0 }}>
+            <span className="font-ui-mono text-[10px] text-ink-3 whitespace-nowrap tracking-[0.04em] shrink-0">
               第 {pageInfo.page} 頁
             </span>
-            <div style={{ width: 100, height: 3, background: borderCol, borderRadius: 2, flexShrink: 0 }}>
-              <div style={{ width: `${pct}%`, height: '100%', background: accentCol, borderRadius: 2, transition: 'width .3s' }} />
+            <div className="w-25 h-0.75 bg-border rounded-sm shrink-0">
+              <div className="h-full bg-accent rounded-sm transition-[width] duration-300" style={{ width: `${pct}%` }} />
             </div>
-            <span style={{ fontFamily: MONO, fontSize: 10, color: ink3Col, whiteSpace: 'nowrap', letterSpacing: '0.04em', flexShrink: 0 }}>
+            <span className="font-ui-mono text-[10px] text-ink-3 whitespace-nowrap tracking-[0.04em] shrink-0">
               / {pageInfo.total} · {pct}%
             </span>
           </>
         )}
       </div>
       {/* 手機版：佔位讓圖示靠右 */}
-      <div className="md:hidden" style={{ flex: 1 }} />
+      <div className="md:hidden flex-1" />
 
       {/* 右：圖示按鈕 */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+      <div className="flex items-center gap-0.5 shrink-0">
         {/* 收藏按鈕（手機 + 桌面共用） */}
         {btn(isBookmarked, onToggleBookmark, isBookmarked ? <IconBookmarkFill /> : <IconBookmarkOutline />, isBookmarked ? '移除書籤' : '加入書籤')}
         {/* 手機版：panels + settings（wrapper 只用 className，不加 inline display） */}

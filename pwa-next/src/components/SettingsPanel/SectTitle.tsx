@@ -1,12 +1,9 @@
-import { MONO } from '@/constants/fonts'
-
 interface SectTitleProps {
   children: React.ReactNode
-  ink3Col: string
 }
 
-const SectTitle = ({ children, ink3Col }: SectTitleProps) => (
-  <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.12em', textTransform: 'uppercase', color: ink3Col, marginBottom: 10 }}>
+const SectTitle = ({ children }: SectTitleProps) => (
+  <div className="font-ui-mono text-[10px] tracking-[0.12em] uppercase text-ink-3 mb-2.5">
     {children}
   </div>
 )

@@ -1,22 +1,19 @@
 import { useRef, useState, useEffect } from 'react'
 import { useAnnotationStore } from '@/store/useAnnotationStore'
 import type { Annotation } from '@/store/useAnnotationStore'
-import { SERIF, MONO } from '@/constants/fonts'
 import { HIGHLIGHT_PALETTE } from '@/constants/highlightColors'
 import { exportAnnotations } from '@/utils/annotationExport'
 import { formatDate } from '@/utils/dateFormat'
-import { useThemeColors } from '@/hooks/useThemeColors'
 
 interface Props {
   onNavigate: (cfi: string) => void
   onChangeColor: (id: string, color: string) => void
   onRemoveAnnotation: (id: string) => void
-  darkMode: boolean
   bookTitle: string
   embedded?: boolean
 }
 
-const NotePanel = ({ onNavigate, onChangeColor, onRemoveAnnotation, darkMode, bookTitle, embedded }: Props) => {
+const NotePanel = ({ onNavigate, onChangeColor, onRemoveAnnotation, bookTitle, embedded }: Props) => {
   const { annotations, updateNote } = useAnnotationStore()
   const [pickerOpenId, setPickerOpenId] = useState<string | null>(null)
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
@@ -25,8 +22,6 @@ const NotePanel = ({ onNavigate, onChangeColor, onRemoveAnnotation, darkMode, bo
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null)
   const [editingNoteText, setEditingNoteText] = useState('')
   const noteTextareaRef = useRef<HTMLTextAreaElement>(null)
-
-  const { paperBg, paperBg2, borderCol, inkCol, ink2Col, ink3Col, accentCol } = useThemeColors(darkMode)
 
   const startEditNote = (a: Annotation) => {
     setPickerOpenId(null)
@@ -60,32 +55,27 @@ const NotePanel = ({ onNavigate, onChangeColor, onRemoveAnnotation, darkMode, bo
   const handleExport = () => { const s = annotations.filter((a) => selectedIds.has(a.id)); if (s.length > 0) exportAnnotations(s, bookTitle) }
 
   const header = (
-    <div style={{ padding: '16px 20px', borderBottom: `1px solid ${borderCol}`, flexShrink: 0, background: paperBg }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+    <div className="px-5 py-4 border-b border-border shrink-0 bg-paper">
+      <div className="flex items-start justify-between gap-2">
         <div>
-          <div style={{ fontFamily: SERIF, fontSize: 17, fontWeight: 500, letterSpacing: '0.01em', color: inkCol }}>我的註記</div>
-          <div style={{ fontFamily: MONO, fontSize: 10, color: ink3Col, letterSpacing: '0.12em', textTransform: 'uppercase', marginTop: 4 }}>
+          <div className="font-ui-serif text-[17px] font-medium tracking-[0.01em] text-ink">我的註記</div>
+          <div className="font-ui-mono text-[10px] text-ink-3 tracking-[0.12em] uppercase mt-1">
             {annotations.length} 筆
           </div>
         </div>
         {annotations.length > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, color: ink3Col, cursor: 'pointer' }}>
+          <div className="flex items-center gap-2 shrink-0">
+            <label className="flex items-center gap-1.25 text-xs text-ink-3 cursor-pointer">
               <input ref={selectAllRef} type="checkbox" checked={allSelected} onChange={toggleSelectAll}
-                style={{ accentColor: accentCol, cursor: 'pointer' }} />
+                className="accent-accent cursor-pointer" />
               全選
             </label>
             <button
               disabled={selectedIds.size === 0}
               onClick={handleExport}
-              style={{
-                height: 26, padding: '0 10px', borderRadius: 6, fontSize: 12,
-                background: selectedIds.size > 0 ? accentCol : 'transparent',
-                color: selectedIds.size > 0 ? '#fff' : ink3Col,
-                opacity: selectedIds.size > 0 ? 1 : 0.5,
-                cursor: selectedIds.size > 0 ? 'pointer' : 'default',
-                fontFamily: 'inherit',
-              }}
+              className={`h-6.5 px-2.5 rounded-md text-xs font-[inherit] ${
+                selectedIds.size > 0 ? 'bg-accent text-white cursor-pointer opacity-100' : 'bg-transparent text-ink-3 cursor-default opacity-50'
+              }`}
             >
               匯出{selectedIds.size > 0 ? ` (${selectedIds.size})` : ''}
             </button>
@@ -96,63 +86,63 @@ const NotePanel = ({ onNavigate, onChangeColor, onRemoveAnnotation, darkMode, bo
   )
 
   const content = (
-    <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, background: paperBg }}>
+    <div className="flex-1 overflow-y-auto min-h-0 bg-paper">
       {annotations.length === 0 ? (
-        <div style={{ padding: '28px 20px' }}>
-          <div style={{ fontFamily: SERIF, fontSize: 15, color: ink2Col, marginBottom: 8 }}>尚無註記</div>
-          <div style={{ fontSize: 13, color: ink3Col, lineHeight: 1.65 }}>選取文字後，便可劃線、加註，讓片段留下痕跡。</div>
+        <div className="py-7 px-5">
+          <div className="font-ui-serif text-[15px] text-ink-2 mb-2">尚無註記</div>
+          <div className="text-[13px] text-ink-3 leading-[1.65]">選取文字後，便可劃線、加註，讓片段留下痕跡。</div>
         </div>
       ) : (
-        <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+        <ul className="list-none m-0 p-0">
           {annotations.map((a: Annotation) => (
-            <li key={a.id} style={{ borderBottom: `1px solid ${borderCol}` }}>
+            <li key={a.id} className="border-b border-border">
               <div
-                style={{ padding: '14px 20px', cursor: 'pointer', transition: 'background .12s' }}
+                className="py-3.5 px-5 cursor-pointer transition-colors duration-120 hover:bg-paper-2"
                 onClick={() => { setPickerOpenId(null); onNavigate(a.cfi) }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = paperBg2)}
-                onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
               >
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                <div className="flex items-start gap-2.5">
                   <input type="checkbox" checked={selectedIds.has(a.id)} onChange={() => toggleSelect(a.id)}
                     onClick={(e) => e.stopPropagation()}
-                    style={{ marginTop: 3, flexShrink: 0, accentColor: accentCol, cursor: 'pointer' }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{
-                      fontFamily: SERIF, fontSize: 14, lineHeight: 1.65, color: inkCol,
-                      borderLeft: `3px solid ${a.color}`, paddingLeft: 10, marginBottom: 8,
-                    }}>
+                    className="mt-0.75 shrink-0 accent-accent cursor-pointer" />
+                  <div className="flex-1 min-w-0">
+                    <div
+                      style={{ borderLeft: `3px solid ${a.color}` }}
+                      className="font-ui-serif text-sm leading-[1.65] text-ink pl-2.5 mb-2"
+                    >
                       {a.text}
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontFamily: MONO, fontSize: 10, color: ink3Col, letterSpacing: '0.04em' }}>
+                    <div className="flex items-center justify-between font-ui-mono text-[10px] text-ink-3 tracking-[0.04em]">
                       <span>{a.chapter || ''}</span>
                       <span>{formatDate(a.createdAt)}</span>
                     </div>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0, marginTop: 2 }}>
+                  <div className="flex items-center gap-1 shrink-0 mt-0.5">
                     <button
-                      style={{ width: 14, height: 14, borderRadius: '50%', background: a.color, border: '1.5px solid rgba(0,0,0,0.12)', flexShrink: 0, cursor: 'pointer' }}
+                      style={{ background: a.color }}
+                      className="w-3.5 h-3.5 rounded-full border-[1.5px] border-black/12 shrink-0 cursor-pointer"
                       onClick={(e) => { e.stopPropagation(); setPickerOpenId(pickerOpenId === a.id ? null : a.id) }}
                       aria-label="更換顏色"
                     />
                     <button
-                      style={{ width: 22, height: 22, borderRadius: 6, fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center', color: pendingDeleteId === a.id ? '#ef4444' : ink3Col, background: pendingDeleteId === a.id ? 'rgba(239,68,68,0.08)' : 'transparent', cursor: 'pointer', transition: 'all .12s' }}
+                      className={`w-5.5 h-5.5 rounded-md text-[11px] flex items-center justify-center cursor-pointer transition-all duration-120 hover:text-red-500 hover:bg-red-500/8 ${
+                        pendingDeleteId === a.id ? 'text-red-500 bg-red-500/8' : 'text-ink-3 bg-transparent'
+                      }`}
                       onClick={(e) => {
                         e.stopPropagation()
                         setPickerOpenId(null)
                         setPendingDeleteId(pendingDeleteId === a.id ? null : a.id)
                       }}
-                      onMouseEnter={(e) => { e.currentTarget.style.color = '#ef4444'; e.currentTarget.style.background = 'rgba(239,68,68,0.08)' }}
-                      onMouseLeave={(e) => { e.currentTarget.style.color = pendingDeleteId === a.id ? '#ef4444' : ink3Col; e.currentTarget.style.background = pendingDeleteId === a.id ? 'rgba(239,68,68,0.08)' : 'transparent' }}
                       aria-label="刪除此註記"
                     >✕</button>
                   </div>
                 </div>
                 {pickerOpenId === a.id && (
-                  <div style={{ display: 'flex', gap: 8, marginTop: 10, paddingLeft: 24 }} onClick={(e) => e.stopPropagation()}>
+                  <div className="flex gap-2 mt-2.5 pl-6" onClick={(e) => e.stopPropagation()}>
                     {HIGHLIGHT_PALETTE.map((c) => (
                       <button
                         key={c.label}
-                        style={{ width: 22, height: 22, borderRadius: '50%', background: c.value, border: `2px solid ${a.color === c.value ? inkCol : 'transparent'}`, cursor: 'pointer', transition: 'transform .1s' }}
+                        style={{ background: c.value }}
+                        className={`w-5.5 h-5.5 rounded-full border-2 cursor-pointer transition-transform duration-100 ${a.color === c.value ? 'border-ink' : 'border-transparent'}`}
                         onClick={() => { onChangeColor(a.id, c.value); setPickerOpenId(null) }}
                         aria-label={`${c.label}色`}
                       />
@@ -160,14 +150,14 @@ const NotePanel = ({ onNavigate, onChangeColor, onRemoveAnnotation, darkMode, bo
                   </div>
                 )}
                 {pendingDeleteId === a.id && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, paddingLeft: 24 }} onClick={(e) => e.stopPropagation()}>
-                    <span style={{ fontFamily: MONO, fontSize: 11, color: '#ef4444', letterSpacing: '0.02em', flexShrink: 0 }}>確定刪除？</span>
+                  <div className="flex items-center gap-2 mt-2.5 pl-6" onClick={(e) => e.stopPropagation()}>
+                    <span className="font-ui-mono text-[11px] text-red-500 tracking-[0.02em] shrink-0">確定刪除？</span>
                     <button
-                      style={{ height: 22, padding: '0 8px', borderRadius: 5, fontFamily: MONO, fontSize: 11, color: ink3Col, background: darkMode ? '#2a2520' : '#ede8e0', cursor: 'pointer', transition: 'all .12s' }}
+                      className="h-5.5 px-2 rounded-[5px] font-ui-mono text-[11px] text-ink-3 bg-[#ede8e0] dark:bg-[#2a2520] cursor-pointer transition-all duration-120"
                       onClick={() => setPendingDeleteId(null)}
                     >取消</button>
                     <button
-                      style={{ height: 22, padding: '0 8px', borderRadius: 5, fontFamily: MONO, fontSize: 11, color: '#fff', background: '#ef4444', cursor: 'pointer', transition: 'all .12s' }}
+                      className="h-5.5 px-2 rounded-[5px] font-ui-mono text-[11px] text-white bg-red-500 cursor-pointer transition-all duration-120"
                       onClick={() => {
                         onRemoveAnnotation(a.id)
                         setSelectedIds((prev) => { const n = new Set(prev); n.delete(a.id); return n })
@@ -178,7 +168,7 @@ const NotePanel = ({ onNavigate, onChangeColor, onRemoveAnnotation, darkMode, bo
                   </div>
                 )}
                 {/* 感想筆記區塊 */}
-                <div style={{ paddingLeft: 24, marginTop: 8 }} onClick={(e) => e.stopPropagation()}>
+                <div className="pl-6 mt-2" onClick={(e) => e.stopPropagation()}>
                   {editingNoteId === a.id ? (
                     <div>
                       <textarea
@@ -187,54 +177,40 @@ const NotePanel = ({ onNavigate, onChangeColor, onRemoveAnnotation, darkMode, bo
                         onChange={(e) => setEditingNoteText(e.target.value)}
                         placeholder="寫下你的感想…"
                         rows={3}
-                        style={{
-                          width: '100%', boxSizing: 'border-box',
-                          padding: '7px 10px', borderRadius: 7,
-                          border: `1px solid ${accentCol}`,
-                          background: darkMode ? '#231f1b' : '#f4f0e8',
-                          color: inkCol, fontFamily: SERIF, fontSize: 13,
-                          lineHeight: 1.65, resize: 'vertical',
-                          outline: 'none',
-                        }}
+                        className="w-full box-border py-1.75 px-2.5 rounded-[7px] border border-accent bg-[#f4f0e8] dark:bg-[#231f1b] text-ink font-ui-serif text-[13px] leading-[1.65] resize-y outline-none"
                         onKeyDown={(e) => { if (e.key === 'Escape') cancelNote() }}
                       />
-                      <div style={{ display: 'flex', gap: 6, marginTop: 5 }}>
+                      <div className="flex gap-1.5 mt-1.25">
                         <button
-                          style={{ height: 24, padding: '0 10px', borderRadius: 5, fontFamily: MONO, fontSize: 11, color: '#fff', background: accentCol, cursor: 'pointer' }}
+                          className="h-6 px-2.5 rounded-[5px] font-ui-mono text-[11px] text-white bg-accent cursor-pointer"
                           onClick={() => saveNote(a.id)}
                         >儲存</button>
                         <button
-                          style={{ height: 24, padding: '0 10px', borderRadius: 5, fontFamily: MONO, fontSize: 11, color: ink3Col, background: darkMode ? '#2a2520' : '#ede8e0', cursor: 'pointer' }}
+                          className="h-6 px-2.5 rounded-[5px] font-ui-mono text-[11px] text-ink-3 bg-[#ede8e0] dark:bg-[#2a2520] cursor-pointer"
                           onClick={cancelNote}
                         >取消</button>
                         {a.note && (
                           <button
-                            style={{ height: 24, padding: '0 10px', borderRadius: 5, fontFamily: MONO, fontSize: 11, color: '#ef4444', background: 'transparent', cursor: 'pointer' }}
+                            className="h-6 px-2.5 rounded-[5px] font-ui-mono text-[11px] text-red-500 bg-transparent cursor-pointer"
                             onClick={() => deleteNote(a.id)}
                           >刪除筆記</button>
                         )}
                       </div>
                     </div>
                   ) : a.note ? (
-                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
-                      <div style={{
-                        flex: 1, fontFamily: SERIF, fontSize: 12.5, color: ink2Col,
-                        lineHeight: 1.65, background: darkMode ? '#231f1b' : '#f4f0e8',
-                        borderRadius: 7, padding: '6px 10px',
-                        borderLeft: `3px solid ${darkMode ? '#5a5248' : '#c8bfad'}`,
-                        whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                      }}>
+                    <div className="flex items-start gap-1.5">
+                      <div className="flex-1 font-ui-serif text-[12.5px] text-ink-2 leading-[1.65] bg-[#f4f0e8] dark:bg-[#231f1b] rounded-[7px] py-1.5 px-2.5 border-l-[3px] border-l-[#c8bfad] dark:border-l-[#5a5248] whitespace-pre-wrap wrap-break-word">
                         {a.note}
                       </div>
                       <button
-                        style={{ flexShrink: 0, marginTop: 4, width: 22, height: 22, borderRadius: 6, fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center', color: ink3Col, background: 'transparent', cursor: 'pointer' }}
+                        className="shrink-0 mt-1 w-5.5 h-5.5 rounded-md text-[11px] flex items-center justify-center text-ink-3 bg-transparent cursor-pointer"
                         onClick={() => startEditNote(a)}
                         aria-label="編輯筆記"
                       >✏︎</button>
                     </div>
                   ) : (
                     <button
-                      style={{ fontFamily: MONO, fontSize: 11, color: ink3Col, background: 'transparent', cursor: 'pointer', letterSpacing: '0.04em', padding: '2px 0' }}
+                      className="font-ui-mono text-[11px] text-ink-3 bg-transparent cursor-pointer tracking-[0.04em] py-0.5"
                       onClick={() => startEditNote(a)}
                     >＋ 新增感想</button>
                   )}
@@ -249,7 +225,7 @@ const NotePanel = ({ onNavigate, onChangeColor, onRemoveAnnotation, darkMode, bo
 
   if (embedded) {
     return (
-      <div style={{ height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column', background: paperBg }}>
+      <div className="h-full min-h-0 flex flex-col bg-paper">
         {header}
         {content}
       </div>
@@ -257,12 +233,7 @@ const NotePanel = ({ onNavigate, onChangeColor, onRemoveAnnotation, darkMode, bo
   }
 
   return (
-    <div style={{
-      width: 320, flexShrink: 0, height: '100%',
-      borderLeft: `1px solid ${borderCol}`,
-      background: paperBg,
-      display: 'flex', flexDirection: 'column', overflow: 'hidden',
-    }}>
+    <div className="w-80 shrink-0 h-full border-l border-border bg-paper flex flex-col overflow-hidden">
       {header}
       {content}
     </div>
