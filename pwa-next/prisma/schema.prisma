@@ -1,0 +1,82 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// 使用者由 Clerk 管理，這裡不存本地 User 表，只存 clerkUserId 當外部索引鍵。
+
+// 書本 metadata。id 是內容 hash（跟 PWA useLibrary.ts 前端算出來的一致），
+// 同一本書內容不管哪個使用者匯入都會算出同一個 id，所以主鍵必須是
+// (clerkUserId, id) 複合鍵，避免不同使用者匯入同一本書時互相覆蓋。
+model Book {
+  id          String   @map("book_id")
+  clerkUserId String   @map("clerk_user_id")
+  title       String
+  author      String   @default("")
+  filename    String
+  addedAt     DateTime @default(now()) @map("added_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  progress    ReadingProgress?
+  bookmarks   Bookmark[]
+  annotations Annotation[]
+
+  @@id([clerkUserId, id])
+  @@map("books")
+}
+
+// 閱讀進度：每本書每個使用者只有一筆，用 CFI 表示位置。
+model ReadingProgress {
+  bookId      String   @map("book_id")
+  clerkUserId String   @map("clerk_user_id")
+  cfi         String
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  book Book @relation(fields: [bookId, clerkUserId], references: [id, clerkUserId], onDelete: Cascade)
+
+  @@id([clerkUserId, bookId])
+  @@unique([bookId, clerkUserId])
+  @@map("reading_progress")
+}
+
+// 書籤：CFI + 標籤，一本書可以有多個。
+model Bookmark {
+  id          String   @id @default(cuid())
+  bookId      String   @map("book_id")
+  clerkUserId String   @map("clerk_user_id")
+  cfi         String
+  label       String
+  addedAt     DateTime @default(now()) @map("added_at")
+
+  book Book @relation(fields: [bookId, clerkUserId], references: [id, clerkUserId], onDelete: Cascade)
+
+  @@index([clerkUserId, bookId])
+  @@map("bookmarks")
+}
+
+// 註記：劃線原文（text）+ 使用者筆記（note），本身帶足夠內容可獨立顯示，
+// 不需要打開書本原文（見「我的筆記」列表頁面規劃）。
+model Annotation {
+  id          String   @id @default(cuid())
+  bookId      String   @map("book_id")
+  clerkUserId String   @map("clerk_user_id")
+  cfi         String
+  text        String
+  note        String   @default("")
+  color       String   @default("")
+  chapter     String   @default("")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  book Book @relation(fields: [bookId, clerkUserId], references: [id, clerkUserId], onDelete: Cascade)
+
+  @@index([clerkUserId, bookId])
+  @@map("annotations")
+}

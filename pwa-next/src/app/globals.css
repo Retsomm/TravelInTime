@@ -1,0 +1,23 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-reading: Georgia, serif;
+}
+
+/* 防止 iOS 水平 rubber-band 捲動；並鎖定整頁高度為視覺視窗高度，
+   避免 Safari 網址列造成 100vh 誤判而產生整頁垂直捲軸（底部頁數等內容被藏在可視範圍外）。
+   捲動一律交由頁面內部指定容器（如書庫清單）的 overflow-y-auto 處理。 */
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+html,
+body {
+  overflow-x: hidden;
+  max-width: 100%;
+}
