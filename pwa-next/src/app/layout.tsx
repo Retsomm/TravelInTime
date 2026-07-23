@@ -31,7 +31,7 @@ const RootLayout = ({
 }>) => {
   return (
     <ClerkProvider>
-      <html lang="zh-Hant" className="h-full">
+      <html lang="zh-Hant" className="h-dvh">
         <head>
           <link rel="preconnect" href="https://fonts.googleapis.com" />
           <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
@@ -40,7 +40,7 @@ const RootLayout = ({
             rel="stylesheet"
           />
         </head>
-        <body className="h-full antialiased">
+        <body className="h-dvh antialiased">
           {children}
           <ServiceWorkerRegister />
         </body>

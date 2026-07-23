@@ -25,6 +25,12 @@ const App = () => {
   // cloudSync.ts 的每個 sync 函式都要先查這個開關才會真的發請求，未登入時完全不送出，
   // 不是「送出去再被 401 擋掉」。這個 effect 一定要排在下面的登入補推 effect 之前
   // （React 同一個元件裡的 effect 依宣告順序執行），不然補推當下開關還沒打開。
+  // 把 dark class 同步到 <html>，讓 body 的 background-color（globals.css 的
+  // var(--color-paper)）能跟著切換，避免深色模式下 body 背景色停留在預設淺色。
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', darkMode)
+  }, [darkMode])
+
   useEffect(() => {
     setSyncEnabled(!!isSignedIn)
   }, [isSignedIn])

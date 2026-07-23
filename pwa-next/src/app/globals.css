@@ -28,12 +28,17 @@
 
 /* 防止 iOS 水平 rubber-band 捲動；並鎖定整頁高度為視覺視窗高度，
    避免 Safari 網址列造成 100vh 誤判而產生整頁垂直捲軸（底部頁數等內容被藏在可視範圍外）。
-   捲動一律交由頁面內部指定容器（如書庫清單）的 overflow-y-auto 處理。 */
+   捲動一律交由頁面內部指定容器（如書庫清單）的 overflow-y-auto 處理。
+   實際高度由 layout.tsx 的 h-dvh class 控制（跟頁面內容容器的 h-dvh 一致），
+   避免 100% 在 iOS PWA standalone 模式下跟 dvh 算出的高度有微小落差，
+   底部露出 body 背景色的縫隙。這裡的 background-color 是那條縫隙萬一還是
+   出現時的保險：讓露出來的是目前主題色（會隨 .dark class 一起在 html 上切換），
+   而不是瀏覽器預設的白色。 */
 html,
 body {
-  height: 100%;
   overflow: hidden;
   overscroll-behavior: none;
+  background-color: var(--color-paper);
 }
 
 html,
