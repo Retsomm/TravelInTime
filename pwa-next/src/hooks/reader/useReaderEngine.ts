@@ -823,8 +823,9 @@ export const useReaderEngine = (params: {
     nextPageRef.current = nextPage
   }, [prevPage, nextPage])
 
-  const handleScriptToggle = () => {
-    const newScript: Script = script === 'tc' ? 'sc' : 'tc'
+  const handleScriptToggle = (target: Script) => {
+    if (target === script) return
+    const newScript: Script = target
     scriptRef.current = newScript
     setScript(newScript)
     const doc = viewerRef.current?.querySelector('iframe')?.contentDocument

@@ -87,9 +87,11 @@ const BookInfoPanel = ({
             <span className="font-ui-mono text-[10px] text-ink-3 tracking-[0.08em] uppercase">閱讀進度</span>
             <span className="font-ui-mono text-[10px] text-accent">{pct}%</span>
           </div>
-          <div className="h-0.75 bg-border rounded-sm">
-            <div className="h-full bg-accent rounded-sm" style={{ width: `${pct}%` }} />
-          </div>
+          <progress
+            value={pct}
+            max={100}
+            className="block w-full h-0.75 rounded-sm overflow-hidden [&::-webkit-progress-bar]:bg-border [&::-webkit-progress-bar]:rounded-sm [&::-webkit-progress-value]:bg-accent [&::-webkit-progress-value]:rounded-sm [&::-moz-progress-bar]:bg-accent [&::-moz-progress-bar]:rounded-sm"
+          />
         </div>
       )}
 

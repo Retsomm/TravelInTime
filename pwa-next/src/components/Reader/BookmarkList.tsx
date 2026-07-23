@@ -27,9 +27,17 @@ const BookmarkList = ({
       {sortBookmarksByAddedAt(bookmarks).map((bm) => (
         <div
           key={bm.id}
+          role="button"
+          tabIndex={0}
           className="border-b border-border py-3 px-4 flex flex-col gap-1.5 cursor-pointer transition-colors duration-120 touch-manipulation hover:bg-paper-2"
           onClick={() => onSelect(bm.cfi)}
           onTouchEnd={(e) => { e.preventDefault(); onSelect(bm.cfi) }}
+          onKeyDown={(e) => {
+            if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) {
+              e.preventDefault()
+              onSelect(bm.cfi)
+            }
+          }}
         >
           <div className="font-ui-serif text-[13px] text-ink leading-normal break-all">
             {bm.label}
@@ -39,6 +47,7 @@ const BookmarkList = ({
               {formatBookmarkDate(bm.addedAt)}
             </span>
             <button
+              type="button"
               onClick={(e) => { e.stopPropagation(); onTogglePendingDelete(bm.id) }}
               onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); onTogglePendingDelete(bm.id) }}
               className={`font-ui-mono text-[10px] cursor-pointer py-0.5 px-1.5 rounded transition-all duration-120 touch-manipulation hover:text-red-500 hover:bg-[#fff0f0] dark:hover:bg-[#3a1a1a] ${
@@ -53,11 +62,13 @@ const BookmarkList = ({
             <div className="flex items-center gap-2 mt-1" onClick={(e) => e.stopPropagation()} onTouchEnd={(e) => e.stopPropagation()}>
               <span className="font-ui-mono text-[11px] text-red-500 tracking-[0.02em] shrink-0">確定移除？</span>
               <button
+                type="button"
                 className="h-5.5 px-2 rounded-[5px] font-ui-mono text-[11px] text-ink-3 bg-[#ede8e0] dark:bg-[#2a2520] cursor-pointer touch-manipulation"
                 onClick={(e) => { e.stopPropagation(); onCancelDelete() }}
                 onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); onCancelDelete() }}
               >取消</button>
               <button
+                type="button"
                 className="h-5.5 px-2 rounded-[5px] font-ui-mono text-[11px] text-white bg-red-500 cursor-pointer touch-manipulation"
                 onClick={(e) => { e.stopPropagation(); onConfirmDelete(bm.id) }}
                 onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); onConfirmDelete(bm.id) }}

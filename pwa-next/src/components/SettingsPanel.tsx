@@ -12,7 +12,7 @@ interface Props {
   fontFamily: string
   onFontChange: (font: string) => void
   script: Script
-  onScriptToggle: () => void
+  onScriptToggle: (target: Script) => void
   readingDirection: 'ltr' | 'rtl'
   onReadingDirectionChange: (d: 'ltr' | 'rtl') => void
   ttsPlaying: boolean
@@ -85,8 +85,8 @@ const SettingsPanel = ({
           {/* TC/SC + LTR/RTL */}
           <div className="flex gap-2 mb-4">
             <div className={`${segBgClass} flex-1`}>
-              <SegBtn active={script === 'tc'} onClick={onScriptToggle}>繁體</SegBtn>
-              <SegBtn active={script === 'sc'} onClick={onScriptToggle}>簡體</SegBtn>
+              <SegBtn active={script === 'tc'} onClick={() => onScriptToggle('tc')}>繁體</SegBtn>
+              <SegBtn active={script === 'sc'} onClick={() => onScriptToggle('sc')}>簡體</SegBtn>
             </div>
             <div className={`${segBgClass} flex-1`}>
               <SegBtn active={readingDirection === 'ltr'} onClick={() => onReadingDirectionChange('ltr')}>左→右</SegBtn>
@@ -156,6 +156,7 @@ const SettingsPanel = ({
                 </button>
                 <button
                   onClick={ttsPlaying ? onTTSPause : onTTSPlay}
+                  aria-label={ttsPlaying ? '暫停朗讀' : '開始朗讀'}
                   className={`w-11 h-11 rounded-full inline-flex items-center justify-center cursor-pointer transition-colors duration-150 text-paper ${ttsPlaying ? 'bg-accent' : 'bg-ink'}`}
                 >
                   {ttsPlaying ? <IconPause /> : <IconPlay />}
@@ -164,8 +165,9 @@ const SettingsPanel = ({
             </div>
 
             <div className="mt-3.5 flex items-center gap-2.5">
-              <span className="text-xs text-ink-3 w-7 shrink-0">語速</span>
+              <label htmlFor="tts-rate" className="text-xs text-ink-3 w-7 shrink-0">語速</label>
               <input
+                id="tts-rate"
                 type="range" min="0.5" max="2" step="0.1" value={ttsRate}
                 onChange={(e) => onTTSRateChange(+e.target.value)}
                 className="flex-1 accent-accent"
