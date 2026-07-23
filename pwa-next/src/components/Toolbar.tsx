@@ -167,7 +167,11 @@ const Toolbar = ({
   const handleApplyLatestVersion = async () => {
     if (applyingUpdate) return
     setApplyingUpdate(true)
-    await onApplyLatestVersion()
+    try {
+      await onApplyLatestVersion()
+    } finally {
+      setApplyingUpdate(false)
+    }
   }
 
   const btn = (

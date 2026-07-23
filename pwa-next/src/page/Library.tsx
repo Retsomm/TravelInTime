@@ -39,7 +39,11 @@ const Library = ({ records, getCoverDataUrl, onAddBooks, onOpenBook, onRemoveBoo
   const handleApplyLatestVersion = async () => {
     if (applyingUpdate) return
     setApplyingUpdate(true)
-    await onApplyLatestVersion()
+    try {
+      await onApplyLatestVersion()
+    } finally {
+      setApplyingUpdate(false)
+    }
   }
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -74,7 +78,7 @@ const Library = ({ records, getCoverDataUrl, onAddBooks, onOpenBook, onRemoveBoo
           <div className="flex-1" />
           <div className="flex items-center gap-1">
             <AuthStatus inkCol={inkCol} ink3Col={ink3Col} />
-            <button className="p-2 rounded-full transition" style={{ color: ink3Col }} onClick={onToggleDark}>
+            <button className="p-2 rounded-full transition" style={{ color: ink3Col }} onClick={onToggleDark} aria-label={darkMode ? '切換為淺色主題' : '切換為深色主題'}>
               {darkMode ? <IconSun /> : <IconMoon />}
             </button>
           </div>
@@ -190,13 +194,13 @@ const Library = ({ records, getCoverDataUrl, onAddBooks, onOpenBook, onRemoveBoo
                   placeholder="搜尋書名、作者…"
                   style={{ flex: 1, background: 'transparent', border: 0, outline: 0, color: inkCol, fontSize: 13, fontFamily: 'inherit' }}
                 />
-                {query && <button style={{ color: ink3Col, fontSize: 11 }} onClick={() => setQuery('')}>✕</button>}
+                {query && <button style={{ color: ink3Col, fontSize: 11 }} onClick={() => setQuery('')} aria-label="清除搜尋">✕</button>}
               </div>
             </div>
 
             <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
               <AuthStatus inkCol={inkCol} ink3Col={ink3Col} />
-              <button className="p-2 rounded-full transition" style={{ color: ink3Col }} onClick={onToggleDark} title={darkMode ? '淺色' : '深色'}>
+              <button className="p-2 rounded-full transition" style={{ color: ink3Col }} onClick={onToggleDark} title={darkMode ? '淺色' : '深色'} aria-label={darkMode ? '切換為淺色主題' : '切換為深色主題'}>
                 {darkMode ? <IconSun /> : <IconMoon />}
               </button>
               <button
@@ -208,6 +212,7 @@ const Library = ({ records, getCoverDataUrl, onAddBooks, onOpenBook, onRemoveBoo
                 }}
                 onClick={() => fileInputRef.current?.click()}
                 disabled={loading}
+                aria-label={loading ? '載入中' : '匯入 ePub'}
               >
                 <IconPlus /> <span className="hidden md:inline">{loading ? '載入中…' : '匯入 ePub'}</span>
               </button>

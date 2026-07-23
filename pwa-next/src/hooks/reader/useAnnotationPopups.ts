@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import type { Rendition } from 'epubjs'
 import { useAnnotationStore } from '@/store/useAnnotationStore'
 import { copyTextToClipboard } from '@/components/Reader/annotationUtils'
@@ -16,7 +17,9 @@ export const useAnnotationPopups = (params: {
   const [popup, setPopup] = useState<PopupState>(null)
   const [editPopup, setEditPopup] = useState<EditPopupState>(null)
   const pendingAnnotationCfiRef = useRef<string | null>(null)
-  const { addAnnotation, updateColor, removeAnnotation } = useAnnotationStore()
+  const { addAnnotation, updateColor, removeAnnotation } = useAnnotationStore(
+    useShallow((s) => ({ addAnnotation: s.addAnnotation, updateColor: s.updateColor, removeAnnotation: s.removeAnnotation })),
+  )
 
   // 建立 annotation SVG 標記的 helper（使用 epub.js 內建 annotations，不修改 DOM 文字節點）
   const addEpubAnnotation = useCallback((

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { BookRecord } from '@/hooks/useLibrary'
 import { coverStyleFor, formatDate, MONO, SERIF } from '@/components/Reader/bookCoverStyles'
+import { copyTextToClipboard } from '@/components/Reader/annotationUtils'
 
 const BookInfoPanel = ({
   record, getCoverDataUrl, darkMode, onClose, progress, embedded,
@@ -16,7 +17,9 @@ const BookInfoPanel = ({
   useEffect(() => {
     setCoverUrl(null)
     if (!record.hasCover) return
-    getCoverDataUrl(record.id).then((url) => { if (url) setCoverUrl(url) })
+    let active = true
+    getCoverDataUrl(record.id).then((url) => { if (active && url) setCoverUrl(url) })
+    return () => { active = false }
   }, [record.id, record.hasCover, getCoverDataUrl])
 
   const paperBg   = darkMode ? '#1a1816' : '#f9f7f2'
@@ -97,7 +100,7 @@ const BookInfoPanel = ({
       {/* 操作按鈕 */}
       <div style={{ padding: '12px 20px', display: 'flex', flexDirection: 'column', gap: 8 }}>
         <button
-          onClick={() => navigator.clipboard?.writeText(record.title)}
+          onClick={() => copyTextToClipboard(record.title)}
           style={{
             display: 'flex', alignItems: 'center', gap: 8, width: '100%',
             padding: '9px 14px', borderRadius: 8, background: paperBg2,

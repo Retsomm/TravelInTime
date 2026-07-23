@@ -17,23 +17,26 @@ export const extractMeta = (
   const work = async () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const book = ePub(buffer.slice(0)) as any
-    await book.ready
-    const pkg = book.package?.metadata
-    const title = (pkg?.title as string | undefined)?.trim() || fallback.title
-    const author = (pkg?.creator as string | undefined)?.trim() || ''
-
-    let coverDataUrl: string | null = null
     try {
-      const coverUrl: string | null = await book.coverUrl()
-      if (coverUrl) {
-        const blob = await fetch(coverUrl).then((r) => r.blob())
-        coverDataUrl = await blobToDataUrl(blob)
-        URL.revokeObjectURL(coverUrl)
-      }
-    } catch { /* 無封面 */ }
+      await book.ready
+      const pkg = book.package?.metadata
+      const title = (pkg?.title as string | undefined)?.trim() || fallback.title
+      const author = (pkg?.creator as string | undefined)?.trim() || ''
 
-    book.destroy()
-    return { title, author, coverDataUrl }
+      let coverDataUrl: string | null = null
+      try {
+        const coverUrl: string | null = await book.coverUrl()
+        if (coverUrl) {
+          const blob = await fetch(coverUrl).then((r) => r.blob())
+          coverDataUrl = await blobToDataUrl(blob)
+          URL.revokeObjectURL(coverUrl)
+        }
+      } catch { /* 無封面 */ }
+
+      return { title, author, coverDataUrl }
+    } finally {
+      book.destroy()
+    }
   }
 
   const timeout = new Promise<typeof fallback>((resolve) =>

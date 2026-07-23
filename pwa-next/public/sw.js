@@ -21,13 +21,19 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const { request } = event
   if (request.method !== 'GET') return
-  if (new URL(request.url).origin !== self.location.origin) return
+  const url = new URL(request.url)
+  if (url.origin !== self.location.origin) return
+  // /api/ 回應可能帶有登入使用者的私人資料，不進快取，也不做離線退回，
+  // 避免不同使用者或未登入狀態的裝置從 Cache Storage 讀到別人的資料。
+  if (url.pathname.startsWith('/api/')) return
 
   event.respondWith(
     fetch(request)
       .then((response) => {
-        const copy = response.clone()
-        caches.open(CACHE_NAME).then((cache) => cache.put(request, copy))
+        if (response.ok) {
+          const copy = response.clone()
+          caches.open(CACHE_NAME).then((cache) => cache.put(request, copy))
+        }
         return response
       })
       .catch(() => caches.match(request).then((cached) => cached ?? caches.match('/'))),

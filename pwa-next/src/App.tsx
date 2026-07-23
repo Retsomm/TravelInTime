@@ -39,14 +39,16 @@ const App = () => {
     if (!isSignedIn) return
     Promise.all(
       records.map(async (r) => {
-        await syncBook(r.id, r.title, r.author, r.filename)
+        const bookSynced = await syncBook(r.id, r.title, r.author, r.filename)
+        // Book 那筆列都沒寫成功，進度/書籤/註記會撞外鍵違反錯誤，不必送出
+        if (!bookSynced) return
         const cfi = loadProgress(r.id)
         const bookmarks = loadBookmarks(r.id)
         const annotations = loadAnnotationsForBook(r.id)
         await Promise.all([
           cfi ? syncProgress(r.id, cfi) : undefined,
-          bookmarks.length > 0 ? syncBookmarks(r.id, bookmarks) : undefined,
-          annotations.length > 0 ? syncAnnotations(r.id, annotations) : undefined,
+          syncBookmarks(r.id, bookmarks),
+          syncAnnotations(r.id, annotations),
         ])
       }),
     )

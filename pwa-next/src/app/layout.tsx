@@ -24,11 +24,11 @@ export const viewport: Viewport = {
   themeColor: "#1c1917",
 };
 
-export default function RootLayout({
+const RootLayout = ({
   children,
 }: Readonly<{
   children: React.ReactNode;
-}>) {
+}>) => {
   return (
     <ClerkProvider>
       <html lang="zh-Hant" className="h-full">
@@ -47,4 +47,6 @@ export default function RootLayout({
       </html>
     </ClerkProvider>
   );
-}
+};
+
+export default RootLayout;

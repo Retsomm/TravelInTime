@@ -40,36 +40,41 @@ const TocRow = ({ item, depth, index, activeHref, onNavigate, inkCol, ink2Col, i
 
   return (
     <>
-      <li>
+      <li
+        style={{
+          display: 'flex', alignItems: 'center', width: '100%',
+          paddingRight: 16 + depth * 12,
+          background: isActive ? paperBg2 : 'transparent',
+          color: isActive ? inkCol : depth > 0 ? ink3Col : ink2Col,
+          transition: 'background .12s',
+        }}
+        onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = paperBg2 }}
+        onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = 'transparent' }}
+      >
+        {hasChildren && (
+          <button
+            type="button"
+            style={{ padding: '10px 4px 10px 20px', color: ink3Col, fontSize: 10, lineHeight: 1, flexShrink: 0, cursor: 'pointer' }}
+            onClick={(e) => { e.stopPropagation(); setOpen(!open) }}
+            aria-label={open ? '收合' : '展開'}
+          >
+            {open ? '▾' : '▸'}
+          </button>
+        )}
         <button
+          type="button"
           style={{
-            display: 'flex', alignItems: 'center', width: '100%',
-            padding: `10px ${16 + depth * 12}px 10px 20px`,
-            textAlign: 'left',
-            background: isActive ? paperBg2 : 'transparent',
-            color: isActive ? inkCol : depth > 0 ? ink3Col : ink2Col,
-            transition: 'background .12s',
+            display: 'flex', alignItems: 'center', flex: 1, minWidth: 0,
+            padding: `10px 0 10px ${hasChildren ? 0 : 20}px`,
+            textAlign: 'left', background: 'transparent', color: 'inherit',
           }}
           onClick={() => onNavigate(item.href)}
-          onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = paperBg2 }}
-          onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = 'transparent' }}
         >
           {isActive ? (
             <span style={{ width: 6, height: 6, borderRadius: '50%', background: accentCol, flexShrink: 0, marginRight: 12 }} />
           ) : (
             <span style={{ fontFamily: MONO, fontSize: 10, color: ink3Col, width: 18, textAlign: 'right', marginRight: 10, flexShrink: 0, letterSpacing: '0.04em' }}>
               {String(index + 1).padStart(2, '0')}
-            </span>
-          )}
-          {hasChildren && (
-            <span
-              role="button"
-              tabIndex={-1}
-              style={{ marginRight: 4, color: ink3Col, fontSize: 10, lineHeight: 1, flexShrink: 0, cursor: 'pointer' }}
-              onClick={(e) => { e.stopPropagation(); setOpen(!open) }}
-              aria-label={open ? '收合' : '展開'}
-            >
-              {open ? '▾' : '▸'}
             </span>
           )}
           <span style={{ flex: 1, fontFamily: SERIF, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

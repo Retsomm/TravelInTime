@@ -26,6 +26,7 @@ const AuthStatus = ({ inkCol, ink3Col }: Props) => {
         className="flex items-center gap-1.5 px-2 py-1.5 rounded-full transition"
         style={{ color: ink3Col }}
         title="登入以啟用雲端備份"
+        aria-label="登入以啟用雲端備份"
       >
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={inkCol} strokeWidth="1.6" className="shrink-0">
           <circle cx="12" cy="8" r="4" />

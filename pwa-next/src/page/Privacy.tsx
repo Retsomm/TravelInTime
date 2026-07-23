@@ -18,14 +18,16 @@ const SECTIONS: { title: string; paragraphs: string[] }[] = [
     paragraphs: [
       '使用者提供（必要、由你上傳或建立）：電子書檔案（epub 等）、書籍檔名、書籍封面；使用者建立的內容（註記、書籤、閱讀進度、收藏等）；使用者在應用內輸入的文字。',
       '裝置與應用狀態（僅本機保存）：本機設定與偏好（字體、字型大小、主題、TTS 設定等）；程式版本資訊。',
-      '第三方連線（非個人資料，但會與第三方伺服器通訊）：Google Fonts（載入遠端字型）；Electron 版自動更新機制檢查更新時會向更新服務發送請求。',
-      '目前本應用並未整合任何分析/追蹤套件、廣告 SDK、地理位置 API、相機或麥克風授權，也未將使用者書籍或註記自動上傳到外部伺服器。',
+      '雲端同步資料（需登入啟用）：若你選擇登入，書籍標題/作者/檔名、閱讀進度、書籤、劃線與註記等內容會透過我們的伺服器（Next.js + Prisma）同步保存到雲端資料庫，以帳號區隔、僅供你在不同裝置間讀取。這些內容屬於你的個人資料，我們不會用於其他用途。',
+      '第三方連線（會與第三方伺服器通訊，但不含你的書籍/註記內容）：Google Fonts（載入遠端字型）；Clerk（帳號登入驗證）；Electron 版自動更新機制檢查更新時會向更新服務發送請求。',
+      '目前本應用並未整合任何分析/追蹤套件、廣告 SDK、地理位置 API、相機或麥克風授權。',
     ],
   },
   {
     title: '資料用途',
     paragraphs: [
       '提供基本功能：在本機儲存電子書、展示封面、顯示與管理註記、書籤及閱讀進度等。',
+      '雲端同步：登入後把書籍中繼資料、閱讀進度、書籤、註記背景同步到雲端資料庫，讓你在不同裝置間接續閱讀。',
       '檢查更新：Electron 的自動更新機制會檢查是否有新版，僅為版本更新用途。',
       '運行字型載入：載入 Google Fonts 以改善字型顯示。',
     ],
@@ -33,15 +35,16 @@ const SECTIONS: { title: string; paragraphs: string[] }[] = [
   {
     title: '資料儲存與保存地點',
     paragraphs: [
-      '多數資料僅儲存在使用者裝置上（例如 IndexedDB、localStorage、SQLite、App 沙盒檔案系統），不會自動上傳至我們的伺服器，除非你特別啟用或未來新增雲端備份功能。',
-      '第三方請求（如 Google Fonts、更新伺服器）會在載入或檢查更新時發出 HTTPS 請求，可能使第三方接收到裝置的 IP 位址與相關連線資訊。',
+      '多數資料僅儲存在使用者裝置上（例如 IndexedDB、localStorage、SQLite、App 沙盒檔案系統）；未登入時完全不會上傳至我們的伺服器。',
+      '登入啟用雲端同步後，書籍中繼資料、閱讀進度、書籤、註記會保存在我們的雲端資料庫（PostgreSQL，透過 Supabase 代管），以帳號區隔資料。',
+      '第三方請求（如 Google Fonts、Clerk 登入驗證、更新伺服器）會在對應時機發出 HTTPS 請求，可能使第三方接收到裝置的 IP 位址與相關連線資訊。',
     ],
   },
   {
     title: '資料分享與第三方',
     paragraphs: [
-      '目前我們不會將使用者的書籍或註記分享或出售給第三方。若未來需與第三方分享資料，會在功能啟用前明確告知並取得使用者同意。',
-      '第三方清單：Google Fonts（fonts.googleapis.com / fonts.gstatic.com）；更新伺服器（electron-updater 連線之主機）。',
+      '我們不會將使用者的書籍或註記分享或出售給第三方。雲端同步資料僅保存在我們自有的資料庫，供你本人跨裝置讀取。',
+      '第三方清單：Google Fonts（fonts.googleapis.com / fonts.gstatic.com）；Clerk（帳號登入驗證）；更新伺服器（electron-updater 連線之主機）。',
     ],
   },
   {
@@ -61,17 +64,18 @@ const SECTIONS: { title: string; paragraphs: string[] }[] = [
   {
     title: '資料保留',
     paragraphs: [
-      '在本地儲存的資料會一直保留，除非使用者主動刪除或清除應用資料。若日後加入雲端備份功能，會另行說明保留期限與刪除機制。',
+      '在本地儲存的資料會一直保留，除非使用者主動刪除或清除應用資料。',
+      '雲端同步資料（登入後才會產生）會保留在我們的資料庫，直到你在應用內刪除該本書（會一併移除雲端的該書進度/書籤/註記）或聯絡我們要求刪除整個帳號的雲端資料。',
     ],
   },
   {
     title: '如何刪除資料',
     paragraphs: [
-      'App（書庫）：長按或選擇該書 → 點「刪除」，即可移除該書及其本機註記/進度。',
-      '刪除整個應用資料：Android 於設定 > 應用程式 > 儲存空間 > 清除資料；iOS 刪除 App 並重新安裝。',
-      'PWA（瀏覽器）：於瀏覽器設定 > 隱私與安全性 > 清除瀏覽資料中移除本站資料。',
+      'App（書庫）：長按或選擇該書 → 點「刪除」，即可移除該書的本機註記/進度；若已登入雲端同步，雲端資料庫中對應這本書的紀錄也會一併刪除。',
+      '刪除整個應用資料：Android 於設定 > 應用程式 > 儲存空間 > 清除資料；iOS 刪除 App 並重新安裝。此動作僅清除本機資料，不影響已同步到雲端的資料。',
+      'PWA（瀏覽器）：於瀏覽器設定 > 隱私與安全性 > 清除瀏覽資料中移除本站資料。此動作僅清除本機資料，不影響已同步到雲端的資料。',
       '桌面版（Electron）：刪除系統中應用資料資料夾（macOS: ~/Library/Application Support/…）。',
-      '若你啟用了任何會上傳至伺服器的功能，請聯絡 112182ssss@gmail.com 要求協助刪除，我們將於 30 天內回應處理。',
+      '若要刪除帳號下所有雲端同步資料，請聯絡 112182ssss@gmail.com 要求協助刪除，我們將於 30 天內回應處理。',
     ],
   },
   {
@@ -99,7 +103,7 @@ const Privacy = ({ darkMode, onToggleDark }: Props) => {
   const paperBg2  = darkMode ? '#231f1c' : '#f1ede4'
   const borderCol = darkMode ? '#3a3430' : '#e4ddd0'
   const inkCol    = darkMode ? '#e8e0d4' : '#2a2420'
-  const ink3Col   = darkMode ? '#8a7f74' : '#9a8f80'
+  const ink3Col   = darkMode ? '#8a7f74' : '#5a5044'
 
   return (
     <div className="flex flex-col min-h-screen" style={{ background: paperBg, color: inkCol }}>
@@ -108,7 +112,13 @@ const Privacy = ({ darkMode, onToggleDark }: Props) => {
         style={{ borderBottom: `1px solid ${borderCol}`, paddingTop: 'max(env(safe-area-inset-top), 12px)' }}
       >
         <span style={{ fontFamily: SERIF, fontSize: 16, fontWeight: 500 }}>隱私權政策</span>
-        <button className="p-2 rounded-full transition ml-auto" style={{ color: ink3Col }} onClick={onToggleDark}>
+        <button
+          className="p-2 rounded-full transition ml-auto focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+          style={{ color: ink3Col }}
+          onClick={onToggleDark}
+          aria-label={darkMode ? '切換為淺色主題' : '切換為深色主題'}
+          aria-pressed={darkMode}
+        >
           {darkMode ? <IconSun /> : <IconMoon />}
         </button>
       </div>

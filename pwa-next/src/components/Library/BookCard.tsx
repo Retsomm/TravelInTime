@@ -20,7 +20,13 @@ const BookCard = ({ record, getCoverDataUrl, onOpen, onRemove }: CardProps) => {
   }, [record.id, record.hasCover, getCoverDataUrl])
 
   return (
-    <div className="group cursor-pointer" onClick={() => onOpen(record.id)}>
+    <div className="group relative">
+      <button
+        type="button"
+        className="block w-full text-left cursor-pointer"
+        onClick={() => onOpen(record.id)}
+        aria-label={`開啟《${record.title}》`}
+      >
       <div style={{
         position: 'relative', aspectRatio: '2/3', borderRadius: 3, overflow: 'hidden',
         background: s.bg,
@@ -60,12 +66,6 @@ const BookCard = ({ record, getCoverDataUrl, onOpen, onRemove }: CardProps) => {
             }} />
           </>
         )}
-        <button
-          className="absolute top-2 right-2 w-6 h-6 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-          style={{ background: 'rgba(0,0,0,0.55)', color: 'white', fontSize: 11, zIndex: 2 }}
-          onClick={(e) => { e.stopPropagation(); onRemove(record.id) }}
-          aria-label="移除書籍"
-        >✕</button>
       </div>
 
       <div style={{ marginTop: 12 }}>
@@ -91,6 +91,14 @@ const BookCard = ({ record, getCoverDataUrl, onOpen, onRemove }: CardProps) => {
           </span>
         </div>
       </div>
+      </button>
+      <button
+        type="button"
+        className="absolute top-2 right-2 w-6 h-6 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+        style={{ background: 'rgba(0,0,0,0.55)', color: 'white', fontSize: 11, zIndex: 2 }}
+        onClick={(e) => { e.stopPropagation(); onRemove(record.id) }}
+        aria-label="移除書籍"
+      >✕</button>
     </div>
   )
 }

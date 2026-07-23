@@ -25,6 +25,8 @@ export const exportAnnotations = (selected: Annotation[], bookTitle: string) => 
   const dateStr = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`
   const timeStr = `${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`
   link.download = `${(bookTitle || '閱讀註記').replace(/[\\/:*?"<>|]/g, '_')}_${dateStr}_${timeStr}.txt`
+  document.body.appendChild(link)
   link.click()
-  URL.revokeObjectURL(url)
+  link.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
 }

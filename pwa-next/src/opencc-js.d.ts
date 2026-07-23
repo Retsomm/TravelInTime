@@ -4,6 +4,6 @@ declare module 'opencc-js' {
     from: 'cn' | 'tw' | 'twp' | 'hk' | 't' | 'jp'
     to: 'cn' | 'tw' | 'twp' | 'hk' | 't' | 'jp'
   }
-  export function Converter(opts: ConverterOptions): ConverterFn
-  export function CustomConverter(dict: [string, string][]): ConverterFn
+  export const Converter: (opts: ConverterOptions) => ConverterFn
+  export const CustomConverter: (dict: [string, string][]) => ConverterFn
 }

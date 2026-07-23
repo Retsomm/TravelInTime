@@ -1,6 +1,6 @@
 import type { MetadataRoute } from 'next'
 
-export default function manifest(): MetadataRoute.Manifest {
+const manifest = (): MetadataRoute.Manifest => {
   return {
     name: 'Travel in Time',
     short_name: 'TravelInTime',
@@ -18,3 +18,5 @@ export default function manifest(): MetadataRoute.Manifest {
     ],
   }
 }
+
+export default manifest

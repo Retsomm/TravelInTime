@@ -147,9 +147,8 @@ repo 根目錄的 `package.json` 其實是 **Electron 桌面版**的建置設定
 - [x] Prisma schema：`Book`（`(clerkUserId, id)` 複合主鍵，`id` 是內容 hash）、`ReadingProgress`、
       `Bookmark`、`Annotation`，皆綁定 `clerkUserId`（見 `pwa-next/prisma/schema.prisma`）。
       （2026-07-23：`prisma db push` 已實測同步到 Neon 成功）
-- [ ] API Route Handlers：CRUD 進度/書籤/註記，每個請求都要驗證 Clerk session
-      （2026-07-23：目前只有兩支驗證用的最小 route——`/api/health`（公開，查 DB 確認連線）、
-      `/api/me`（受保護，回傳 `auth()` 的 userId），實際的 CRUD endpoints 還沒寫）
+- [x] API Route Handlers：CRUD 進度/書籤/註記，每個請求都要驗證 Clerk session
+      （已完成並經使用者驗證，見下方 Phase 2「API Route Handlers：CRUD 進度/書籤/註記」項目）
 
 ### Phase 2 — 把 pwa/ 的閱讀器 UI 搬進 pwa-next/（進行中）
 > 這個階段開始前，`pwa/` 本身不會被動到，`pwa-next/` 只是逐步長出跟 `pwa/` 功能對等的

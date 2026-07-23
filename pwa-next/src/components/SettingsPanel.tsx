@@ -61,7 +61,13 @@ const SettingsPanel = ({
         <div style={{ fontFamily: SERIF, fontSize: 17, fontWeight: 500, letterSpacing: '0.01em', color: inkCol }}>排版與語音</div>
       </div>
 
-      <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, padding: 20, display: 'flex', flexDirection: 'column', gap: 24 }}>
+      {/* 桌面版朗讀中/已暫停時，底部會多一條 position:fixed 的朗讀控制列（見 Reader.tsx），
+          它不佔 flex 版面空間，所以這裡要額外補一段 padding-bottom 讓內容不被蓋住；
+          手機版朗讀列是正常排版流的元素，本來就會被 flex 版面扣掉，不需要額外處理。 */}
+      <div
+        className={ttsPlaying || ttsPaused ? 'pb-5 md:pb-16' : 'pb-5'}
+        style={{ flex: 1, overflowY: 'auto', minHeight: 0, paddingTop: 20, paddingLeft: 20, paddingRight: 20, display: 'flex', flexDirection: 'column', gap: 24 }}
+      >
 
         {/* ── 字體 ── */}
         <section>

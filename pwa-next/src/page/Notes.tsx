@@ -46,9 +46,9 @@ const Notes = () => {
   const grouped = useMemo(() => {
     const byBook = new Map<string, NoteRow[]>()
     for (const n of notes) {
-      const list = byBook.get(n.bookTitle) ?? []
+      const list = byBook.get(n.bookId) ?? []
       list.push(n)
-      byBook.set(n.bookTitle, list)
+      byBook.set(n.bookId, list)
     }
     return byBook
   }, [notes])
@@ -80,10 +80,10 @@ const Notes = () => {
             <p style={{ fontSize: 13, marginTop: 6 }}>在書裡劃線並留下筆記，會出現在這裡</p>
           </div>
         ) : (
-          Array.from(grouped.entries()).map(([bookTitle, rows]) => (
-            <div key={bookTitle} className="mb-6">
+          Array.from(grouped.entries()).map(([bookId, rows]) => (
+            <div key={bookId} className="mb-6">
               <div className="flex items-center gap-2 mb-2">
-                <span style={{ fontFamily: SERIF, fontSize: 14, fontWeight: 600, color: ink2Col }}>{bookTitle}</span>
+                <span style={{ fontFamily: SERIF, fontSize: 14, fontWeight: 600, color: ink2Col }}>{rows[0].bookTitle}</span>
                 <Link
                   href={`/?open=${rows[0].bookId}`}
                   style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.04em', color: ink3Col }}
