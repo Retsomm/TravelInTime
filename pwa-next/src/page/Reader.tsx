@@ -447,7 +447,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
       <div className="md:hidden shrink-0 border-t border-border bg-paper pb-[env(safe-area-inset-bottom)]">
         {/* 手機版朗讀控制列：永遠佔位（44px），用 visibility 切換顯示，避免動態加入/移除造成 epub.js ResizeObserver 觸發重新分頁 */}
         <div
-          className={`flex items-center gap-2.5 px-4 h-11 border-b border-border ${(playing || ttsPaused) ? 'visible pointer-events-auto' : 'invisible pointer-events-none'}`}
+          className={`flex items-center gap-2.5 px-4 h-9 border-b border-border ${(playing || ttsPaused) ? 'visible pointer-events-auto' : 'invisible pointer-events-none'}`}
           onClick={(e) => e.stopPropagation()}
           onTouchStart={(e) => e.stopPropagation()}
         >
@@ -457,7 +457,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
           <button
             onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); playing ? handleTTSPause() : handleTTSPlay() }}
             onClick={(e) => { e.stopPropagation(); playing ? handleTTSPause() : handleTTSPlay() }}
-            className="w-11 h-9 rounded-lg cursor-pointer bg-[#f1ede4] dark:bg-[#2a2520] border border-border text-ink flex items-center justify-center touch-manipulation shrink-0"
+            className="w-9 h-7 rounded-lg cursor-pointer bg-[#f1ede4] dark:bg-[#2a2520] border border-border text-ink flex items-center justify-center touch-manipulation shrink-0"
             aria-label={playing ? '暫停朗讀' : '繼續朗讀'}
           >
             {playing ? <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg> : <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="5,3 19,12 5,21"/></svg>}
@@ -465,13 +465,13 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
           <button
             onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); handleTTSReset() }}
             onClick={(e) => { e.stopPropagation(); handleTTSReset() }}
-            className="w-11 h-9 rounded-lg cursor-pointer bg-[#f1ede4] dark:bg-[#2a2520] border border-border text-ink-3 flex items-center justify-center touch-manipulation shrink-0"
+            className="w-9 h-7 rounded-lg cursor-pointer bg-[#f1ede4] dark:bg-[#2a2520] border border-border text-ink-3 flex items-center justify-center touch-manipulation shrink-0"
             aria-label="停止朗讀"
           >
             <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
           </button>
         </div>
-        <div className="flex items-center h-8 gap-2.5 px-4">
+        <div className="flex items-center h-6 gap-2.5 px-4">
           {ready && displayPageInfo && (
             <>
               <span className="font-ui-mono text-[10px] text-ink-3 whitespace-nowrap tracking-[0.04em] shrink-0">
