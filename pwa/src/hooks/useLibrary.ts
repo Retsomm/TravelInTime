@@ -74,6 +74,16 @@ export const loadBookSettings = (bookId: string): BookSettings | null => {
   }
 }
 
+// ── 內容綁定 id ─────────────────────────────────────────────────────────
+// 用檔案內容算 SHA-256，確保同一本書不管在哪裝置、匯入幾次都算出同一個 id，
+// 這樣重新匯入後才能跟雲端資料庫裡的舊進度/書籤/註記接回去。
+const hashFileContent = async (buffer: ArrayBuffer): Promise<string> => {
+  const digest = await crypto.subtle.digest('SHA-256', buffer)
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('')
+}
+
 // ── Hook ───────────────────────────────────────────────────────────────
 
 export const useLibrary = () => {
@@ -81,7 +91,15 @@ export const useLibrary = () => {
 
   const addBook = async (file: File): Promise<string> => {
     const buffer = await file.arrayBuffer()
-    const id = crypto.randomUUID()
+    const id = await hashFileContent(buffer)
+
+    // 同一份內容已經存在本機（例如重複匯入、或找回遺失的書本），
+    // 直接接回既有紀錄，不覆蓋既有進度/書籤/註記。
+    const alreadyExists = (await idbGet('files', id)) !== null
+    if (alreadyExists) {
+      touchBook(id)
+      return id
+    }
 
     await idbPut('files', id, buffer)
 

@@ -1,0 +1,55 @@
+.trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  text-align: left;
+  background: var(--paper-bg-2);
+  border: 1px solid var(--border-col);
+  color: var(--ink-col);
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.triggerLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chevron {
+  flex-shrink: 0;
+  margin-left: 4px;
+  color: var(--ink3-col);
+}
+
+.listbox {
+  background: var(--paper-bg);
+  border: 1px solid var(--border-col);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px -8px rgba(0, 0, 0, 0.2);
+  overflow-y: auto;
+  max-height: 240px;
+  padding: 4px 0;
+}
+
+.option {
+  padding: 7px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  background: transparent;
+  color: var(--ink3-col);
+  font-family: inherit;
+}
+
+.option[data-selected],
+.option[data-active] {
+  background: var(--paper-bg-2);
+}
+
+.option[data-selected] {
+  color: var(--ink-col);
+}

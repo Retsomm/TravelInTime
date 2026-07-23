@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type CSSProperties } from 'react'
 import type { BookRecord } from '@/hooks/useLibrary'
 import { coverStyleFor, formatDate, MONO, SERIF } from '@/components/Reader/bookCoverStyles'
 import { copyTextToClipboard } from '@/components/Reader/annotationUtils'
+import styles from './BookInfoPanel.module.css'
 
 const BookInfoPanel = ({
   record, getCoverDataUrl, darkMode, onClose, progress, embedded,
@@ -14,13 +15,22 @@ const BookInfoPanel = ({
   embedded?: boolean
 }) => {
   const [coverUrl, setCoverUrl] = useState<string | null>(null)
+  const [copyFailed, setCopyFailed] = useState(false)
   useEffect(() => {
     setCoverUrl(null)
     if (!record.hasCover) return
     let active = true
-    getCoverDataUrl(record.id).then((url) => { if (active && url) setCoverUrl(url) })
+    getCoverDataUrl(record.id)
+      .then((url) => { if (active && url) setCoverUrl(url) })
+      .catch(() => {})
     return () => { active = false }
   }, [record.id, record.hasCover, getCoverDataUrl])
+
+  const handleCopyTitle = () => {
+    copyTextToClipboard(record.title)
+      .then(() => setCopyFailed(false))
+      .catch(() => setCopyFailed(true))
+  }
 
   const paperBg   = darkMode ? '#1a1816' : '#f9f7f2'
   const paperBg2  = darkMode ? '#231f1c' : '#f1ede4'
@@ -33,16 +43,22 @@ const BookInfoPanel = ({
   const cs = coverStyleFor(record.id)
   const pct = progress != null ? Math.round(progress * 100) : null
 
+  const coverFallbackVars = {
+    '--cover-bg': cs.bg,
+    '--cover-rule': cs.rule,
+    '--cover-ink': cs.ink,
+  } as CSSProperties
+
   const coverEl = coverUrl ? (
     <img src={coverUrl} alt={record.title} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
   ) : (
-    <div style={{ width: '100%', height: '100%', background: cs.bg, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', padding: 14, position: 'relative', overflow: 'hidden' }}>
-      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'linear-gradient(135deg, rgba(255,255,255,0.06) 0%, transparent 60%)' }} />
-      <div style={{ borderBottom: `1px solid ${cs.rule}`, marginBottom: 8, paddingBottom: 6 }}>
-        <div style={{ fontFamily: SERIF, fontSize: 16, fontWeight: 600, color: cs.ink, lineHeight: 1.4, wordBreak: 'break-all' }}>{record.title}</div>
+    <div className={styles.coverFallback} style={coverFallbackVars}>
+      <div className={styles.coverFallbackOverlay} />
+      <div className={styles.coverFallbackTitleWrap}>
+        <div className={styles.coverFallbackTitle}>{record.title}</div>
       </div>
       {record.author && (
-        <div style={{ fontFamily: MONO, fontSize: 10, color: cs.rule, letterSpacing: '0.06em' }}>{record.author}</div>
+        <div className={styles.coverFallbackAuthor}>{record.author}</div>
       )}
     </div>
   )
@@ -63,10 +79,10 @@ const BookInfoPanel = ({
       </div>
 
       {/* 書名作者 */}
-      <div style={{ padding: '0 20px 16px' }}>
-        <div style={{ fontFamily: SERIF, fontSize: 16, fontWeight: 500, color: inkCol, lineHeight: 1.4, marginBottom: 4 }}>{record.title}</div>
+      <div className={styles.titleBlock} style={{ '--ink-col': inkCol, '--ink3-col': ink3Col } as CSSProperties}>
+        <div className={styles.title}>{record.title}</div>
         {record.author && (
-          <div style={{ fontFamily: MONO, fontSize: 11, color: ink3Col, letterSpacing: '0.04em' }}>{record.author}</div>
+          <div className={styles.author}>{record.author}</div>
         )}
       </div>
 
@@ -100,7 +116,7 @@ const BookInfoPanel = ({
       {/* 操作按鈕 */}
       <div style={{ padding: '12px 20px', display: 'flex', flexDirection: 'column', gap: 8 }}>
         <button
-          onClick={() => copyTextToClipboard(record.title)}
+          onClick={handleCopyTitle}
           style={{
             display: 'flex', alignItems: 'center', gap: 8, width: '100%',
             padding: '9px 14px', borderRadius: 8, background: paperBg2,
@@ -116,6 +132,9 @@ const BookInfoPanel = ({
           </svg>
           複製書名
         </button>
+        {copyFailed && (
+          <div style={{ fontFamily: MONO, fontSize: 10, color: accentCol }}>複製失敗，請手動複製</div>
+        )}
       </div>
     </div>
   )

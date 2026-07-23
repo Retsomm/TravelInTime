@@ -22,20 +22,29 @@ export const setSyncEnabled = (enabled: boolean) => {
 // 回傳這次請求是否成功（HTTP ok），呼叫端可以據此決定要不要繼續依賴這筆寫入的後續操作
 // （例如 Book 沒寫成功就不該接著送外鍵依賴它的 progress/bookmarks/annotations）。
 // 失敗仍然不重試、不拋錯——只是把「成功與否」誠實回報給呼叫端自行判斷，語意跟原本一致。
+// 逾時或請求本身出錯都視為失敗（resolve false），不阻塞佇列裡排在後面的請求。
+const PUSH_TIMEOUT_MS = 10000
+
 const push = (url: string, method: 'PUT' | 'DELETE', body?: unknown): Promise<boolean> => {
   if (!syncEnabled) return Promise.resolve(false)
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), PUSH_TIMEOUT_MS)
   return fetch(url, {
     method,
     headers: body ? { 'Content-Type': 'application/json' } : undefined,
     body: body ? JSON.stringify(body) : undefined,
+    signal: controller.signal,
   })
     .then((res) => res.ok)
     .catch(() => false)
+    .finally(() => clearTimeout(timer))
 }
 
-// bookmarks/annotations 是「整份清單覆蓋」的寫入，同一本書快速連續異動（例如連續刪除多筆）
-// 會送出多個 PUT，若同時在飛可能因回應順序顛倒讓舊快照蓋掉新快照。這裡依 bookId+resource
-// 建一條隊列，確保同一把 key 的請求嚴格照呼叫順序、一個接一個送出，回應順序就不會顛倒。
+// 同一本書的所有寫入（book 本身的 PUT/DELETE，以及 progress/bookmarks/annotations 的 PUT）
+// 共用同一把 bookId 隊列鍵，確保嚴格照呼叫順序、一個接一個送出：
+// 一來 progress/bookmarks/annotations 是整份覆蓋的寫入，回應順序顛倒會讓舊快照蓋掉新快照；
+// 二來 progress/bookmarks/annotations 在雲端資料庫外鍵依賴 book 那筆列，若 syncBook 還沒送達
+// 就送出，會撞外鍵違反錯誤——共用隊列讓 book 的寫入一定排在同一本書後續寫入之前。
 const queues = new Map<string, Promise<boolean>>()
 
 const enqueue = (key: string, task: () => Promise<boolean>): Promise<boolean> => {
@@ -45,21 +54,22 @@ const enqueue = (key: string, task: () => Promise<boolean>): Promise<boolean> =>
 }
 
 export const syncBook = (id: string, title: string, author: string, filename: string): Promise<boolean> =>
-  push(`/api/books/${id}`, 'PUT', { title, author, filename })
+  enqueue(id, () => push(`/api/books/${id}`, 'PUT', { title, author, filename }))
 
-export const syncRemoveBook = (id: string): Promise<boolean> => push(`/api/books/${id}`, 'DELETE')
+export const syncRemoveBook = (id: string): Promise<boolean> =>
+  enqueue(id, () => push(`/api/books/${id}`, 'DELETE'))
 
 export const syncProgress = (bookId: string, cfi: string): Promise<boolean> =>
-  enqueue(`${bookId}:progress`, () => push(`/api/books/${bookId}/progress`, 'PUT', { cfi }))
+  enqueue(bookId, () => push(`/api/books/${bookId}/progress`, 'PUT', { cfi }))
 
 export const syncBookmarks = (
   bookId: string,
   bookmarks: Array<{ id: string; cfi: string; label: string; addedAt: number }>,
 ): Promise<boolean> =>
-  enqueue(`${bookId}:bookmarks`, () => push(`/api/books/${bookId}/bookmarks`, 'PUT', { bookmarks }))
+  enqueue(bookId, () => push(`/api/books/${bookId}/bookmarks`, 'PUT', { bookmarks }))
 
 export const syncAnnotations = (
   bookId: string,
   annotations: Array<{ id: string; cfi: string; text: string; note?: string; color: string; chapter: string; createdAt: number }>,
 ): Promise<boolean> =>
-  enqueue(`${bookId}:annotations`, () => push(`/api/books/${bookId}/annotations`, 'PUT', { annotations }))
+  enqueue(bookId, () => push(`/api/books/${bookId}/annotations`, 'PUT', { annotations }))

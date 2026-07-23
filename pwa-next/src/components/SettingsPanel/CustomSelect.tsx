@@ -1,4 +1,5 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState, type CSSProperties } from 'react'
+import styles from './CustomSelect.module.css'
 
 interface SelectOption { label: string; value: string }
 
@@ -87,22 +88,19 @@ const CustomSelect = ({
       <button
         ref={triggerRef}
         type="button"
-        style={{
-          width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          fontSize: 13, padding: '6px 10px', borderRadius: 8, textAlign: 'left',
-          background: paperBg2, border: `1px solid ${borderCol}`, color: inkCol,
-          fontFamily: 'inherit', cursor: 'pointer',
-        }}
+        className={styles.trigger}
+        style={{ '--paper-bg-2': paperBg2, '--border-col': borderCol, '--ink-col': inkCol, '--ink3-col': ink3Col } as CSSProperties}
         onClick={() => open ? setOpen(false) : openDropdown()}
         onKeyDown={handleTriggerKeyDown}
+        role="combobox"
         aria-label={ariaLabel}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={listboxId}
         aria-activedescendant={open && activeIndex >= 0 ? getOptionId(activeIndex) : undefined}
       >
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{selected?.label ?? ''}</span>
-        <svg style={{ flexShrink: 0, marginLeft: 4, color: ink3Col }} width="12" height="12" viewBox="0 0 12 12" fill="none">
+        <span className={styles.triggerLabel}>{selected?.label ?? ''}</span>
+        <svg className={styles.chevron} width="12" height="12" viewBox="0 0 12 12" fill="none">
           <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
         </svg>
       </button>
@@ -110,7 +108,8 @@ const CustomSelect = ({
         <div
           ref={listRef}
           id={listboxId}
-          style={{ ...dropdownStyle, background: paperBg, border: `1px solid ${borderCol}`, borderRadius: 8, boxShadow: '0 8px 24px -8px rgba(0,0,0,0.2)', overflowY: 'auto', maxHeight: 240, padding: '4px 0' }}
+          className={styles.listbox}
+          style={{ ...dropdownStyle, '--paper-bg': paperBg, '--paper-bg-2': paperBg2, '--border-col': borderCol, '--ink-col': inkCol, '--ink3-col': ink3Col } as CSSProperties}
           role="listbox"
         >
           {options.map((o, i) => (
@@ -119,14 +118,10 @@ const CustomSelect = ({
               id={getOptionId(i)}
               role="option"
               aria-selected={o.value === value}
-              style={{
-                padding: '7px 12px', fontSize: 13, cursor: 'pointer',
-                background: o.value === value || i === activeIndex ? paperBg2 : 'transparent',
-                color: o.value === value ? inkCol : ink3Col,
-                fontFamily: 'inherit',
-              }}
-              onMouseEnter={(e) => { setActiveIndex(i); if (o.value !== value) e.currentTarget.style.background = paperBg2 }}
-              onMouseLeave={(e) => { if (o.value !== value && i !== activeIndex) e.currentTarget.style.background = 'transparent' }}
+              className={styles.option}
+              data-selected={o.value === value || undefined}
+              data-active={i === activeIndex || undefined}
+              onMouseEnter={() => setActiveIndex(i)}
               onMouseDown={() => { onChange(o.value); setOpen(false) }}
             >
               {o.label}

@@ -7,6 +7,10 @@ const FOCUSABLE_SELECTOR = 'button, [href], input, select, textarea, [tabindex]:
 // 確保鍵盤使用者在對話框開啟期間也碰不到背景控制項。
 export const useModalA11y = (onClose: () => void) => {
   const containerRef = useRef<HTMLDivElement>(null)
+  const onCloseRef = useRef(onClose)
+  useEffect(() => {
+    onCloseRef.current = onClose
+  })
 
   useEffect(() => {
     const previouslyFocused = document.activeElement as HTMLElement | null
@@ -16,7 +20,7 @@ export const useModalA11y = (onClose: () => void) => {
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        onClose()
+        onCloseRef.current()
         return
       }
       if (e.key !== 'Tab' || !container) return
@@ -38,7 +42,6 @@ export const useModalA11y = (onClose: () => void) => {
       document.removeEventListener('keydown', handleKeyDown)
       previouslyFocused?.focus()
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   return containerRef
