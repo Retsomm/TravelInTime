@@ -9,7 +9,7 @@ const manifest = (): MetadataRoute.Manifest => {
     scope: '/',
     display: 'standalone',
     orientation: 'any',
-    background_color: '#fafaf9',
+    background_color: '#1a1816',
     theme_color: '#1c1917',
     icons: [
       { src: '/logo.png', sizes: '1024x1024', type: 'image/png', purpose: 'any' },

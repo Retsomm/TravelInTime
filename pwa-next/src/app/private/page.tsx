@@ -1,10 +1,15 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Privacy from '@/page/Privacy'
 
 const PrivatePage = () => {
   const [darkMode, setDarkMode] = useState(true)
+
+  // 把 dark class 同步到 <html>，讓 body 的 background-color 能跟著切換
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', darkMode)
+  }, [darkMode])
 
   return (
     <div className={darkMode ? 'dark' : ''}>

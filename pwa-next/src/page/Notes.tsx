@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useLibrary } from '@/hooks/useLibrary'
 import { loadAnnotationsForBook, saveAnnotationsForBook } from '@/store/useAnnotationStore'
@@ -19,6 +19,11 @@ const Notes = () => {
   const { records } = useLibrary()
   const [darkMode, setDarkMode] = useState(true)
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
+
+  // 把 dark class 同步到 <html>，讓 body 的 background-color 能跟著切換
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', darkMode)
+  }, [darkMode])
 
   const [notes, setNotes] = useState<NoteRow[]>(() =>
     records
