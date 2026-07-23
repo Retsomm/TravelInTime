@@ -1,13 +1,14 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useUser } from '@clerk/nextjs'
 import Library from '@/page/Library'
 import Reader from '@/page/Reader'
 import MissingBookModal from '@/components/Library/MissingBookModal'
 import { useLibrary, loadBookmarks, loadProgress } from '@/hooks/useLibrary'
 import { loadAnnotationsForBook } from '@/store/useAnnotationStore'
-import { syncBook, syncProgress, syncBookmarks, syncAnnotations } from '@/utils/cloudSync'
+import { syncBook, syncProgress, syncBookmarks, syncAnnotations, setSyncEnabled } from '@/utils/cloudSync'
 
 type View = 'library' | 'reader'
 
@@ -21,21 +22,34 @@ const App = () => {
   const recoverFileInputRef = useRef<HTMLInputElement>(null)
   const { isSignedIn } = useUser()
 
+  // cloudSync.ts 的每個 sync 函式都要先查這個開關才會真的發請求，未登入時完全不送出，
+  // 不是「送出去再被 401 擋掉」。這個 effect 一定要排在下面的登入補推 effect 之前
+  // （React 同一個元件裡的 effect 依宣告順序執行），不然補推當下開關還沒打開。
+  useEffect(() => {
+    setSyncEnabled(!!isSignedIn)
+  }, [isSignedIn])
+
   // 登入當下，把本機既有的書本/進度/書籤/註記全部背景推一次到雲端——
   // 平常只有「資料異動時」才會觸發同步（見 cloudSync.ts 的呼叫點），
   // 這裡補上「登入那一刻」把已經存在的舊資料也一次補推上去，否則要等
   // 使用者剛好再異動到那本書才會補推。
+  // 每本書內部要先等 syncBook 完成才能推它的進度/書籤/註記（外鍵依賴，
+  // 雲端資料庫要先有這本書的列才能寫入子資料），不同書之間則可以平行推。
   useEffect(() => {
     if (!isSignedIn) return
-    for (const r of records) {
-      syncBook(r.id, r.title, r.author, r.filename)
-      const cfi = loadProgress(r.id)
-      if (cfi) syncProgress(r.id, cfi)
-      const bookmarks = loadBookmarks(r.id)
-      if (bookmarks.length > 0) syncBookmarks(r.id, bookmarks)
-      const annotations = loadAnnotationsForBook(r.id)
-      if (annotations.length > 0) syncAnnotations(r.id, annotations)
-    }
+    Promise.all(
+      records.map(async (r) => {
+        await syncBook(r.id, r.title, r.author, r.filename)
+        const cfi = loadProgress(r.id)
+        const bookmarks = loadBookmarks(r.id)
+        const annotations = loadAnnotationsForBook(r.id)
+        await Promise.all([
+          cfi ? syncProgress(r.id, cfi) : undefined,
+          bookmarks.length > 0 ? syncBookmarks(r.id, bookmarks) : undefined,
+          annotations.length > 0 ? syncAnnotations(r.id, annotations) : undefined,
+        ])
+      }),
+    )
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSignedIn])
 
@@ -55,6 +69,17 @@ const App = () => {
   const handleAddBooks = async (files: File[]) => {
     await Promise.allSettled(files.map((file) => addBook(file)))
   }
+
+  // 從「我的筆記」頁點「開啟這本書」會連到 /?open=<bookId>，這裡接手打開並清掉網址參數。
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  useEffect(() => {
+    const openId = searchParams.get('open')
+    if (!openId) return
+    handleOpenBook(openId)
+    router.replace('/')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
 
   const handleRecoverFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]

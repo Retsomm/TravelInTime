@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
+import ServiceWorkerRegister from "@/components/ServiceWorkerRegister";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -39,7 +40,10 @@ export default function RootLayout({
             rel="stylesheet"
           />
         </head>
-        <body className="h-full antialiased">{children}</body>
+        <body className="h-full antialiased">
+          {children}
+          <ServiceWorkerRegister />
+        </body>
       </html>
     </ClerkProvider>
   );

@@ -1,3 +1,21 @@
+export const patchBookPrototype = (bookProto: any) => {
+  if (!bookProto.replacements || bookProto._replacementsGuard) return
+  const orig = bookProto.replacements
+  bookProto.replacements = new Proxy(orig, {
+    apply(target, thisArg: { resources?: unknown }, args: unknown[]) {
+      // epub.js bug 修補：book.destroy() 後 this.resources 會變成 undefined，
+      // 若此時 replacements()/replaceCss() 的非同步鏈仍在跑，會噴
+      // "Cannot read properties of undefined (reading 'replaceCss')"。
+      // book 已經 destroy 時代表這個結果已經沒人在乎了，靜默吞掉即可。
+      return (target.apply(thisArg, args) as Promise<unknown>).catch((e: unknown) => {
+        if (!thisArg.resources) return
+        throw e
+      })
+    },
+  })
+  bookProto._replacementsGuard = true
+}
+
 export const patchRenditionPrototype = (renditionProto: any) => {
   if (!renditionProto.injectIdentifier || renditionProto._injectIdentifierGuard) return
   const orig = renditionProto.injectIdentifier

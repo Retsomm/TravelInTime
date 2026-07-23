@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
+import Link from 'next/link'
 import type { BookRecord } from '@/hooks/useLibrary'
-import { IconMoon, IconPlus, IconRefresh, IconSearch, IconSun } from '@/components/Library/icons'
+import { IconMoon, IconNote, IconPlus, IconRefresh, IconSearch, IconSun } from '@/components/Library/icons'
 import BookCard from '@/components/Library/BookCard'
 import ConfirmModal from '@/components/Library/ConfirmModal'
 import AuthStatus from '@/components/Library/AuthStatus'
@@ -158,6 +159,17 @@ const Library = ({ records, getCoverDataUrl, onAddBooks, onOpenBook, onRemoveBoo
                     <IconRefresh />
                     <span>{applyingUpdate ? '更新中…' : '套用最新版'}</span>
                   </button>
+                  <Link
+                    href="/notes"
+                    style={{
+                      width: '100%', minHeight: 34, borderRadius: 6, padding: '8px 10px',
+                      display: 'flex', alignItems: 'center', gap: 8,
+                      color: inkCol, fontFamily: 'inherit', fontSize: 13, textAlign: 'left',
+                    }}
+                  >
+                    <IconNote />
+                    <span>我的筆記</span>
+                  </Link>
                 </div>
               )}
             </div>

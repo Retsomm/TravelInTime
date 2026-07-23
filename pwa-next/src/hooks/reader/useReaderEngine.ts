@@ -9,7 +9,7 @@ import { useAnnotationStore, loadAnnotationsForBook, saveAnnotationsForBook } fr
 import type { Annotation } from '@/store/useAnnotationStore'
 import { saveProgress, loadProgress, saveBookSettings, loadBookSettings } from '@/hooks/useLibrary'
 import type { BookRecord } from '@/hooks/useLibrary'
-import { patchIframeViewPrototype, patchRenditionPrototype } from '@/components/Reader/epubPatches'
+import { patchBookPrototype, patchIframeViewPrototype, patchRenditionPrototype } from '@/components/Reader/epubPatches'
 import { applyDarkOverride, applyFontFamilyOverride, applyFontSizeOverride, applyLetterSpacingOverride, applyLineHeightOverride, normalizeFontFamily } from '@/components/Reader/readerStyles'
 import { convertDoc, getToSC, getToTC, restoreDoc } from '@/components/Reader/scriptConversion'
 import { DEBUG_TTS_FOLLOW, TTS_HIGHLIGHT_INTERVAL, TTS_NEW_PAGE_AUTO_FOLLOW_GUARD, TTS_PAGE_END_FIXED_LEAD, TTS_USER_INPUT_GRACE, clearTTSHighlight, clearTTSHighlights, collectContentDocuments, createRangeFromTextOffset, ensureTTSHighlightStyle, getBoundaryOffsetFromRange, getTTSRangeViewportState, getTextIndex, paintTTSHighlightOverlay, ttsTextIndexCache } from '@/components/Reader/ttsHighlight'
@@ -273,6 +273,12 @@ export const useReaderEngine = (params: {
         bookBufferRef.current = buffer
         const book = ePub(buffer)
         bookRef.current = book
+
+        // epub.js bug 修補：book.destroy() 後 this.resources 會變成 undefined，若此時
+        // replacements()/replaceCss() 的非同步鏈仍在跑就會 crash（dev 模式下 effect
+        // 重複掛載很容易踩到：先建立又立刻 destroy 的那個 book 實例）。
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        patchBookPrototype(Object.getPrototypeOf(book) as any)
 
         const rendition = book.renderTo(container, {
           width: container.clientWidth,

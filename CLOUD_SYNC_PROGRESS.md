@@ -9,10 +9,10 @@ tags:
 > 本文件目的：這是跨多次對話的大工程，單一對話的 context 不會保留，所以把決策與計畫寫在這裡，
 > 之後任何一次對話（不論是不是同一個 Claude session）都能從這裡接續，不用重新討論一次。
 
-**現況：Phase 1（Next.js 骨架 + Prisma + Clerk）、Phase 2 的雲端同步核心（登入 UI、CRUD API、
-前端本機優先＋背景同步）都已完成並經使用者實測驗證（Neon 四張表確認有資料）。
-`pwa-next/` 的閱讀器 UI 尚未跟 `pwa/` 逐項比對過完整功能對等，離「可以切換上線」還有距離，
-見下方 Phase 2 剩餘項目與 Phase 3。**
+**現況：Phase 1、Phase 2（雲端同步核心、書本檔案遺失復原、PWA 安裝/離線、登入提示強化）、
+Phase 3 的「我的筆記」頁面都已完成寫碼；雲端同步核心與書本檔案遺失復原這兩塊已經過使用者
+實測驗證，其餘（PWA/登入提示視覺/我的筆記頁）還沒有。`pwa-next/` 的閱讀器 UI 尚未跟 `pwa/`
+逐項比對過完整功能對等，離「可以切換上線」還有距離，見下方 Phase 5。**
 
 ---
 
@@ -175,10 +175,29 @@ repo 根目錄的 `package.json` 其實是 **Electron 桌面版**的建置設定
       過程中發現並修正一個 bug：一開始 `proxy.ts` 把除了 `/api/health` 以外的「所有」路由都
       擋在 Clerk 登入後面，包含 `/` 和 `/private`——但書庫瀏覽/閱讀完全是本機功能，不該要求
       登入，`/private`（隱私權政策）更是必須公開。已改成只保護 `/api/me`，頁面路由一律公開。
-- [ ] **PWA 安裝／離線能力尚未搬遷**：舊的 `pwa/` 用 `vite-plugin-pwa` 產生 manifest.webmanifest、
-      service worker（workbox）、離線快取，這部分在 `pwa-next/` 完全還沒做（Next.js 沒有對應的
-      內建功能，需要另外設定，例如 `next-pwa` 或手寫 service worker）。這次先確保核心閱讀功能
-      能動，PWA 安裝/離線是故意延後的獨立子任務，不要誤以為已經包含在目前的進度裡。
+- [x] PWA 安裝／離線能力
+      （2026-07-23：manifest 用 Next.js 內建的 `app/manifest.ts` 慣例（不用額外套件），數值跟舊
+      `pwa/vite.config.ts` 的 `VitePWA` 設定對齊（name/theme_color/background_color/icons）；
+      `yarn build` 確認會自動產生 `/manifest.webmanifest` route，curl 實測內容正確、
+      `Content-Type` 也對。
+
+      service worker 沒有用 `next-pwa`／`serwist` 這類套件——考量這次專案裡已經踩過好幾次
+      Next 16／Prisma 7 這種新版本跟第三方套件相容性的雷，`next-pwa` 對 Turbopack／Next 16
+      的支援沒有把握，加一個不確定相容的套件風險比自己寫更大。改成手寫一支極簡的
+      `public/sw.js`：網路優先、離線時退回快取、導覽請求最後退回 `/`。**這個手寫版本的取捨
+      要老實說清楚**：沒有 build-time 產生的資源清單，不會預先快取整個網站，離線能力只涵蓋
+      「使用者連線時實際造訪過的頁面/資源」，跟舊版 `vite-plugin-pwa`+workbox 那種「安裝當下
+      就預先快取好整個 app shell」不是同一個等級的離線體驗，是刻意的簡化版，不是功能對等。
+      書本內容/進度/書籤/註記本來就在 IndexedDB/localStorage，不受這個快取策略影響。
+      `ServiceWorkerRegister.tsx` 只在 `NODE_ENV==='production'` 註冊，避免 `yarn dev` 時
+      service worker 快取住開發資源、Fast Refresh 後畫面還是舊的（這類設定常見的坑）。
+
+      `yarn build` 通過，curl 確認 `/sw.js` 能正常存取（`Content-Type:
+      application/javascript`）。**這部分完全沒有在真實瀏覽器測過**，curl 沒辦法驗證
+      service worker 真的有註冊成功、離線時是否真的能開啟已造訪過的頁面、Chrome/手機瀏覽器
+      的「加到主畫面」安裝流程是否正常出現——這些都需要使用者在 `yarn start`（production
+      模式，不是 `yarn dev`）下用真實瀏覽器測試，用開發者工具的 Application 分頁確認
+      Manifest／Service Workers 兩個項目狀態正常。）
 - [x] 加入 Clerk 登入 UI
       （2026-07-23：新增 `components/Library/AuthStatus.tsx`，插入 `Library.tsx` 兩種 header
       （空書庫／有書籍）；未登入顯示登入圖示按鈕（`SignInButton mode="modal"`，彈窗登入不用跳頁），
@@ -216,7 +235,10 @@ repo 根目錄的 `package.json` 其實是 **Electron 桌面版**的建置設定
       localStorage，沒有單筆增刪的個別 API 呼叫點，這就是為什麼上一項把書籤/註記 API 改成
       整包替換。未登入時這些 fetch 一樣會發出去，只是穩定收到 401 後被吞掉——沒有另外判斷
       「有沒有登入」才發請求，刻意保持簡單。`yarn build` 通過。
-      **尚未做**：未登入時沒有任何 UI 提示「登入以啟用雲端備份」。
+      **2026-07-23 補上**：`AuthStatus.tsx` 原本未登入時只有一個 icon 按鈕，靠 hover title
+      提示「登入以啟用雲端同步」，不夠明顯。改成 icon + 文字標籤（「登入以雲端備份」，桌面寬度
+      才顯示文字，手機維持 icon-only 避免擠版面），跟書庫其他按鈕（例如「匯入 ePub」）的
+      icon+文字慣例一致。`yarn build` 通過，**還沒實際在瀏覽器看過視覺效果**。
 
       **2026-07-23 使用者實測回報並已修的 bug**：使用者第一次實測（登入、匯入書、翻頁、畫線），
       Neon 的 `reading_progress`/`annotations`/`bookmarks` 都是空的。從瀏覽器 Network 分頁
@@ -241,8 +263,65 @@ repo 根目錄的 `package.json` 其實是 **Electron 桌面版**的建置設定
       `P2028` transaction 逾時這次沒有再出現，先前的推測（重複 500 疊加造成的次生現象）
       成立，不用另外處理。
 
+      **2026-07-23 又抓到一個相關的競速條件 bug**：使用者反映希望「未登入時的資料，登入後
+      自動走雲端」——這個機制本來就有（見上面「登入當下補推」），但檢查後發現登入當下補推
+      迴圈裡，`syncBook(...)` 跟緊接著的 `syncProgress`/`syncBookmarks`/`syncAnnotations`
+      都是 fire-and-forget、沒有互相等待，等於這幾個請求幾乎同時送出——如果進度/書籤/註記的
+      請求比 `syncBook` 早一步抵達伺服器，雲端資料庫還沒有這本書的列，一樣會撞外鍵違反錯誤，
+      跟先前那個「舊書從沒同步過」的 bug 現象相同，但根因是請求送出順序的競速，不是漏掉呼叫。
+      修法：`cloudSync.ts` 每個函式改成回傳 `Promise<void>`（沿用同一個 fetch，settle 就好，
+      大部分呼叫端仍然當 fire-and-forget 用、不用 await），登入補推迴圈改成對每本書
+      `await syncBook(...)` 完成後才接著推該書的進度/書籤/註記，不同書之間仍然平行推
+      （`Promise.all` 包每本書，每本書內部循序）。`yarn build` 通過。
+
+      同時釐清一個使用者可能誤解的地方：**本機儲存本來就不會被雲端同步失敗影響**——不管
+      有沒有登入、雲端請求成功或失敗，`localStorage`/`IndexedDB` 的寫入都是同步呼叫的第一步，
+      雲端同步永遠是「寫完本機之後」才額外觸發的背景動作，失敗會被 `.catch` 吞掉，不會拋回
+      呼叫端、不會讓本機儲存跟著失敗、也不會有任何錯誤跳出來擋住使用者操作。之前使用者在
+      瀏覽器 Network 分頁 / 終端機看到的 500，只是背景同步請求本身失敗的紀錄，從使用者操作
+      的角度完全不會感覺到——這部分不需要改，本來就是這樣設計的。
+
+      **2026-07-23 使用者進一步反映**：未登入時背景同步請求還是會發出去、被伺服器用 401
+      擋掉，雖然不影響操作，但使用者不希望看到這些請求。改成 `cloudSync.ts` 加一個模組層級
+      開關 `setSyncEnabled`／`syncEnabled`，未登入時 `push()` 直接不 `fetch`（回傳
+      `Promise.resolve()`），不是「送出去再被 401 擋掉」。`App.tsx` 新增一個 effect，
+      監聽 `isSignedIn` 同步這個開關，且刻意排在登入補推那個 effect**之前**宣告（React
+      同元件內的 effect 依宣告順序執行，這裡先開開關、下一個 effect 才用得到）。`yarn build`
+      通過。
+
+      **2026-07-23 使用者實測回報一個新問題並排查**：瀏覽器 console 印出
+      `TypeError: Cannot read properties of undefined (reading 'replaceCss')`。追查 epub.js
+      原始碼發現：`book.destroy()` 會把 `this.resources` 設成 `undefined`，如果開啟書本時
+      內部非同步的 `replacements().then(() => this.resources.replaceCss())` 鏈還沒跑完、
+      book 就被 destroy，就會撞到這個錯誤；epub.js 自己有包 `.catch(err => console.error(err))`，
+      所以這個錯誤本來就只會被印在 console，不會變成沒接住的例外。使用者確認：**書本畫面正常
+      顯示，只有 console 有錯誤訊息**，判斷是無害的雜訊（很可能是 dev 模式下 effect 重複
+      掛載，先建立又立刻 destroy 的那個 book 實例留下的殘留錯誤）。既然 `epubPatches.ts`
+      裡已經有同一類「epub.js 物件在非同步操作中被 destroy」問題的既有 patch 慣例
+      （`patchRenditionPrototype`／`patchIframeViewPrototype`），跟進同樣手法新增
+      `patchBookPrototype`，wrap `Book.prototype.replacements`，如果 reject 當下
+      `this.resources` 已經是 undefined（代表 book 已經被 destroy，這個結果沒人在乎了）就
+      靜默吞掉，否則正常往外拋。`yarn build` 通過，**這個修正還沒被使用者複測**，需要確認
+      同樣情境下 console 不再印這個錯誤（或至少確認沒有引入新的問題）。
+
+      **2026-07-23 使用者測試 OK**：未登入不再發同步請求、登入補推競速修正、epub.js
+      console 錯誤，三項都驗證通過。
+
 ### Phase 3 — 新功能（在 pwa-next/ 裡做）
-- [ ] 新增「我的筆記」獨立列表頁面
+- [x] 新增「我的筆記」獨立列表頁面
+      （2026-07-23：新增 `src/page/Notes.tsx` + `app/notes/page.tsx`（`next/dynamic` + `ssr:false`，
+      跟主頁面同樣的手法，因為要讀 localStorage）。讀本機資料（跟整個 app 的「本機優先」原則
+      一致，不是讀雲端資料庫——不需要登入也能用），遍歷 `useLibrary()` 的所有書本呼叫
+      `loadAnnotationsForBook`，攤平成一個依時間排序、依書名分組的清單，每筆顯示劃線原文、
+      筆記、章節、日期，有一個「開啟這本書 →」連結（`/?open=<bookId>`）跟刪除功能（直接讀寫
+      `localStorage`，沒有透過 Reader 內的 zustand store，因為那個 store 一次只服務一本書）。
+      Library 的 logo 選單新增「我的筆記」連結入口（新增 `IconNote`）。
+      `App.tsx` 新增處理 `?open=` query param 的 `useEffect`（用 `next/navigation` 的
+      `useSearchParams`/`useRouter`），讓從筆記頁點連結回到書庫時能自動打開對應的書、
+      再清掉網址參數。`yarn build` 通過，curl 確認 `/notes` route 回 200（實際內容是
+      client-only render，跟首頁一樣 curl 看不到，需要瀏覽器驗證）。**完全沒有在瀏覽器
+      實測過**，需要使用者確認：清單有沒有正確列出所有書的註記、分組/排序對不對、
+      「開啟這本書」連結能不能正確跳轉並打開閱讀器、刪除功能有沒有正常運作。）
 - [x] `handleOpenBook` 補上本機檔案遺失的提示 + 重新匯入引導 + 匯入後自動用內容 hash 比對接回雲端資料
       （2026-07-23：新增 `components/Library/MissingBookModal.tsx`，`getBookUrl` 找不到檔案時
       跳出提示＋一個隱藏的檔案選取器讓使用者重新匯入；選對檔案（hash 相符）會直接接續打開，

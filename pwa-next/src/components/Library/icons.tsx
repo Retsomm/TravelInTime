@@ -36,3 +36,10 @@ export const IconArrowLeft = () => (
     <polyline points="12 19 5 12 12 5" />
   </svg>
 )
+export const IconNote = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4 4h13l3 3v13H4z" />
+    <line x1="8" y1="10" x2="16" y2="10" />
+    <line x1="8" y1="14" x2="14" y2="14" />
+  </svg>
+)
