@@ -1,0 +1,43 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-reading: Georgia, serif;
+  --font-ui-serif: "Source Serif 4", "Noto Serif TC", Georgia, serif;
+  --font-ui-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  /* 書庫/閱讀器共用的紙質主題色，淺色預設值在此，深色覆寫見下方 .dark */
+  --color-paper: #f9f7f2;
+  --color-paper-2: #f1ede4;
+  --color-border: #e4ddd0;
+  --color-ink: #2a2420;
+  --color-ink-2: #5a4e44;
+  --color-ink-3: #9a8f80;
+  --color-accent: oklch(0.62 0.14 40);
+}
+
+.dark {
+  --color-paper: #1a1816;
+  --color-paper-2: #231f1c;
+  --color-border: #3a3430;
+  --color-ink: #e8e0d4;
+  --color-ink-2: #b8afa4;
+  --color-ink-3: #7a706a;
+}
+
+/* 防止 iOS 水平 rubber-band 捲動；並鎖定整頁高度為視覺視窗高度，
+   避免 Safari 網址列造成 100vh 誤判而產生整頁垂直捲軸（底部頁數等內容被藏在可視範圍外）。
+   捲動一律交由頁面內部指定容器（如書庫清單）的 overflow-y-auto 處理。 */
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+html,
+body {
+  overflow-x: hidden;
+  max-width: 100%;
+}

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { META_KEY, bookmarksKey, progressKey, settingsKey } from '@/constants/storageKeys'
 import { idbGet, idbPut, idbDelete } from '@/utils/indexedDb'
 import { extractMeta } from '@/utils/epubMetadata'
+import { syncBook, syncRemoveBook, syncProgress, syncBookmarks } from '@/utils/cloudSync'
 
 export interface BookRecord {
   id: string
@@ -40,13 +41,17 @@ export const loadBookmarks = (bookId: string): Bookmark[] => {
   try { return JSON.parse(localStorage.getItem(bookmarksKey(bookId)) ?? '[]') } catch { return [] }
 }
 
-export const saveBookmarks = (bookId: string, bookmarks: Bookmark[]) =>
+export const saveBookmarks = (bookId: string, bookmarks: Bookmark[]) => {
   localStorage.setItem(bookmarksKey(bookId), JSON.stringify(bookmarks))
+  syncBookmarks(bookId, bookmarks)
+}
 
 // ── Reading progress ───────────────────────────────────────────────────
 
-export const saveProgress = (bookId: string, cfi: string) =>
+export const saveProgress = (bookId: string, cfi: string) => {
   localStorage.setItem(progressKey(bookId), cfi)
+  syncProgress(bookId, cfi)
+}
 
 export const loadProgress = (bookId: string): string | null =>
   localStorage.getItem(progressKey(bookId))
@@ -93,11 +98,35 @@ export const useLibrary = () => {
     const buffer = await file.arrayBuffer()
     const id = await hashFileContent(buffer)
 
-    // 同一份內容已經存在本機（例如重複匯入、或找回遺失的書本），
-    // 直接接回既有紀錄，不覆蓋既有進度/書籤/註記。
-    const alreadyExists = (await idbGet('files', id)) !== null
-    if (alreadyExists) {
+    const existingRecord = loadMeta().find((r) => r.id === id)
+    const fileExists = (await idbGet('files', id)) !== null
+
+    if (existingRecord && fileExists) {
+      // 重複匯入同一本書：資料都在，直接接回既有紀錄，不覆蓋既有進度/書籤/註記。
       touchBook(id)
+      syncBook(id, existingRecord.title, existingRecord.author, existingRecord.filename)
+      return id
+    }
+
+    if (existingRecord && !fileExists) {
+      // 書本檔案遺失後的復原匯入：書庫清單裡的紀錄還在，只是 IndexedDB 裡的檔案內容不見了，
+      // 這裡只補回檔案本體，不能再走下面「新書」的路徑，否則會產生重複的書庫項目。
+      await idbPut('files', id, buffer)
+      touchBook(id)
+      syncBook(id, existingRecord.title, existingRecord.author, existingRecord.filename)
+
+      // 封面圖存在同一個 IndexedDB 資料庫的另一個 store，檔案遺失時很可能也一併消失了，
+      // 這裡重新萃取補回，避免 hasCover 是 true 但實際讀不到封面圖。
+      extractMeta(buffer, file.name).then(({ coverDataUrl }) => {
+        if (!coverDataUrl) return
+        idbPut('covers', id, coverDataUrl)
+        setRecords((prev) => {
+          const next = prev.map((r) => (r.id === id ? { ...r, hasCover: true } : r))
+          saveMeta(next)
+          return next
+        })
+      })
+
       return id
     }
 
@@ -117,6 +146,7 @@ export const useLibrary = () => {
       saveMeta(next)
       return next
     })
+    syncBook(id, initial.title, initial.author, initial.filename)
 
     extractMeta(buffer, file.name).then(({ title, author, coverDataUrl }) => {
       if (coverDataUrl) idbPut('covers', id, coverDataUrl)
@@ -127,6 +157,7 @@ export const useLibrary = () => {
         saveMeta(next)
         return next
       })
+      syncBook(id, title, author, initial.filename)
     })
 
     return id
@@ -152,6 +183,7 @@ export const useLibrary = () => {
       saveMeta(next)
       return next
     })
+    syncRemoveBook(id)
   }
 
   const touchBook = (id: string) => {
