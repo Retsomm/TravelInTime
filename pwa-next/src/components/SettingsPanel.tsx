@@ -54,6 +54,9 @@ const SettingsPanel = ({
     setApplyingUpdate(true)
     try {
       await onApplyLatestVersion()
+    } catch (err) {
+      console.error('[PWA] 套用最新版失敗:', err)
+      window.alert('套用最新版失敗，請稍後再試一次。')
     } finally {
       setApplyingUpdate(false)
     }
