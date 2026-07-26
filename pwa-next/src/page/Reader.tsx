@@ -335,6 +335,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
               onLineHeightChange={setLineHeight}
               letterSpacing={letterSpacing}
               onLetterSpacingChange={setLetterSpacing}
+              onApplyLatestVersion={onApplyLatestVersion}
             />
           </div>
         )}

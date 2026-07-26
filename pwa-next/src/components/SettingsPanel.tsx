@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { FONT_OPTIONS } from '@/store/useReaderStore'
 import type { Script } from '@/store/useReaderStore'
 import NumStepper from '@/components/SettingsPanel/NumStepper'
@@ -32,6 +33,7 @@ interface Props {
   onLineHeightChange: (v: number) => void
   letterSpacing: number
   onLetterSpacingChange: (v: number) => void
+  onApplyLatestVersion: () => void | Promise<void>
 }
 
 const segBgClass = 'bg-paper-2 border border-border rounded-lg p-0.5 flex gap-0.5'
@@ -42,11 +44,23 @@ const SettingsPanel = ({
   ttsPlaying, ttsPaused, onTTSPlay, onTTSPause, onTTSReset, ttsVoices, ttsSelectedVoice, onTTSVoiceChange,
   ttsRate, onTTSRateChange, ttsSleepMinutes, onTTSSleepChange, ttsSleepRemaining,
   lineHeight, onLineHeightChange, letterSpacing, onLetterSpacingChange,
+  onApplyLatestVersion,
 }: Props) => {
   const ttsIdle = !ttsPlaying && !ttsPaused
+  const [applyingUpdate, setApplyingUpdate] = useState(false)
+
+  const handleApplyLatestVersion = async () => {
+    if (applyingUpdate) return
+    setApplyingUpdate(true)
+    try {
+      await onApplyLatestVersion()
+    } finally {
+      setApplyingUpdate(false)
+    }
+  }
 
   return (
-    <div className="w-80 shrink-0 h-full border-l border-border bg-paper flex flex-col overflow-hidden">
+    <div className="w-full md:w-80 shrink-0 h-full md:border-l border-border bg-paper flex flex-col overflow-hidden">
       {/* Header */}
       <div className="px-5 py-4 border-b border-border shrink-0">
         <div className="font-ui-serif text-[17px] font-medium tracking-[0.01em] text-ink">排版與語音</div>
@@ -196,6 +210,22 @@ const SettingsPanel = ({
               ))}
             </div>
           </div>
+        </section>
+
+        {/* ── 應用程式 ── */}
+        {/* 手機版沒有桌面版 logo 選單可用，這裡是行動裝置上唯一能清快取強制取得最新版的入口，
+            iOS PWA 常因為快取住舊版 JS 造成功能異常，出問題時優先請使用者按這個按鈕。 */}
+        <section>
+          <SectTitle>應用程式</SectTitle>
+          <button
+            onClick={handleApplyLatestVersion}
+            disabled={applyingUpdate}
+            className={`w-full min-h-9 rounded-lg py-2 px-3.5 flex items-center gap-2 bg-paper-2 border border-border font-ui-serif text-[13px] text-left transition-colors duration-120 ${
+              applyingUpdate ? 'text-ink-3 cursor-default opacity-70' : 'text-ink cursor-pointer opacity-100 hover:bg-border'
+            }`}
+          >
+            {applyingUpdate ? '更新中…' : '套用最新版（清除快取並重新整理）'}
+          </button>
         </section>
       </div>
     </div>
