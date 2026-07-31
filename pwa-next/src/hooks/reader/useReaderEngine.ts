@@ -10,7 +10,7 @@ import type { Annotation } from '@/store/useAnnotationStore'
 import { saveProgress, loadProgress, saveBookSettings, loadBookSettings } from '@/hooks/useLibrary'
 import type { BookRecord } from '@/hooks/useLibrary'
 import { patchBookPrototype, patchIframeViewPrototype, patchRenditionPrototype } from '@/components/Reader/epubPatches'
-import { applyDarkOverride, applyFontFamilyOverride, applyFontSizeOverride, applyLetterSpacingOverride, applyLineHeightOverride, normalizeFontFamily } from '@/components/Reader/readerStyles'
+import { applyDarkOverride, applyFontFamilyOverride, applyFontSizeOverride, applyLetterSpacingOverride, applyLineHeightOverride, applyWritingModeOverride, normalizeFontFamily } from '@/components/Reader/readerStyles'
 import { convertDoc, getToSC, getToTC, restoreDoc } from '@/components/Reader/scriptConversion'
 import { DEBUG_TTS_FOLLOW, TTS_HIGHLIGHT_INTERVAL, TTS_NEW_PAGE_AUTO_FOLLOW_GUARD, TTS_PAGE_END_FIXED_LEAD, TTS_USER_INPUT_GRACE, clearTTSHighlight, clearTTSHighlights, collectContentDocuments, createRangeFromTextOffset, ensureTTSHighlightStyle, getBoundaryOffsetFromRange, getTTSRangeViewportState, getTextIndex, paintTTSHighlightOverlay, ttsTextIndexCache } from '@/components/Reader/ttsHighlight'
 import { computeAccurateTotal, computeChapterAverage, computeGlobalPage, clampProgressRatio, resolveInitialPageInfo } from '@/components/Reader/progressCalculations'
@@ -303,6 +303,24 @@ export const useReaderEngine = (params: {
         epubLayoutFix.textContent = '.epub-container { justify-content: flex-start !important; }'
         document.head.appendChild(epubLayoutFix)
 
+        // 部分書本（尤其直式排版的中文書）OPF spine 帶 page-progression-direction="rtl"，
+        // epub.js 在 rendition 啟動時會據此自動把整個 rendition 設成「從右到左」翻頁——
+        // 不只是文字方向，連 manager 的 next()/prev() 捲動方向、分頁欄位的填色順序都會反過來。
+        // 這跟上面把直排文字強制改回橫排是兩件獨立的事：文字排版靠 CSS 覆寫解決，但翻頁方向
+        // 是 epub.js 內部 Layout 物件建立當下就烘焙好的設定，rendition.direction() 只會更新
+        // manager/stage 的捲動方向，Layout 裡的 direction 不會跟著變，所以要連同
+        // rendition.layout() 用新的 direction 重建 Layout，兩者都做才會讓翻頁順序跟橫排文字一致。
+        rendition.started.then(() => {
+          if (destroyed) return
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const globalLayoutProperties = (rendition.settings as any).globalLayoutProperties
+          const props = { ...globalLayoutProperties, direction: 'ltr' }
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          ;(rendition.settings as any).globalLayoutProperties = props
+          rendition.direction('ltr')
+          rendition.layout(props)
+        })
+
         rendition.hooks.content.register((view: unknown) => {
           // epub.js bug 修補：IframeView.underline null range crash、reframe null range crash
           patchIframeViewPrototype(Object.getPrototypeOf(view) as Record<string, unknown>)
@@ -312,6 +330,7 @@ export const useReaderEngine = (params: {
           ttsContentDocsRef.current.add(doc)
           ttsTextIndexCache.delete(doc)
           clearTTSHighlight(doc)
+          applyWritingModeOverride(doc)
 
           // 腳本轉換：只在顯示腳本與書本原始語言不同時才轉換
           if (scriptRef.current !== baseScriptRef.current) {
