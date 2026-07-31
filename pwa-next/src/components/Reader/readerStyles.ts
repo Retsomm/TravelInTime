@@ -90,6 +90,17 @@ export const applyFontSizeOverride = (doc: Document, size: number) => {
   setTimeout(() => setInlineFontSize(doc, size), 150)
 }
 
+// iOS Safari（含「加入主畫面」的 standalone PWA）有一個獨立於 font-size 之外的
+// text autosizing 演算法：它會依欄寬/裝置寬的比例，在畫面「渲染時」額外把文字放大
+// 顯示，這個放大不會反映在 getComputedStyle().fontSize 上，所以上面 applyFontSizeOverride
+// 逐一覆寫 inline font-size 也蓋不掉它——這正是本機瀏覽器（無此 autosizing 行為）測試正常，
+// 只有實機 iOS PWA 才會看到文字被異常放大、擠壓版面的原因。多欄分頁排版（epub.js 的
+// paginated flow 本質上就是窄欄 CSS columns）特別容易觸發這個演算法。
+// 標準解法是明確設定 text-size-adjust: 100%，關閉這個自動放大。
+export const applyTextSizeAdjustOverride = (doc: Document) => {
+  injectStyle(doc, 'tit-tsa', `html, body, * { -webkit-text-size-adjust: 100% !important; text-size-adjust: 100% !important; }`)
+}
+
 // 部分書本（尤其某些直式排版的中文電子書）內建 CSS 會在特定元素（不一定是 html/body，
 // 可能是內文的 wrapper div）設定 writing-mode: vertical-rl !important，跟本 App 固定的
 // 橫向分頁 flow 衝突，疊在一起會變成直排文字塞進橫向分頁容器裡，版面完全跑掉，標點符號
