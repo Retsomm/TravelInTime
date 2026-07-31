@@ -10,7 +10,7 @@ import type { Annotation } from '@/store/useAnnotationStore'
 import { saveProgress, loadProgress, saveBookSettings, loadBookSettings } from '@/hooks/useLibrary'
 import type { BookRecord } from '@/hooks/useLibrary'
 import { patchBookPrototype, patchIframeViewPrototype, patchRenditionPrototype } from '@/components/Reader/epubPatches'
-import { applyDarkOverride, applyFontFamilyOverride, applyFontSizeOverride, applyLetterSpacingOverride, applyLineHeightOverride, applyWritingModeOverride, normalizeFontFamily } from '@/components/Reader/readerStyles'
+import { applyDarkOverride, applyFontFamilyOverride, applyFontSizeOverride, applyLetterSpacingOverride, applyLineHeightOverride, applyTextSizeAdjustOverride, applyWritingModeOverride, normalizeFontFamily } from '@/components/Reader/readerStyles'
 import { convertDoc, getToSC, getToTC, restoreDoc } from '@/components/Reader/scriptConversion'
 import { DEBUG_TTS_FOLLOW, TTS_HIGHLIGHT_INTERVAL, TTS_NEW_PAGE_AUTO_FOLLOW_GUARD, TTS_PAGE_END_FIXED_LEAD, TTS_USER_INPUT_GRACE, clearTTSHighlight, clearTTSHighlights, collectContentDocuments, createRangeFromTextOffset, ensureTTSHighlightStyle, getBoundaryOffsetFromRange, getTTSRangeViewportState, getTextIndex, paintTTSHighlightOverlay, ttsTextIndexCache } from '@/components/Reader/ttsHighlight'
 import { computeAccurateTotal, computeChapterAverage, computeGlobalPage, clampProgressRatio, resolveInitialPageInfo } from '@/components/Reader/progressCalculations'
@@ -367,6 +367,8 @@ export const useReaderEngine = (params: {
           // 內文排版方向永遠固定 ltr，理由同上面 forceReadingDirection 的說明——不跟隨
           // 使用者的翻頁方向偏好，那個偏好只影響按鈕/手勢要呼叫 next 還是 prev
           applyWritingModeOverride(doc, 'ltr')
+          // 關閉 iOS Safari 的 text autosizing，避免實機 PWA 把內文額外放大（見 readerStyles.ts 說明）
+          applyTextSizeAdjustOverride(doc)
 
           // 腳本轉換：只在顯示腳本與書本原始語言不同時才轉換
           if (scriptRef.current !== baseScriptRef.current) {
