@@ -114,24 +114,36 @@ export const applyDarkOverride = (doc: Document, isDark: boolean) => {
 // `* { ... !important }` 的 universal selector specificity 是 0，蓋不過書本自己用
 // element/class selector 寫的 !important 規則，所以要跟 setInlineFontSize 一樣，
 // 逐一走訪 body 底下每個元素直接蓋 inline style（inline !important 優先權最高）。
-// 注意：翻頁方向（direction: ltr/rtl）不在這裡處理——那是 epub.js 內部 Layout/manager
-// 的設定，要透過 rendition.direction()／rendition.layout() 在 rendition 層級重建才會連
-// 翻頁順序一起修正，見 index.ts 的 rendition.started.then(...)。
-const setInlineWritingMode = (doc: Document) => {
+// 注意：翻頁方向（epub.js rendition 的 next()/prev() 呼叫順序）不在這裡處理——那是
+// epub.js 內部 Layout/manager 的設定，要透過 rendition.direction()／rendition.layout()
+// 在 rendition 層級重建才會連翻頁順序一起修正，見 index.ts 的 rendition.started.then(...)。
+// 但這裡的 CSS `direction` 屬性要覆寫：直排書本原始 CSS 常搭配 direction: rtl（在
+// vertical-rl 下這是控制欄位由右到左排列，本來就正常），一旦上面把 writing-mode 強制
+// 改成 horizontal-tb，同一個 direction: rtl 會被瀏覽器當成「橫排文字也要右到左」，
+// 導致整段文字變成右對齊、且行內文字順序左右相反（標點符號前後顛倒），所以要一併強制
+// 覆寫成「目前實際生效的翻頁方向」，這是內容排版層級的事，跟上面翻頁方向的 rendition
+// 設定是兩件獨立的事，但兩者的 direction 值必須一致：epub.js 的分頁引擎（contents.js
+// columns()）會用 rendition 目前的 direction 設定去計算 CSS 多欄排版的欄位順序（同時
+// manager 的 next()/prev() 也是用同一個 direction 決定 scrollLeft 要加還是減），如果這裡
+// 寫死 ltr，遇到使用者設定（或書本 OPF）是 rtl 的書，多欄排版順序跟捲動方向就會對不起來，
+// 表現成「按下一頁按鈕卻往回翻」。所以一定要傳入跟 rendition.direction() 相同的值，不能
+// 寫死。
+const setInlineWritingMode = (doc: Document, direction: 'ltr' | 'rtl') => {
   [doc.documentElement, doc.body, ...Array.from(doc.querySelectorAll('body *'))].forEach((el) => {
     try {
       const style = (el as HTMLElement).style;
       if (!style) return;
       style.setProperty('writing-mode', 'horizontal-tb', 'important');
       style.setProperty('text-orientation', 'mixed', 'important');
+      style.setProperty('direction', direction, 'important');
     } catch {
       /* SVG / MathML 等特殊元素略過 */
     }
   });
 };
 
-export const applyWritingModeOverride = (doc: Document) => {
-  injectStyle(doc, 'tit-wm', `html, body, * { writing-mode: horizontal-tb !important; text-orientation: mixed !important; }`);
-  setInlineWritingMode(doc);
-  setTimeout(() => setInlineWritingMode(doc), 150);
+export const applyWritingModeOverride = (doc: Document, direction: 'ltr' | 'rtl' = 'ltr') => {
+  injectStyle(doc, 'tit-wm', `html, body, * { writing-mode: horizontal-tb !important; text-orientation: mixed !important; direction: ${direction} !important; }`);
+  setInlineWritingMode(doc, direction);
+  setTimeout(() => setInlineWritingMode(doc, direction), 150);
 };

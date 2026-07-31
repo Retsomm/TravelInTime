@@ -3,7 +3,7 @@ import ePub from 'epubjs'
 import type { Book, Rendition } from 'epubjs'
 import type { TocItem } from '@/components/ChapterPanel'
 import type { TTSProgressSource } from '@/hooks/useTTS'
-import { useReaderStore } from '@/store/useReaderStore'
+import { FONT_OPTIONS, useReaderStore } from '@/store/useReaderStore'
 import type { Script } from '@/store/useReaderStore'
 import { useAnnotationStore, loadAnnotationsForBook, saveAnnotationsForBook } from '@/store/useAnnotationStore'
 import type { Annotation } from '@/store/useAnnotationStore'
@@ -253,8 +253,12 @@ export const useReaderEngine = (params: {
       fontFamilyRef.current = normalizedFamily
       scriptRef.current = savedSettings.script
     } else {
+      // 這本書沒有自己存過的排版設定，重設整個 store 回預設值，避免沿用同一個 session
+      // 裡前一本書留下的設定（尤其 readingDirection，見 useReaderStore.ts 的說明）
+      useReaderStore.getState().resetToDefaults()
       resetScript()
       scriptRef.current = 'tc'
+      fontFamilyRef.current = FONT_OPTIONS[0].value
     }
 
     // 設定 annotation 自動儲存（先 unsub 再 clearAll，避免 clear 覆蓋 localStorage）
@@ -306,13 +310,27 @@ export const useReaderEngine = (params: {
         // 部分書本（尤其直式排版的中文書）OPF spine 帶 page-progression-direction="rtl"，
         // epub.js 在 rendition 啟動時會據此自動把整個 rendition 設成「從右到左」翻頁——
         // 不只是文字方向，連 manager 的 next()/prev() 捲動方向、分頁欄位的填色順序都會反過來。
-        // 這跟上面把直排文字強制改回橫排是兩件獨立的事：文字排版靠 CSS 覆寫解決，但翻頁方向
-        // 是 epub.js 內部 Layout 物件建立當下就烘焙好的設定，rendition.direction() 只會更新
-        // manager/stage 的捲動方向，Layout 裡的 direction 不會跟著變，所以要連同
-        // rendition.layout() 用新的 direction 重建 Layout，兩者都做才會讓翻頁順序跟橫排文字一致。
-        rendition.started.then(() => {
+        // 這裡永遠強制成 ltr，不跟著使用者設定面板的「翻頁方向」偏好走：epub.js 的分頁引擎
+        // （contents.js columns()）跟 manager 的 next()/prev() 是用同一個 direction 值決定
+        // CSS 多欄排版順序「跟」捲動方向要不要反過來，這個 direction 一旦設成 rtl，內文的
+        // CSS 排版（欄位順序、text-align/bidi）也會跟著整個鏡射變成靠右、行內文字順序顛倒
+        // ——但「翻頁方向」這個設定在使用者的認知裡只是「按哪個按鈕/往哪滑算是下一頁」的
+        // 操作偏好，不應該連動影響內文排版本身要不要鏡射。所以兩者要拆開：epub.js 內部的
+        // direction 永遠固定 ltr（讓內文排版跟分頁邏輯保持正常、一致），使用者的翻頁方向
+        // 偏好只透過下面 prevPage/nextPage 呼叫時的按鈕/手勢對應去實現（見 nextPage/prevPage
+        // 呼叫端 `readingDirection === 'rtl' ? nextPage : prevPage` 那段），不會碰到這裡。
+        // 這段必須在第一次 rendition.display() 之前完成：epub.js 的 rendition.direction()
+        // 內部若偵測到 manager 已經 render 過（this.manager.isRendered() && this.location
+        // 皆為真），會自動觸發 this.manager.clear() + this.display(this.location.start.cfi)
+        // 重新導頁一次。若這段跟下面 book.ready 分頭啟動的 rendition.display(savedCfi) 沒有
+        // 先後保證，兩者的執行順序取決於 promise microtask 排程而非程式碼順序，一旦 display()
+        // 先跑完，接著才跑到這裡的 direction()/layout() 就會在使用者剛打開書時觸發一次「強制
+        // 翻頁」的重新導頁，且容易落在跟原本不同的頁面（表現成「一開始就強制往左翻頁，然後
+        // 翻到看似章節末頁又跳回第一頁」）。因此改成回傳這個 promise，讓下面 book.ready 的
+        // rendition.display() 明確等它完成後才呼叫。
+        const forceReadingDirection = rendition.started.then(() => {
           if (destroyed) return
-          const direction = useReaderStore.getState().readingDirection
+          const direction = 'ltr' as const
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const globalLayoutProperties = (rendition.settings as any).globalLayoutProperties
           const props = { ...globalLayoutProperties, direction }
@@ -331,7 +349,9 @@ export const useReaderEngine = (params: {
           ttsContentDocsRef.current.add(doc)
           ttsTextIndexCache.delete(doc)
           clearTTSHighlight(doc)
-          applyWritingModeOverride(doc)
+          // 內文排版方向永遠固定 ltr，理由同上面 forceReadingDirection 的說明——不跟隨
+          // 使用者的翻頁方向偏好，那個偏好只影響按鈕/手勢要呼叫 next 還是 prev
+          applyWritingModeOverride(doc, 'ltr')
 
           // 腳本轉換：只在顯示腳本與書本原始語言不同時才轉換
           if (scriptRef.current !== baseScriptRef.current) {
@@ -581,40 +601,44 @@ export const useReaderEngine = (params: {
             const restored = useAnnotationStore.getState().annotations
             restored.forEach((ann) => addEpubAnnotation(rendition, ann))
 
-            const savedCfi = loadProgress(bookId)
-            return rendition.display(savedCfi ?? undefined).catch(async (err: unknown) => {
-              console.warn('[Reader] display(savedCfi) 失敗:', err)
+            // 等待上面的翻頁方向修正完成，確保第一次 display() 不會跟 direction()/layout()
+            // 內部可能觸發的重新導頁互相搶跑
+            return forceReadingDirection.then(() => {
+              const savedCfi = loadProgress(bookId)
+              return rendition.display(savedCfi ?? undefined).catch(async (err: unknown) => {
+                console.warn('[Reader] display(savedCfi) 失敗:', err)
 
-              // fallback 1：數字索引 0（epubjs 支援 spine index）
-              try {
-                return await rendition.display(0 as unknown as string)
-              } catch (e1) { console.warn('[Reader] index=0 失敗:', e1) }
-
-              // fallback 2：第一個 spine item 的 href
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const spineItems: any[] = (book as any).spine?.items ?? []
-              const firstHref = spineItems[0]?.href as string | undefined
-              if (firstHref) {
+                // fallback 1：數字索引 0（epubjs 支援 spine index）
                 try {
-                  return await rendition.display(firstHref)
-                } catch (e2) { console.warn('[Reader] href fallback 失敗:', e2) }
-              }
+                  return await rendition.display(0 as unknown as string)
+                } catch (e1) { console.warn('[Reader] index=0 失敗:', e1) }
 
-              // fallback 3：常見 section id / idref 名稱
-              const commonNames = [
-                'text', 'body', 'content', 'main',
-                'chapter1', 'chapter-1', 'chap01', 'chap1',
-                'item1', 'item-1', 'section1', 'page1',
-                'cover', 'toc', 'nav',
-              ]
-              for (const name of commonNames) {
-                try {
-                  return await rendition.display(name)
-                } catch { /* 繼續嘗試下一個 */ }
-              }
+                // fallback 2：第一個 spine item 的 href
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const spineItems: any[] = (book as any).spine?.items ?? []
+                const firstHref = spineItems[0]?.href as string | undefined
+                if (firstHref) {
+                  try {
+                    return await rendition.display(firstHref)
+                  } catch (e2) { console.warn('[Reader] href fallback 失敗:', e2) }
+                }
 
-              // fallback 最終：無參數（epubjs 顯示第一個可用 section）
-              return rendition.display()
+                // fallback 3：常見 section id / idref 名稱
+                const commonNames = [
+                  'text', 'body', 'content', 'main',
+                  'chapter1', 'chapter-1', 'chap01', 'chap1',
+                  'item1', 'item-1', 'section1', 'page1',
+                  'cover', 'toc', 'nav',
+                ]
+                for (const name of commonNames) {
+                  try {
+                    return await rendition.display(name)
+                  } catch { /* 繼續嘗試下一個 */ }
+                }
+
+                // fallback 最終：無參數（epubjs 顯示第一個可用 section）
+                return rendition.display()
+              })
             })
           })
           .then(() => {

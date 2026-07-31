@@ -486,13 +486,25 @@ const loadBook = async (base64: string, cfi: string | null, initialAnnotations: 
     // 部分書本（尤其直式排版的中文書）OPF spine 帶 page-progression-direction="rtl"，
     // epub.js 在 rendition 啟動時會據此自動把整個 rendition 設成「從右到左」翻頁——
     // 不只是文字方向，連 manager 的 next()/prev() 捲動方向、分頁欄位的填色順序都會反過來。
-    // 這跟下面把直排文字強制改回橫排是兩件獨立的事：文字排版靠 CSS 覆寫解決，但翻頁方向
-    // 是 epub.js 內部 Layout 物件建立當下就烘焙好的設定，rendition.direction() 只會更新
-    // manager/stage 的捲動方向，Layout 裡的 direction 不會跟著變，所以要連同
-    // rendition.layout() 用新的 direction 重建 Layout，兩者都做才會讓翻頁順序跟橫排文字一致。
-    currentRendition.started.then(() => {
+    // 這裡永遠強制成 ltr，不跟著使用者設定面板的「翻頁方向」偏好走：epub.js 的分頁引擎
+    // （contents.js columns()）跟 manager 的 next()/prev() 是用同一個 direction 值決定 CSS
+    // 多欄排版順序跟捲動方向要不要反過來，這個 direction 一旦設成 rtl，內文的 CSS 排版
+    // （欄位順序、text-align/bidi）也會跟著整個鏡射變成靠右、行內文字順序顛倒——但「翻頁
+    // 方向」這個設定在使用者的認知裡只是「往哪滑算是下一頁」的操作偏好，不應該連動影響內文
+    // 排版本身要不要鏡射。所以兩者要拆開：epub.js 內部的 direction 永遠固定 ltr（讓內文
+    // 排版跟分頁邏輯保持正常、一致），使用者的翻頁方向偏好只透過 RN 端滑動手勢呼叫
+    // next/prev 時的方向對應去實現，不會碰到這裡。
+    // 這段必須在第一次 rendition.display() 之前完成（見下方 await forceReadingDirection）：
+    // epub.js 的 rendition.direction() 內部若偵測到 manager 已經 render 過
+    // （this.manager.isRendered() && this.location 皆為真），會自動觸發
+    // this.manager.clear() + this.display(this.location.start.cfi) 重新導頁一次。原本這裡
+    // 沒有 await，跟下面的 rendition.display(cfi) 各自非同步進行，執行順序取決於 promise
+    // microtask 排程而非程式碼順序，一旦 display() 先跑完，接著才跑到這裡的
+    // direction()/layout() 就會在使用者剛打開書時觸發一次「強制翻頁」的重新導頁（表現成
+    // 「一開始就強制往左翻頁，然後翻到看似章節末頁又跳回第一頁」）。
+    const forceReadingDirection = currentRendition.started.then(() => {
       if (generation !== loadGeneration) return;
-      const direction = typography.readingDirection;
+      const direction = 'ltr' as const;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const globalLayoutProperties = (currentRendition.settings as any).globalLayoutProperties;
       const props = { ...globalLayoutProperties, direction };
@@ -510,7 +522,9 @@ const loadBook = async (base64: string, cfi: string | null, initialAnnotations: 
       contentDocs.add(doc);
       applyDarkOverride(doc, darkMode);
       applyTypographyToDoc(doc, typography, baseScript);
-      applyWritingModeOverride(doc);
+      // 內文排版方向永遠固定 ltr，理由同上面 forceReadingDirection 的說明——不跟隨
+      // 使用者的翻頁方向偏好，那個偏好只影響滑動手勢要呼叫 next 還是 prev
+      applyWritingModeOverride(doc, 'ltr');
       // epub.js 的 Contents 類別本身只在「選取範圍非空」時才會 emit 'selected'，使用者點掉
       // 選取／選取範圍收合完全沒有對應事件可以監聽，因此另外自己掛一個 selectionchange，
       // 只在偵測到「收合」時回報給 RN 端關閉選取操作列，不跟 epub.js 內建的 250ms debounce
@@ -631,6 +645,9 @@ const loadBook = async (base64: string, cfi: string | null, initialAnnotations: 
     spineHrefs = ((book.spine as any)?.items ?? []).map((item: any) => item.href as string);
     post({ type: 'tocLoaded', toc: tocCache });
 
+    // 等待上面的翻頁方向修正完成，確保第一次 display() 不會跟 direction()/layout()
+    // 內部可能觸發的重新導頁互相搶跑
+    await forceReadingDirection;
     await rendition.display(cfi ?? undefined);
     applyAnnotations(initialAnnotations);
     // 全書精確頁數／進度百分比：背景跑 scanAllChapterPages()（見上方定義）。延後幾秒才開始，
