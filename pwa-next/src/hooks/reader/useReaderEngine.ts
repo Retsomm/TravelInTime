@@ -312,12 +312,13 @@ export const useReaderEngine = (params: {
         // rendition.layout() 用新的 direction 重建 Layout，兩者都做才會讓翻頁順序跟橫排文字一致。
         rendition.started.then(() => {
           if (destroyed) return
+          const direction = useReaderStore.getState().readingDirection
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const globalLayoutProperties = (rendition.settings as any).globalLayoutProperties
-          const props = { ...globalLayoutProperties, direction: 'ltr' }
+          const props = { ...globalLayoutProperties, direction }
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           ;(rendition.settings as any).globalLayoutProperties = props
-          rendition.direction('ltr')
+          rendition.direction(direction)
           rendition.layout(props)
         })
 

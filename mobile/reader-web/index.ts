@@ -4,7 +4,7 @@ import type { AnnotationMark, InboundMessage, OutboundMessage, TocItem } from '.
 import { DEFAULT_TYPOGRAPHY, type TypographySettings } from '../lib/readerSettings';
 import { addAnnotationMark, diffAnnotations, reinjectAllAnnotations, removeAnnotationMark, verifyAnnotationsRendered } from './annotationUtils';
 import { computeProgress } from './progressCalculations';
-import { applyDarkOverride, applyTypographyToDoc } from './readerStyles';
+import { applyDarkOverride, applyTypographyToDoc, applyWritingModeOverride } from './readerStyles';
 import { buildToc, getChapterLabel, resolveNavTarget } from './tocLookup';
 import { shouldAutoAdvancePage } from './ttsFollowCalculations';
 import {
@@ -481,6 +481,26 @@ const loadBook = async (base64: string, cfi: string | null, initialAnnotations: 
       // Android 的 WebView（Chromium）沒有這個限制。
       allowScriptedContent: true,
     });
+    const currentRendition = rendition;
+
+    // 部分書本（尤其直式排版的中文書）OPF spine 帶 page-progression-direction="rtl"，
+    // epub.js 在 rendition 啟動時會據此自動把整個 rendition 設成「從右到左」翻頁——
+    // 不只是文字方向，連 manager 的 next()/prev() 捲動方向、分頁欄位的填色順序都會反過來。
+    // 這跟下面把直排文字強制改回橫排是兩件獨立的事：文字排版靠 CSS 覆寫解決，但翻頁方向
+    // 是 epub.js 內部 Layout 物件建立當下就烘焙好的設定，rendition.direction() 只會更新
+    // manager/stage 的捲動方向，Layout 裡的 direction 不會跟著變，所以要連同
+    // rendition.layout() 用新的 direction 重建 Layout，兩者都做才會讓翻頁順序跟橫排文字一致。
+    currentRendition.started.then(() => {
+      if (generation !== loadGeneration) return;
+      const direction = typography.readingDirection;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const globalLayoutProperties = (currentRendition.settings as any).globalLayoutProperties;
+      const props = { ...globalLayoutProperties, direction };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (currentRendition.settings as any).globalLayoutProperties = props;
+      currentRendition.direction(direction);
+      currentRendition.layout(props);
+    });
 
     // 每次章節內容渲染（換頁/換章節都會重新渲染 iframe 內容）時套用目前的深色模式狀態，
     // 並記錄這份 document 供 setDarkMode 之後即時切換時重新套用（不必等下次換頁）。
@@ -490,6 +510,7 @@ const loadBook = async (base64: string, cfi: string | null, initialAnnotations: 
       contentDocs.add(doc);
       applyDarkOverride(doc, darkMode);
       applyTypographyToDoc(doc, typography, baseScript);
+      applyWritingModeOverride(doc);
       // epub.js 的 Contents 類別本身只在「選取範圍非空」時才會 emit 'selected'，使用者點掉
       // 選取／選取範圍收合完全沒有對應事件可以監聽，因此另外自己掛一個 selectionchange，
       // 只在偵測到「收合」時回報給 RN 端關閉選取操作列，不跟 epub.js 內建的 250ms debounce

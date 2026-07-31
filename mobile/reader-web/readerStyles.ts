@@ -106,3 +106,32 @@ export const applyDarkOverride = (doc: Document, isDark: boolean) => {
     }
   });
 };
+
+// 部分書本（尤其某些直式排版的中文電子書）內建 CSS 會在特定元素（不一定是 html/body，
+// 可能是內文的 wrapper div）設定 writing-mode: vertical-rl !important，跟本 App 固定的
+// 橫向分頁 flow 衝突，疊在一起會變成直排文字塞進橫向分頁容器裡，版面完全跑掉，標點符號
+// 也會用直排的字圈位置去排，橫排讀起來就變成標點跑到文字前面。
+// `* { ... !important }` 的 universal selector specificity 是 0，蓋不過書本自己用
+// element/class selector 寫的 !important 規則，所以要跟 setInlineFontSize 一樣，
+// 逐一走訪 body 底下每個元素直接蓋 inline style（inline !important 優先權最高）。
+// 注意：翻頁方向（direction: ltr/rtl）不在這裡處理——那是 epub.js 內部 Layout/manager
+// 的設定，要透過 rendition.direction()／rendition.layout() 在 rendition 層級重建才會連
+// 翻頁順序一起修正，見 index.ts 的 rendition.started.then(...)。
+const setInlineWritingMode = (doc: Document) => {
+  [doc.documentElement, doc.body, ...Array.from(doc.querySelectorAll('body *'))].forEach((el) => {
+    try {
+      const style = (el as HTMLElement).style;
+      if (!style) return;
+      style.setProperty('writing-mode', 'horizontal-tb', 'important');
+      style.setProperty('text-orientation', 'mixed', 'important');
+    } catch {
+      /* SVG / MathML 等特殊元素略過 */
+    }
+  });
+};
+
+export const applyWritingModeOverride = (doc: Document) => {
+  injectStyle(doc, 'tit-wm', `html, body, * { writing-mode: horizontal-tb !important; text-orientation: mixed !important; }`);
+  setInlineWritingMode(doc);
+  setTimeout(() => setInlineWritingMode(doc), 150);
+};
