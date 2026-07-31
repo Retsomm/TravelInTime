@@ -10,7 +10,7 @@ export const FONT_OPTIONS = [
   { label: '粉圓體', value: '"Huninn", sans-serif' },
 ]
 
-const DEFAULT_SETTINGS = {
+export const DEFAULT_SETTINGS = {
   fontSize: 16,
   fontFamily: FONT_OPTIONS[0].value,
   script: 'tc' as Script,
@@ -44,7 +44,7 @@ export const useReaderStore = create<ReaderStore>((set) => ({
   setFontSize: (fontSize) => set({ fontSize }),
   setFontFamily: (fontFamily) => set({ fontFamily }),
   setScript: (script) => set({ script }),
-  resetScript: () => set({ script: 'tc' }),
+  resetScript: () => set({ script: DEFAULT_SETTINGS.script }),
   setLineHeight: (lineHeight) => set({ lineHeight }),
   setLetterSpacing: (letterSpacing) => set({ letterSpacing }),
   setReadingDirection: (readingDirection) => set({ readingDirection }),

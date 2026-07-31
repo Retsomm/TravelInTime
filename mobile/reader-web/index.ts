@@ -504,14 +504,22 @@ const loadBook = async (base64: string, cfi: string | null, initialAnnotations: 
     // 「一開始就強制往左翻頁，然後翻到看似章節末頁又跳回第一頁」）。
     const forceReadingDirection = currentRendition.started.then(() => {
       if (generation !== loadGeneration) return;
-      const direction = 'ltr' as const;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const globalLayoutProperties = (currentRendition.settings as any).globalLayoutProperties;
-      const props = { ...globalLayoutProperties, direction };
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (currentRendition.settings as any).globalLayoutProperties = props;
-      currentRendition.direction(direction);
-      currentRendition.layout(props);
+      try {
+        const direction = 'ltr' as const;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const globalLayoutProperties = (currentRendition.settings as any).globalLayoutProperties;
+        const props = { ...globalLayoutProperties, direction };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (currentRendition.settings as any).globalLayoutProperties = props;
+        currentRendition.direction(direction);
+        currentRendition.layout(props);
+      } catch (err) {
+        // 方向修正失敗不該卡住開書：寧可維持這本書可能沒被修正的原始翻頁方向，
+        // 也要讓下面等待這個 promise 的 display() 繼續執行。
+        debugLog('[forceReadingDirection] 方向修正失敗，略過', err);
+      }
+    }).catch((err) => {
+      debugLog('[forceReadingDirection] rendition.started 失敗，略過方向修正', err);
     });
 
     // 每次章節內容渲染（換頁/換章節都會重新渲染 iframe 內容）時套用目前的深色模式狀態，
@@ -648,6 +656,9 @@ const loadBook = async (base64: string, cfi: string | null, initialAnnotations: 
     // 等待上面的翻頁方向修正完成，確保第一次 display() 不會跟 direction()/layout()
     // 內部可能觸發的重新導頁互相搶跑
     await forceReadingDirection;
+    // 等待期間使用者可能已經觸發下一次 loadBook（換書），generation 已經不吻合時
+    // 不能再對這個已經過時的 rendition 呼叫 display／套用 annotations。
+    if (generation !== loadGeneration) return;
     await rendition.display(cfi ?? undefined);
     applyAnnotations(initialAnnotations);
     // 全書精確頁數／進度百分比：背景跑 scanAllChapterPages()（見上方定義）。延後幾秒才開始，

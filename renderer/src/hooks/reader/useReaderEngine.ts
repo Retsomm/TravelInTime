@@ -273,14 +273,22 @@ export const useReaderEngine = (params: {
         // rendition.display() 明確等它完成後才呼叫。
         const forceReadingDirection = rendition.started.then(() => {
           if (destroyed) return
-          const direction = 'ltr' as const
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const globalLayoutProperties = (rendition.settings as any).globalLayoutProperties
-          const props = { ...globalLayoutProperties, direction }
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          ;(rendition.settings as any).globalLayoutProperties = props
-          rendition.direction(direction)
-          rendition.layout(props)
+          try {
+            const direction = 'ltr' as const
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const globalLayoutProperties = (rendition.settings as any).globalLayoutProperties
+            const props = { ...globalLayoutProperties, direction }
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            ;(rendition.settings as any).globalLayoutProperties = props
+            rendition.direction(direction)
+            rendition.layout(props)
+          } catch (err) {
+            // 方向修正失敗不該卡住開書：寧可維持這本書可能沒被修正的原始翻頁方向，
+            // 也要讓下面等待這個 promise 的 display() 繼續執行。
+            console.warn('[Reader] forceReadingDirection 方向修正失敗，略過:', err)
+          }
+        }).catch((err) => {
+          console.warn('[Reader] forceReadingDirection: rendition.started 失敗，略過方向修正:', err)
         })
 
         rendition.hooks.content.register((view: unknown) => {
@@ -486,6 +494,9 @@ export const useReaderEngine = (params: {
             // 等待上面的翻頁方向修正完成，確保第一次 display() 不會跟 direction()/layout()
             // 內部可能觸發的重新導頁互相搶跑
             return forceReadingDirection.then(() => {
+              // 等待期間元件可能已經卸載（換書／離開閱讀畫面），不能再對已卸載的
+              // rendition 呼叫 display。
+              if (destroyed) return
               const savedCfi = loadProgress(bookId)
               return rendition.display(savedCfi ?? undefined).catch(async (err: unknown) => {
                 console.warn('[Reader] display(savedCfi) 失敗:', err)
