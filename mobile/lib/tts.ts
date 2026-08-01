@@ -146,6 +146,7 @@ export const useTTS = () => {
   const speakChunk = useCallback((generation: number) => {
     const chunk = chunksRef.current[chunkIndexRef.current];
     if (chunk === undefined) {
+      if (__DEV__) console.log('[tts] speakChunk: 這輪 chunksRef 全部念完，呼叫 onAllDone', { generation });
       setPlaying(false);
       setPaused(false);
       onAllDoneRef.current?.();
@@ -159,19 +160,32 @@ export const useTTS = () => {
     for (let i = 0; i < chunkIndexRef.current; i++) chunkStartOffset += chunksRef.current[i].length;
     chunkStartOffsetRef.current = chunkStartOffset;
     lastBoundaryCharIndexRef.current = 0;
+    if (__DEV__) {
+      console.log('[tts] speakChunk: 開始念', {
+        generation,
+        chunkIndex: chunkIndexRef.current,
+        totalChunks: chunksRef.current.length,
+        chunkLength: chunk.length,
+      });
+    }
     Speech.speak(chunk, {
       voice: selectedVoiceRef.current?.identifier,
       language: selectedVoiceRef.current?.language ?? 'zh-TW',
       rate: rateRef.current,
       onDone: () => {
-        if (generationRef.current !== generation) return;
+        if (generationRef.current !== generation) {
+          if (__DEV__) console.log('[tts] onDone: generation 已過期，略過', { generation, current: generationRef.current });
+          return;
+        }
         chunkIndexRef.current += 1;
         speakChunk(generation);
       },
       onStopped: () => {
+        if (__DEV__) console.log('[tts] onStopped: 使用者手動 pause/stop 或系統中斷', { generation });
         /* 使用者手動 pause/stop 觸發，狀態已由呼叫端更新，這裡不用重複處理 */
       },
-      onError: () => {
+      onError: (error) => {
+        if (__DEV__) console.log('[tts] onError: 這個 chunk 朗讀失敗，朗讀鏈就此中止', { generation, current: generationRef.current, error: error?.message ?? String(error) });
         if (generationRef.current !== generation) return;
         setPlaying(false);
         setPaused(false);
