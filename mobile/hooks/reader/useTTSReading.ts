@@ -93,6 +93,16 @@ export const useTTSReading = ({ postToWebView, currentHrefRef, atEndRef, request
       }
       postToWebView({ type: 'next' });
       await waitForRelocated();
+      if (hop === 19) {
+        // 第 20 次翻頁後的目的地也要檢查一次，不能翻完就直接放棄，否則剛好翻到的
+        // 那一頁若本身有文字會被平白錯過（見上面 for 迴圈：check 在 navigate 之前，
+        // 最後一次 navigate 完迴圈就結束，若不在這裡補一次 check，這個目的地永遠不會被檢查）。
+        const { text: finalText, startOffset: finalOffset } = await requestChapterText();
+        if (finalText.trim()) {
+          startSpeaking(finalText, finalOffset);
+          return;
+        }
+      }
     }
     if (__DEV__) console.log('[tts-reading] readNextAndContinue: 連續 20 次翻頁都沒有可念文字，放棄');
   }, [advanceToNextChapter, requestChapterText, startSpeaking, atEndRef, currentHrefRef, postToWebView, waitForRelocated]);

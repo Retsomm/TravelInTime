@@ -482,6 +482,7 @@ const loadBook = async (base64: string, cfi: string | null, initialAnnotations: 
   locationsReady = false;
   lastRelocatedLoc = null;
   lastLinearSpineIndex = null;
+  consecutiveStuckNext = 0;
   renderedAnnotations = new Map();
   stopTTSTracking();
 
