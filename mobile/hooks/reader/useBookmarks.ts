@@ -1,20 +1,33 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { type Bookmark, generateId, loadBookmarks, saveBookmarks } from '../../lib/library';
 import { isBookmarked, removeBookmarkList, toggleBookmarkList } from '../../lib/reader/calculations';
 
 export const useBookmarks = (id: string | undefined, currentCfi: string, currentChapterTitle: string) => {
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
+  const loadedRef = useRef(false);
 
   useEffect(() => {
     if (!id) return;
     let cancelled = false;
+    loadedRef.current = false;
     loadBookmarks(id).then((saved) => {
-      if (!cancelled) setBookmarks(saved);
+      if (!cancelled) {
+        setBookmarks(saved);
+        loadedRef.current = true;
+      }
     });
     return () => {
       cancelled = true;
     };
   }, [id]);
+
+  // 存檔改成跟著已提交的 bookmarks state 走，而不是在 handler 裡用當下算出的
+  // next 立即存檔：這樣連續呼叫（例如清單裡連點兩個刪除）會依序疊加在最新 state
+  // 上，不會有兩次呼叫都基於同一份舊 snapshot 而互相蓋掉對方的問題。
+  useEffect(() => {
+    if (!id || !loadedRef.current) return;
+    saveBookmarks(id, bookmarks).catch((err) => console.error('[reader] saveBookmarks 失敗', err));
+  }, [id, bookmarks]);
 
   const handleToggleBookmark = () => {
     if (!id || !currentCfi) return;
@@ -24,16 +37,11 @@ export const useBookmarks = (id: string | undefined, currentCfi: string, current
       label: currentChapterTitle || '書籤',
       addedAt: Date.now(),
     };
-    const next = toggleBookmarkList(bookmarks, currentCfi, newBookmark);
-    setBookmarks(next);
-    saveBookmarks(id, next).catch((err) => console.error('[reader] saveBookmarks 失敗', err));
+    setBookmarks((prev) => toggleBookmarkList(prev, currentCfi, newBookmark));
   };
 
   const handleDeleteBookmark = (bookmarkId: string) => {
-    if (!id) return;
-    const next = removeBookmarkList(bookmarks, bookmarkId);
-    setBookmarks(next);
-    saveBookmarks(id, next).catch((err) => console.error('[reader] saveBookmarks 失敗', err));
+    setBookmarks((prev) => removeBookmarkList(prev, bookmarkId));
   };
 
   return {
