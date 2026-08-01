@@ -1,6 +1,6 @@
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { Alert, FlatList, Pressable, Text, View, useWindowDimensions } from 'react-native';
+import { Alert, FlatList, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import BookCard from '../../components/BookCard';
@@ -186,24 +186,24 @@ const LibraryScreen = () => {
   }, [books, sort]);
 
   return (
-    <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: colors.paperBg }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', height: 44, paddingHorizontal: 16 }}>
-        <Text style={{ fontSize: 20, fontWeight: '600', color: colors.ink }}>
-          書櫃 <Text style={{ fontSize: 13, fontWeight: '400', color: colors.ink3 }}>{books.length} 本</Text>
+    <SafeAreaView edges={['top']} style={[styles.safeArea, { backgroundColor: colors.paperBg }]}>
+      <View style={styles.header}>
+        <Text style={[styles.headerTitle, { color: colors.ink }]}>
+          書櫃 <Text style={[styles.headerCount, { color: colors.ink3 }]}>{books.length} 本</Text>
         </Text>
         <Pressable onPress={handleAddBook} hitSlop={12}>
-          <Text style={{ fontSize: 16, color: '#2563eb' }}>+ 加入書籍</Text>
+          <Text style={styles.addButtonText}>+ 加入書籍</Text>
         </Pressable>
       </View>
 
       {books.length > 0 && (
-        <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
+        <View style={styles.sortWrapper}>
           <SortControl sort={sort} onSortChange={setSort} />
         </View>
       )}
 
       {!loading && books.length === 0 ? (
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+        <View style={styles.emptyState}>
           <Text style={{ color: colors.ink3 }}>尚未加入任何書籍</Text>
         </View>
       ) : (
@@ -212,8 +212,8 @@ const LibraryScreen = () => {
           data={shown}
           keyExtractor={(item) => item.id}
           numColumns={COLUMNS}
-          contentContainerStyle={{ padding: H_PADDING, gap: GRID_GAP }}
-          columnWrapperStyle={{ gap: GRID_GAP }}
+          contentContainerStyle={styles.listContent}
+          columnWrapperStyle={styles.columnWrapper}
           renderItem={({ item }) => (
             <BookCard
               record={item}
@@ -236,11 +236,60 @@ const LibraryScreen = () => {
         // 用 1x1 近乎歸零的尺寸隱藏這個 WebView 時，WKWebView（iOS）有可能不會確實跑內容的 JS
         // （近似 headless/離屏極小視圖被系統節流），改用較合理的尺寸（100x100）搬到畫面外，
         // 只用 opacity:0 隱藏，避免這個因素導致整個 extractMeta 流程收不到任何回應。
-        style={{ position: 'absolute', width: 100, height: 100, opacity: 0, top: -1000, left: 0 }}
+        style={styles.hiddenExtractorWebview}
         pointerEvents="none"
       />
     </SafeAreaView>
   );
 };
+
+const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    height: 44,
+    paddingHorizontal: 16,
+  },
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+  },
+  headerCount: {
+    fontSize: 13,
+    fontWeight: '400',
+  },
+  addButtonText: {
+    fontSize: 16,
+    color: '#2563eb',
+  },
+  sortWrapper: {
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+  },
+  emptyState: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  listContent: {
+    padding: H_PADDING,
+    gap: GRID_GAP,
+  },
+  columnWrapper: {
+    gap: GRID_GAP,
+  },
+  hiddenExtractorWebview: {
+    position: 'absolute',
+    width: 100,
+    height: 100,
+    opacity: 0,
+    top: -1000,
+    left: 0,
+  },
+});
 
 export default LibraryScreen;

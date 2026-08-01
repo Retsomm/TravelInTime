@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { Image, Pressable, Text, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { getCoverUri, type BookRecord } from '../lib/library';
 import { coverStyleFor } from '../lib/coverStyles';
 import { useTheme } from '../lib/theme';
@@ -29,30 +29,19 @@ const BookCard = ({ record, width, onPress, onDelete }: Props) => {
         accessibilityRole="button"
         accessibilityLabel={record.author ? `開啟《${record.title}》，作者 ${record.author}` : `開啟《${record.title}》`}
       >
-        <View
-          style={{
-            width,
-            height: coverHeight,
-            borderRadius: 6,
-            overflow: 'hidden',
-            backgroundColor: style.bg,
-          }}
-        >
+        <View style={[styles.cover, { width, height: coverHeight, backgroundColor: style.bg }]}>
           {coverUri ? (
-            <Image source={{ uri: coverUri }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+            <Image source={{ uri: coverUri }} style={styles.coverImage} resizeMode="cover" />
           ) : (
-            <View style={{ flex: 1, justifyContent: 'space-between', padding: 14 }}>
+            <View style={styles.coverPlaceholder}>
               <View>
-                <View style={{ width: 20, height: 2, backgroundColor: style.rule, marginBottom: 8 }} />
-                <Text numberOfLines={4} style={{ color: style.ink, fontSize: 13, fontWeight: '600', lineHeight: 17 }}>
+                <View style={[styles.ruleLine, { backgroundColor: style.rule }]} />
+                <Text numberOfLines={4} style={[styles.placeholderTitle, { color: style.ink }]}>
                   {record.title}
                 </Text>
               </View>
               {record.author ? (
-                <Text
-                  numberOfLines={1}
-                  style={{ color: style.ink, fontSize: 9, letterSpacing: 1, textTransform: 'uppercase', opacity: 0.75 }}
-                >
+                <Text numberOfLines={1} style={[styles.placeholderAuthor, { color: style.ink }]}>
                   {record.author}
                 </Text>
               ) : null}
@@ -66,41 +55,109 @@ const BookCard = ({ record, width, onPress, onDelete }: Props) => {
       <Pressable
         onPress={onDelete}
         hitSlop={8}
-        style={{
-          position: 'absolute',
-          top: 6,
-          right: 6,
-          width: 26,
-          height: 26,
-          borderRadius: 13,
-          backgroundColor: 'rgba(0,0,0,0.55)',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
+        style={styles.deleteButton}
         accessibilityRole="button"
         accessibilityLabel="移除書籍"
       >
-        <Text style={{ color: '#fff', fontSize: 12, lineHeight: 14 }}>✕</Text>
+        <Text style={styles.deleteButtonText}>✕</Text>
       </Pressable>
 
-      <View style={{ marginTop: 8 }}>
-        <Text numberOfLines={2} style={{ fontSize: 13, fontWeight: '500', color: colors.ink, lineHeight: 17 }}>
+      <View style={styles.infoContainer}>
+        <Text numberOfLines={2} style={[styles.title, { color: colors.ink }]}>
           {record.title}
         </Text>
         {record.author ? (
-          <Text numberOfLines={1} style={{ fontSize: 11, color: colors.ink3, marginTop: 3 }}>
+          <Text numberOfLines={1} style={[styles.author, { color: colors.ink3 }]}>
             {record.author}
           </Text>
         ) : null}
-        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6, gap: 6 }}>
-          <View style={{ flex: 1, height: 4, borderRadius: 2, backgroundColor: colors.progressTrack, overflow: 'hidden' }}>
-            <View style={{ width: `${pct}%`, height: '100%', backgroundColor: colors.progressFill }} />
+        <View style={styles.progressRow}>
+          <View style={[styles.progressTrack, { backgroundColor: colors.progressTrack }]}>
+            <View style={[styles.progressFill, { width: `${pct}%`, backgroundColor: colors.progressFill }]} />
           </View>
-          <Text style={{ fontSize: 10, color: colors.ink3 }}>{pct === 100 ? '讀畢' : `${pct}%`}</Text>
+          <Text style={[styles.progressLabel, { color: colors.ink3 }]}>{pct === 100 ? '讀畢' : `${pct}%`}</Text>
         </View>
       </View>
     </View>
   );
 };
+
+const styles = StyleSheet.create({
+  cover: {
+    borderRadius: 6,
+    overflow: 'hidden',
+  },
+  coverImage: {
+    width: '100%',
+    height: '100%',
+  },
+  coverPlaceholder: {
+    flex: 1,
+    justifyContent: 'space-between',
+    padding: 14,
+  },
+  ruleLine: {
+    width: 20,
+    height: 2,
+    marginBottom: 8,
+  },
+  placeholderTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    lineHeight: 17,
+  },
+  placeholderAuthor: {
+    fontSize: 9,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    opacity: 0.75,
+  },
+  deleteButton: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  deleteButtonText: {
+    color: '#fff',
+    fontSize: 12,
+    lineHeight: 14,
+  },
+  infoContainer: {
+    marginTop: 8,
+  },
+  title: {
+    fontSize: 13,
+    fontWeight: '500',
+    lineHeight: 17,
+  },
+  author: {
+    fontSize: 11,
+    marginTop: 3,
+  },
+  progressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 6,
+    gap: 6,
+  },
+  progressTrack: {
+    flex: 1,
+    height: 4,
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+  },
+  progressLabel: {
+    fontSize: 10,
+  },
+});
 
 export default BookCard;
