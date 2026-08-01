@@ -130,6 +130,24 @@ const unlockNavSoon = () => {
 // 見 progressCalculations.ts 內 stuck-CFI 校正的說明。
 let lastNavDirection: 'prev' | 'next' | null = null;
 
+// 連續幾次呼叫 next() 但 CFI 完全沒變的次數。progressCalculations.ts 的 stuck-CFI 校正只處理
+// 「全書最後一章」的頁碼顯示；但同一種 epub.js 分頁量測誤差（章節結尾有極短/空白內容，
+// next() 實際上翻不過去）理論上任何一章都可能發生，不是只有最後一章。朗讀跟讀跨章節時
+// （RN 端 useTTSReading.ts 的 advanceToNextChapter）完全依賴 next() 真的能翻過章節邊界，
+// 一旦卡在這種「翻不動的最後一頁」，href 永遠不會變、也不是真正的全書結尾（atEnd 不會是
+// true），會導致朗讀在這一章結束後直接無聲停住。這裡偵測到連續兩次真的卡住（排除偶發的
+// 單次重複 CFI，那多半下一次 next() 就正常前進，見 progressCalculations.ts 的說明），就直接
+// 用跟書籤／目錄跳轉相同的 rendition.display() 跳過去下一個 linear 章節，繞過卡住的分頁翻頁。
+let consecutiveStuckNext = 0;
+
+const findNextLinearHref = (afterIndex: number): string | null => {
+  if (!book) return null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const spineItems = ((book.spine as any)?.items ?? []) as any[];
+  const next = spineItems.find((item) => item.index > afterIndex && item.linear !== 'no');
+  return next?.href ?? null;
+};
+
 const turnPage = (direction: 'prev' | 'next') => {
   if (navBusy || !rendition) return;
   lockNav();
@@ -464,6 +482,7 @@ const loadBook = async (base64: string, cfi: string | null, initialAnnotations: 
   locationsReady = false;
   lastRelocatedLoc = null;
   lastLinearSpineIndex = null;
+  consecutiveStuckNext = 0;
   renderedAnnotations = new Map();
   stopTTSTracking();
 
@@ -590,8 +609,24 @@ const loadBook = async (base64: string, cfi: string | null, initialAnnotations: 
       unlockNavSoon();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const previousCfi = (lastRelocatedLoc as any)?.start?.cfi ?? null;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const locAny = loc as any;
+      const stuckOnNext = lastNavDirection === 'next' && previousCfi !== null && locAny?.start?.cfi === previousCfi;
       lastRelocatedLoc = loc;
       postRelocated(loc, previousCfi);
+      if (stuckOnNext) {
+        consecutiveStuckNext += 1;
+        if (consecutiveStuckNext >= 2 && !locAny?.atEnd) {
+          consecutiveStuckNext = 0;
+          const nextHref = findNextLinearHref(locAny?.start?.index ?? -1);
+          if (nextHref) {
+            debugLog('[relocated] next() 連續卡住同一個 CFI，直接跳到下一章', nextHref);
+            gotoTarget(nextHref);
+          }
+        }
+      } else {
+        consecutiveStuckNext = 0;
+      }
       // 從書籤／目錄／註記清單等其他畫面跳轉（gotoTarget → rendition.display(cfi)）時，
       // 若目標落在目前已經渲染過、epub.js 判斷不需要重建 iframe 內容的章節（例如相鄰的
       // 預先渲染 view），hooks.content 就不會再觸發，上面掛在 hooks.content 裡的

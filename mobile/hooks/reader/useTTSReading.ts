@@ -37,13 +37,22 @@ export const useTTSReading = ({ postToWebView, currentHrefRef, atEndRef, request
   // 翻頁還沒來得及跟上時才需要额外呼叫 next() 補上。
   const advanceToNextChapter = useCallback(async (): Promise<boolean> => {
     const startHref = readingHrefRef.current;
+    if (__DEV__) console.log('[tts-reading] advanceToNextChapter 開始', { startHref, currentHref: currentHrefRef.current, atEnd: atEndRef.current });
     for (let i = 0; i < 50; i++) {
-      if (currentHrefRef.current !== startHref) return true;
-      if (atEndRef.current) return false;
+      if (currentHrefRef.current !== startHref) {
+        if (__DEV__) console.log('[tts-reading] advanceToNextChapter: href 已改變，跨章節成功', { i, newHref: currentHrefRef.current });
+        return true;
+      }
+      if (atEndRef.current) {
+        if (__DEV__) console.log('[tts-reading] advanceToNextChapter: 已到全書結尾，停止', { i });
+        return false;
+      }
       postToWebView({ type: 'next' });
       await waitForRelocated();
     }
-    return currentHrefRef.current !== startHref;
+    const advanced = currentHrefRef.current !== startHref;
+    if (__DEV__) console.log('[tts-reading] advanceToNextChapter: 50 次重試後仍未跨過章節', { advanced, startHref, currentHref: currentHrefRef.current, atEnd: atEndRef.current });
+    return advanced;
   }, [currentHrefRef, atEndRef, postToWebView, waitForRelocated]);
 
   const continueReadingRef = useRef<() => void>(() => {});
@@ -63,11 +72,40 @@ export const useTTSReading = ({ postToWebView, currentHrefRef, atEndRef, request
 
   const readNextAndContinue = useCallback(async () => {
     const advanced = await advanceToNextChapter();
-    if (!advanced) return;
-    const { text, startOffset } = await requestChapterText();
-    if (!text.trim()) return;
-    startSpeaking(text, startOffset);
-  }, [advanceToNextChapter, requestChapterText, startSpeaking]);
+    if (!advanced) {
+      if (__DEV__) console.log('[tts-reading] readNextAndContinue: advanceToNextChapter 回報 false，朗讀在此停止');
+      return;
+    }
+    // 實測抓到的真正情況（見對話紀錄的 log）：跨完章節後 getChapterText() 拿到空字串，不是
+    // WebView 渲染還沒完成的暫時性競態（重試 300ms 仍是空字串）——是這個 spine 項目本身就
+    // 沒有文字內容（常見於純標題頁／純圖片頁，例如 xxxt.xhtml 這種章節標題圖片頁）。這種頁面
+    // 要繼續往後翻頁找下一個真的有文字的頁面，而不是原地重試或直接放棄朗讀。
+    for (let hop = 0; hop < 20; hop++) {
+      const { text, startOffset } = await requestChapterText();
+      if (text.trim()) {
+        startSpeaking(text, startOffset);
+        return;
+      }
+      if (__DEV__) console.log('[tts-reading] readNextAndContinue: 目前頁面沒有可念文字，往後翻頁找下一頁', { hop, href: currentHrefRef.current });
+      if (atEndRef.current) {
+        if (__DEV__) console.log('[tts-reading] readNextAndContinue: 已到全書結尾仍沒有可念文字，朗讀在此停止');
+        return;
+      }
+      postToWebView({ type: 'next' });
+      await waitForRelocated();
+      if (hop === 19) {
+        // 第 20 次翻頁後的目的地也要檢查一次，不能翻完就直接放棄，否則剛好翻到的
+        // 那一頁若本身有文字會被平白錯過（見上面 for 迴圈：check 在 navigate 之前，
+        // 最後一次 navigate 完迴圈就結束，若不在這裡補一次 check，這個目的地永遠不會被檢查）。
+        const { text: finalText, startOffset: finalOffset } = await requestChapterText();
+        if (finalText.trim()) {
+          startSpeaking(finalText, finalOffset);
+          return;
+        }
+      }
+    }
+    if (__DEV__) console.log('[tts-reading] readNextAndContinue: 連續 20 次翻頁都沒有可念文字，放棄');
+  }, [advanceToNextChapter, requestChapterText, startSpeaking, atEndRef, currentHrefRef, postToWebView, waitForRelocated]);
   useEffect(() => {
     continueReadingRef.current = readNextAndContinue;
   }, [readNextAndContinue]);
