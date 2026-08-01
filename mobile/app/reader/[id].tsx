@@ -1,7 +1,7 @@
 import * as Clipboard from 'expo-clipboard';
 import { useLocalSearchParams, router } from 'expo-router';
 import { useRef, useState } from 'react';
-import { ActivityIndicator, Linking, Pressable, Text, View } from 'react-native';
+import { ActivityIndicator, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import { IconBack, IconBookmarkFill, IconBookmarkOutline, IconChapters, IconNotes, IconPause, IconPlay, IconReset, IconSettings, IconSleepTimer } from '../../components/icons';
@@ -124,8 +124,8 @@ const ReaderScreen = () => {
   const pageProgress = formatPageProgress(engine.pageInfo);
 
   return (
-    <SafeAreaView edges={['top', 'bottom']} style={{ flex: 1, backgroundColor: colors.paperBg }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', height: 44, paddingHorizontal: 12 }}>
+    <SafeAreaView edges={['top', 'bottom']} style={[styles.safeArea, { backgroundColor: colors.paperBg }]}>
+      <View style={styles.header}>
         <Pressable
           onPress={handleBack}
           hitSlop={12}
@@ -134,10 +134,10 @@ const ReaderScreen = () => {
         >
           <IconBack color={colors.ink} />
         </Pressable>
-        <Text style={{ flex: 1, textAlign: 'center', fontSize: 16, color: colors.ink }} numberOfLines={1}>
+        <Text style={[styles.headerTitle, { color: colors.ink }]} numberOfLines={1}>
           {engine.record?.title ?? '閱讀中'}
         </Text>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+        <View style={styles.headerIcons}>
           <Pressable
             onPress={bookmarks.handleToggleBookmark}
             hitSlop={12}
@@ -152,10 +152,7 @@ const ReaderScreen = () => {
             accessibilityRole="button"
             accessibilityLabel={annotationMode ? '結束劃線模式' : '進入劃線模式'}
             accessibilityState={{ selected: annotationMode }}
-            style={{
-              width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center',
-              backgroundColor: annotationMode ? colors.paperBg2 : 'transparent',
-            }}
+            style={[styles.headerIconButton, { backgroundColor: annotationMode ? colors.paperBg2 : 'transparent' }]}
           >
             <IconNotes color={annotationMode ? colors.progressFill : colors.ink} />
           </Pressable>
@@ -165,10 +162,7 @@ const ReaderScreen = () => {
             accessibilityRole="button"
             accessibilityLabel="書籤／目錄／資訊"
             accessibilityState={{ selected: listPanelTab !== null }}
-            style={{
-              width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center',
-              backgroundColor: listPanelTab !== null ? colors.paperBg2 : 'transparent',
-            }}
+            style={[styles.headerIconButton, { backgroundColor: listPanelTab !== null ? colors.paperBg2 : 'transparent' }]}
           >
             <IconChapters color={listPanelTab !== null ? colors.progressFill : colors.ink} />
           </Pressable>
@@ -178,16 +172,13 @@ const ReaderScreen = () => {
             accessibilityRole="button"
             accessibilityLabel="排版與語音設定"
             accessibilityState={{ selected: settingsVisible }}
-            style={{
-              width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center',
-              backgroundColor: settingsVisible ? colors.paperBg2 : 'transparent',
-            }}
+            style={[styles.headerIconButton, { backgroundColor: settingsVisible ? colors.paperBg2 : 'transparent' }]}
           >
             <IconSettings color={settingsVisible ? colors.progressFill : colors.ink} />
           </Pressable>
         </View>
       </View>
-      <View style={{ flex: 1 }}>
+      <View style={styles.webviewContainer}>
         <WebView
           ref={engine.webviewRef}
           originWhitelist={['*']}
@@ -198,27 +189,24 @@ const ReaderScreen = () => {
           webviewDebuggingEnabled={__DEV__}
           bounces={false}
           overScrollMode="never"
-          style={{ flex: 1, opacity: engine.loading ? 0 : 1 }}
+          style={[styles.webview, { opacity: engine.loading ? 0 : 1 }]}
         />
         {annotationMode && (
           <View
             pointerEvents="none"
-            style={{
-              position: 'absolute', top: 0, left: 0, right: 0,
-              paddingVertical: 6, alignItems: 'center', backgroundColor: colors.progressFill,
-            }}
+            style={[styles.annotationBanner, { backgroundColor: colors.progressFill }]}
           >
-            <Text style={{ fontSize: 11, color: '#fff' }}>劃線模式中：長按文字選取即可標記，點擊畫面翻頁已暫停</Text>
+            <Text style={styles.annotationBannerText}>劃線模式中：長按文字選取即可標記，點擊畫面翻頁已暫停</Text>
           </View>
         )}
         {engine.loading && !engine.errorMessage ? (
-          <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' }}>
+          <View style={styles.centerOverlay}>
             <ActivityIndicator size="large" />
           </View>
         ) : null}
         {engine.errorMessage ? (
-          <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-            <Text style={{ textAlign: 'center' }}>載入失敗：{engine.errorMessage}</Text>
+          <View style={styles.errorOverlay}>
+            <Text style={styles.errorText}>載入失敗：{engine.errorMessage}</Text>
           </View>
         ) : null}
         {settingsVisible && (
@@ -288,23 +276,21 @@ const ReaderScreen = () => {
             與底部頁碼列之間，屬於一般排版流（不是蓋在 WebView 上的 overlay），才不會遮到
             正在閱讀的文字；也因為高度固定不隨播放狀態變動，不會觸發 WebView resize 讓
             epub.js 重新分頁（見下面頁碼列註解，同一個理由）。 */}
-        <View
-          style={{
-            height: 52, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 20,
-            borderTopWidth: 1, borderTopColor: colors.borderColor,
-          }}
-        >
+        <View style={[styles.ttsBar, { borderTopColor: colors.borderColor }]}>
           <Pressable
             onPress={ttsReading.handleTTSReset}
             disabled={!tts.playing && !tts.paused}
             hitSlop={10}
             accessibilityRole="button"
             accessibilityLabel="重置朗讀進度"
-            style={{
-              width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center',
-              backgroundColor: colors.paperBg2, borderWidth: 1, borderColor: colors.borderColor,
-              opacity: (!tts.playing && !tts.paused) ? 0.4 : 1,
-            }}
+            style={[
+              styles.circleButton34,
+              {
+                backgroundColor: colors.paperBg2,
+                borderColor: colors.borderColor,
+                opacity: (!tts.playing && !tts.paused) ? 0.4 : 1,
+              },
+            ]}
           >
             <IconReset color={colors.ink2} />
           </Pressable>
@@ -313,14 +299,11 @@ const ReaderScreen = () => {
             hitSlop={10}
             accessibilityRole="button"
             accessibilityLabel={tts.playing ? '暫停朗讀' : '開始朗讀'}
-            style={{
-              width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center',
-              backgroundColor: tts.playing ? colors.progressFill : colors.ink,
-            }}
+            style={[styles.playButton, { backgroundColor: tts.playing ? colors.progressFill : colors.ink }]}
           >
             {tts.playing ? <IconPause color={colors.paperBg} /> : <IconPlay color={colors.paperBg} />}
           </Pressable>
-          <View style={{ width: 34, alignItems: 'center' }}>
+          <View style={styles.sleepWrapper}>
             <Pressable
               onPress={ttsReading.handleCycleSleep}
               hitSlop={10}
@@ -332,16 +315,18 @@ const ReaderScreen = () => {
                     ? `睡眠計時倒數 ${Math.floor(tts.sleepRemaining / 60)}分${tts.sleepRemaining % 60}秒`
                     : `睡眠計時 ${tts.sleepMinutes} 分鐘`
               }
-              style={{
-                width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center',
-                backgroundColor: tts.sleepMinutes > 0 ? colors.paperBg2 : 'transparent',
-                borderWidth: 1, borderColor: colors.borderColor,
-              }}
+              style={[
+                styles.circleButton34,
+                {
+                  backgroundColor: tts.sleepMinutes > 0 ? colors.paperBg2 : 'transparent',
+                  borderColor: colors.borderColor,
+                },
+              ]}
             >
               <IconSleepTimer color={tts.sleepMinutes > 0 ? colors.progressFill : colors.ink2} />
             </Pressable>
             {tts.sleepMinutes > 0 && (
-              <Text style={{ fontSize: 9, color: colors.ink3, marginTop: 2 }}>
+              <Text style={[styles.sleepCountdownText, { color: colors.ink3 }]}>
                 {tts.sleepRemaining !== null
                   ? `${String(Math.floor(tts.sleepRemaining / 60)).padStart(2, '0')}:${String(tts.sleepRemaining % 60).padStart(2, '0')}`
                   : `${tts.sleepMinutes}分`}
@@ -353,23 +338,21 @@ const ReaderScreen = () => {
             null 變有值時這塊區域才冒出來，導致 WebView 版面高度跟著變動——epub.js 的分頁是
             依照初次拿到的 viewer 尺寸算的，事後才緊縮 WebView 高度容易讓已渲染好的那一頁內容
             被裁切，需要等 resize 事件跑完才會重新分頁，中間會有一段畫面被蓋住的空窗期。 */}
-        <View style={{ height: 28, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingBottom: 8 }}>
+        <View style={styles.pageBar}>
           {pageProgress && (
             <>
-              <Text style={{ fontSize: 10, color: colors.ink3, letterSpacing: 0.5 }}>
+              <Text style={[styles.pageText, { color: colors.ink3 }]}>
                 第 {pageProgress.page} 頁
               </Text>
-              <View style={{ flex: 1, height: 3, backgroundColor: colors.progressTrack, borderRadius: 2 }}>
+              <View style={[styles.pageProgressTrack, { backgroundColor: colors.progressTrack }]}>
                 <View
-                  style={{
-                    width: `${pageProgress.percent}%`,
-                    height: '100%',
-                    backgroundColor: colors.progressFill,
-                    borderRadius: 2,
-                  }}
+                  style={[
+                    styles.pageProgressFill,
+                    { width: `${pageProgress.percent}%`, backgroundColor: colors.progressFill },
+                  ]}
                 />
               </View>
-              <Text style={{ fontSize: 10, color: colors.ink3, letterSpacing: 0.5 }}>
+              <Text style={[styles.pageText, { color: colors.ink3 }]}>
                 / {pageProgress.total} · {pageProgress.percent}%
               </Text>
             </>
@@ -379,5 +362,126 @@ const ReaderScreen = () => {
     </SafeAreaView>
   );
 };
+
+const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 44,
+    paddingHorizontal: 12,
+  },
+  headerTitle: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: 16,
+  },
+  headerIcons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+  },
+  headerIconButton: {
+    width: 30,
+    height: 30,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  webviewContainer: {
+    flex: 1,
+  },
+  webview: {
+    flex: 1,
+  },
+  annotationBanner: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    paddingVertical: 6,
+    alignItems: 'center',
+  },
+  annotationBannerText: {
+    fontSize: 11,
+    color: '#fff',
+  },
+  centerOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  errorOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  errorText: {
+    textAlign: 'center',
+  },
+  ttsBar: {
+    height: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 20,
+    borderTopWidth: 1,
+  },
+  circleButton34: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+  },
+  playButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sleepWrapper: {
+    width: 34,
+    alignItems: 'center',
+  },
+  sleepCountdownText: {
+    fontSize: 9,
+    marginTop: 2,
+  },
+  pageBar: {
+    height: 28,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingBottom: 8,
+  },
+  pageText: {
+    fontSize: 10,
+    letterSpacing: 0.5,
+  },
+  pageProgressTrack: {
+    flex: 1,
+    height: 3,
+    borderRadius: 2,
+  },
+  pageProgressFill: {
+    height: '100%',
+    borderRadius: 2,
+  },
+});
 
 export default ReaderScreen;

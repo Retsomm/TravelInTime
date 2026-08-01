@@ -1,6 +1,6 @@
 import * as Clipboard from 'expo-clipboard';
 import { useMemo, useRef, useState } from 'react';
-import { Image, Pressable, ScrollView, Share, Text, TextInput, View } from 'react-native';
+import { Image, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from 'react-native';
 import { IconCopy } from './icons';
 import { HIGHLIGHT_COLORS } from '../lib/annotationColors';
 import { getCoverUri, type Annotation, type BookRecord, type Bookmark } from '../lib/library';
@@ -115,14 +115,12 @@ const ListPanel = ({
         onPress={() => onNavigateChapter(item.href)}
         accessibilityRole="button"
         accessibilityLabel={`前往章節：${item.label}`}
-        style={{
-          paddingVertical: 10,
-          paddingLeft: 16 + depth * 14,
-          paddingRight: 16,
-          backgroundColor: item.href === activeHref ? colors.paperBg2 : 'transparent',
-        }}
+        style={[
+          styles.tocItem,
+          { paddingLeft: 16 + depth * 14, backgroundColor: item.href === activeHref ? colors.paperBg2 : 'transparent' },
+        ]}
       >
-        <Text style={{ fontSize: 14, color: item.href === activeHref ? colors.ink : colors.ink2 }} numberOfLines={1}>
+        <Text style={[styles.tocItemText, { color: item.href === activeHref ? colors.ink : colors.ink2 }]} numberOfLines={1}>
           {item.label}
         </Text>
       </Pressable>
@@ -135,8 +133,8 @@ const ListPanel = ({
   const coverUri = useMemo(() => (record ? getCoverUri(record) : null), [record?.coverFilename, record?.coverUri]);
 
   return (
-    <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: colors.paperBg, zIndex: 20 }}>
-      <View style={{ flexDirection: 'row', backgroundColor: colors.paperBg2, borderRadius: 8, padding: 2, gap: 2, margin: 12, marginTop: 20 }}>
+    <View style={[styles.root, { backgroundColor: colors.paperBg }]}>
+      <View style={[styles.tabsRow, { backgroundColor: colors.paperBg2 }]}>
         {TABS.map((t) => {
           const active = tab === t.key;
           return (
@@ -146,46 +144,46 @@ const ListPanel = ({
               accessibilityRole="tab"
               accessibilityLabel={t.label}
               accessibilityState={{ selected: active }}
-              style={{ flex: 1, height: 30, borderRadius: 6, alignItems: 'center', justifyContent: 'center', backgroundColor: active ? colors.paperBg : 'transparent' }}
+              style={[styles.tabButton, { backgroundColor: active ? colors.paperBg : 'transparent' }]}
             >
-              <Text style={{ fontSize: 13, color: active ? colors.ink : colors.ink3 }}>{t.label}</Text>
+              <Text style={[styles.tabButtonText, { color: active ? colors.ink : colors.ink3 }]}>{t.label}</Text>
             </Pressable>
           );
         })}
       </View>
 
       {tab === 'bookmarks' && (
-        <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
+        <ScrollView contentContainerStyle={styles.scrollContent}>
           {bookmarks.length === 0 ? (
-            <Text style={{ textAlign: 'center', fontSize: 12, color: colors.ink3, padding: 32 }}>尚無書籤</Text>
+            <Text style={[styles.emptyStateText, { color: colors.ink3 }]}>尚無書籤</Text>
           ) : (
             [...bookmarks].sort((a, b) => a.addedAt - b.addedAt).map((bm) => (
-              <View key={bm.id} style={{ paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderColor: colors.borderColor, gap: 6 }}>
+              <View key={bm.id} style={[styles.bookmarkRow, { borderColor: colors.borderColor }]}>
                 <Pressable onPress={() => onNavigateBookmark(bm)} accessibilityRole="button" accessibilityLabel={`跳至書籤：${bm.label}`}>
-                  <Text style={{ fontSize: 13, color: colors.ink }}>{bm.label}</Text>
+                  <Text style={[styles.bookmarkLabel, { color: colors.ink }]}>{bm.label}</Text>
                 </Pressable>
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <Text style={{ fontSize: 10, color: colors.ink3 }}>{formatDate(bm.addedAt)}</Text>
+                <View style={styles.bookmarkMetaRow}>
+                  <Text style={[styles.metaText10, { color: colors.ink3 }]}>{formatDate(bm.addedAt)}</Text>
                   <Pressable
                     onPress={() => setPendingDeleteId(pendingDeleteId === bm.id ? null : bm.id)}
                     hitSlop={8}
                     accessibilityRole="button"
                     accessibilityLabel="移除書籤"
                   >
-                    <Text style={{ fontSize: 11, color: pendingDeleteId === bm.id ? '#ef4444' : colors.ink3 }}>移除</Text>
+                    <Text style={[styles.actionText11, { color: pendingDeleteId === bm.id ? '#ef4444' : colors.ink3 }]}>移除</Text>
                   </Pressable>
                 </View>
                 {pendingDeleteId === bm.id && (
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                    <Text style={{ fontSize: 11, color: '#ef4444' }}>確定移除？</Text>
-                    <Pressable onPress={() => setPendingDeleteId(null)} style={{ paddingHorizontal: 8, height: 22, borderRadius: 5, backgroundColor: colors.paperBg2, alignItems: 'center', justifyContent: 'center' }}>
-                      <Text style={{ fontSize: 11, color: colors.ink3 }}>取消</Text>
+                  <View style={styles.confirmRow}>
+                    <Text style={styles.confirmDeleteText11}>確定移除？</Text>
+                    <Pressable onPress={() => setPendingDeleteId(null)} style={[styles.smallCancelButton, { backgroundColor: colors.paperBg2 }]}>
+                      <Text style={[styles.actionText11, { color: colors.ink3 }]}>取消</Text>
                     </Pressable>
                     <Pressable
                       onPress={() => { onDeleteBookmark(bm.id); setPendingDeleteId(null); }}
-                      style={{ paddingHorizontal: 8, height: 22, borderRadius: 5, backgroundColor: '#ef4444', alignItems: 'center', justifyContent: 'center' }}
+                      style={styles.smallDangerButton}
                     >
-                      <Text style={{ fontSize: 11, color: '#fff' }}>移除</Text>
+                      <Text style={styles.whiteText11}>移除</Text>
                     </Pressable>
                   </View>
                 )}
@@ -196,9 +194,9 @@ const ListPanel = ({
       )}
 
       {tab === 'chapters' && (
-        <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
+        <ScrollView contentContainerStyle={styles.scrollContent}>
           {toc.length === 0 ? (
-            <Text style={{ textAlign: 'center', fontSize: 12, color: colors.ink3, padding: 32 }}>此書籍無目錄資料</Text>
+            <Text style={[styles.emptyStateText, { color: colors.ink3 }]}>此書籍無目錄資料</Text>
           ) : (
             toc.map((item) => renderTocItem(item, 0))
           )}
@@ -206,118 +204,118 @@ const ListPanel = ({
       )}
 
       {tab === 'bookinfo' && record && (
-        <ScrollView contentContainerStyle={{ padding: 20, gap: 16 }}>
-          <View style={{ aspectRatio: 2 / 3, width: 140, borderRadius: 4, overflow: 'hidden', alignSelf: 'center' }}>
+        <ScrollView contentContainerStyle={styles.bookinfoContent}>
+          <View style={styles.bookinfoCover}>
             {coverUri ? (
-              <Image source={{ uri: coverUri }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+              <Image source={{ uri: coverUri }} style={styles.coverImageFull} resizeMode="cover" />
             ) : cs ? (
-              <View style={{ flex: 1, backgroundColor: cs.bg, justifyContent: 'flex-end', padding: 12 }}>
-                <Text style={{ fontSize: 14, fontWeight: '600', color: cs.ink }} numberOfLines={3}>{record.title}</Text>
-                {record.author ? <Text style={{ fontSize: 10, color: cs.rule, marginTop: 4 }}>{record.author}</Text> : null}
+              <View style={[styles.coverPlaceholder, { backgroundColor: cs.bg }]}>
+                <Text style={[styles.coverPlaceholderTitle, { color: cs.ink }]} numberOfLines={3}>{record.title}</Text>
+                {record.author ? <Text style={[styles.coverPlaceholderAuthor, { color: cs.rule }]}>{record.author}</Text> : null}
               </View>
             ) : null}
           </View>
           <View>
-            <Text style={{ fontSize: 16, fontWeight: '500', color: colors.ink }}>{record.title}</Text>
-            {record.author ? <Text style={{ fontSize: 11, color: colors.ink3, marginTop: 4 }}>{record.author}</Text> : null}
+            <Text style={[styles.bookTitle, { color: colors.ink }]}>{record.title}</Text>
+            {record.author ? <Text style={[styles.bookAuthor, { color: colors.ink3 }]}>{record.author}</Text> : null}
           </View>
           {pct !== null && (
             <View>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
-                <Text style={{ fontSize: 10, color: colors.ink3 }}>閱讀進度</Text>
-                <Text style={{ fontSize: 10, color: colors.progressFill }}>{pct}%</Text>
+              <View style={styles.progressLabelRow}>
+                <Text style={[styles.metaText10, { color: colors.ink3 }]}>閱讀進度</Text>
+                <Text style={[styles.metaText10, { color: colors.progressFill }]}>{pct}%</Text>
               </View>
-              <View style={{ height: 3, backgroundColor: colors.borderColor, borderRadius: 2 }}>
-                <View style={{ width: `${pct}%`, height: '100%', backgroundColor: colors.progressFill, borderRadius: 2 }} />
+              <View style={[styles.bookinfoProgressTrack, { backgroundColor: colors.borderColor }]}>
+                <View style={[styles.bookinfoProgressFill, { width: `${pct}%`, backgroundColor: colors.progressFill }]} />
               </View>
             </View>
           )}
-          <View style={{ gap: 10 }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-              <Text style={{ fontSize: 10, color: colors.ink3 }}>匯入時間</Text>
-              <Text style={{ fontSize: 11, color: colors.ink2 }}>{formatDate(record.addedAt)}</Text>
+          <View style={styles.metaList}>
+            <View style={styles.infoRow}>
+              <Text style={[styles.metaText10, { color: colors.ink3 }]}>匯入時間</Text>
+              <Text style={[styles.infoValue, { color: colors.ink2 }]}>{formatDate(record.addedAt)}</Text>
             </View>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-              <Text style={{ fontSize: 10, color: colors.ink3 }}>最後閱讀</Text>
-              <Text style={{ fontSize: 11, color: colors.ink2 }}>{record.lastOpenedAt ? formatDate(record.lastOpenedAt) : '尚未記錄'}</Text>
+            <View style={styles.infoRow}>
+              <Text style={[styles.metaText10, { color: colors.ink3 }]}>最後閱讀</Text>
+              <Text style={[styles.infoValue, { color: colors.ink2 }]}>{record.lastOpenedAt ? formatDate(record.lastOpenedAt) : '尚未記錄'}</Text>
             </View>
           </View>
           <Pressable
             onPress={() => Clipboard.setStringAsync(record.title)}
             accessibilityRole="button"
             accessibilityLabel="複製書名"
-            style={{
-              flexDirection: 'row', alignItems: 'center', gap: 8,
-              paddingVertical: 9, paddingHorizontal: 14, borderRadius: 8,
-              backgroundColor: colors.paperBg2, borderWidth: 1, borderColor: colors.borderColor,
-            }}
+            style={[styles.copyButton, { backgroundColor: colors.paperBg2, borderColor: colors.borderColor }]}
           >
             <IconCopy color={colors.ink2} />
-            <Text style={{ fontSize: 13, color: colors.ink2 }}>複製書名</Text>
+            <Text style={[styles.copyButtonText, { color: colors.ink2 }]}>複製書名</Text>
           </Pressable>
         </ScrollView>
       )}
 
       {tab === 'notes' && (
-        <View style={{ flex: 1 }}>
+        <View style={styles.flex1}>
           {annotations.length > 0 && (
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingBottom: 8 }}>
+            <View style={styles.notesHeaderRow}>
               <Pressable onPress={toggleSelectAllAnn} accessibilityRole="button" accessibilityLabel="全選">
-                <Text style={{ fontSize: 12, color: colors.ink3 }}>{allAnnSelected ? '取消全選' : '全選'}</Text>
+                <Text style={[styles.metaText12, { color: colors.ink3 }]}>{allAnnSelected ? '取消全選' : '全選'}</Text>
               </Pressable>
               <Pressable
                 onPress={handleExportAnnotations}
                 disabled={selectedAnnIds.size === 0}
                 accessibilityRole="button"
                 accessibilityLabel="匯出選取的註記"
-                style={{
-                  height: 26, paddingHorizontal: 10, borderRadius: 6, alignItems: 'center', justifyContent: 'center',
-                  backgroundColor: selectedAnnIds.size > 0 ? colors.progressFill : 'transparent',
-                  opacity: selectedAnnIds.size > 0 ? 1 : 0.5,
-                }}
+                style={[
+                  styles.exportButton,
+                  {
+                    backgroundColor: selectedAnnIds.size > 0 ? colors.progressFill : 'transparent',
+                    opacity: selectedAnnIds.size > 0 ? 1 : 0.5,
+                  },
+                ]}
               >
-                <Text style={{ fontSize: 12, color: selectedAnnIds.size > 0 ? '#fff' : colors.ink3 }}>
+                <Text style={[styles.metaText12, { color: selectedAnnIds.size > 0 ? '#fff' : colors.ink3 }]}>
                   匯出{selectedAnnIds.size > 0 ? ` (${selectedAnnIds.size})` : ''}
                 </Text>
               </Pressable>
             </View>
           )}
-          <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
+          <ScrollView contentContainerStyle={styles.scrollContent}>
             {annotations.length === 0 ? (
-              <View style={{ padding: 32 }}>
-                <Text style={{ fontSize: 13, color: colors.ink2, marginBottom: 6, textAlign: 'center' }}>尚無註記</Text>
-                <Text style={{ fontSize: 12, color: colors.ink3, textAlign: 'center', lineHeight: 18 }}>
+              <View style={styles.emptyNotesWrapper}>
+                <Text style={[styles.emptyNotesTitle, { color: colors.ink2 }]}>尚無註記</Text>
+                <Text style={[styles.emptyNotesSubtitle, { color: colors.ink3 }]}>
                   在書本內文選取文字，即可劃線、加註感想。
                 </Text>
               </View>
             ) : (
               annotations.map((a) => (
-                <View key={a.id} style={{ paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderColor: colors.borderColor, gap: 8 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 10 }}>
+                <View key={a.id} style={[styles.annotationRow, { borderColor: colors.borderColor }]}>
+                  <View style={styles.annotationInnerRow}>
                     <Pressable
                       onPress={() => toggleSelectAnn(a.id)}
                       hitSlop={8}
                       accessibilityRole="checkbox"
                       accessibilityState={{ checked: selectedAnnIds.has(a.id) }}
-                      style={{
-                        width: 18, height: 18, borderRadius: 4, marginTop: 3, alignItems: 'center', justifyContent: 'center',
-                        borderWidth: 1.5, borderColor: selectedAnnIds.has(a.id) ? colors.progressFill : colors.borderColor,
-                        backgroundColor: selectedAnnIds.has(a.id) ? colors.progressFill : 'transparent',
-                      }}
+                      style={[
+                        styles.annotationCheckbox,
+                        {
+                          borderColor: selectedAnnIds.has(a.id) ? colors.progressFill : colors.borderColor,
+                          backgroundColor: selectedAnnIds.has(a.id) ? colors.progressFill : 'transparent',
+                        },
+                      ]}
                     >
-                      {selectedAnnIds.has(a.id) && <Text style={{ fontSize: 11, color: '#fff' }}>✓</Text>}
+                      {selectedAnnIds.has(a.id) && <Text style={styles.whiteText11}>✓</Text>}
                     </Pressable>
 
-                    <Pressable style={{ flex: 1 }} onPress={() => onNavigateAnnotation(a.cfi)} accessibilityRole="button" accessibilityLabel="跳至此註記">
+                    <Pressable style={styles.flex1} onPress={() => onNavigateAnnotation(a.cfi)} accessibilityRole="button" accessibilityLabel="跳至此註記">
                       <Text
-                        style={{ fontSize: 13, color: colors.ink, lineHeight: 20, borderLeftWidth: 3, borderColor: a.color, paddingLeft: 10 }}
+                        style={[styles.annotationText, { color: colors.ink, borderColor: a.color }]}
                         numberOfLines={4}
                       >
                         {a.text}
                       </Text>
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}>
-                        <Text style={{ fontSize: 10, color: colors.ink3 }} numberOfLines={1}>{a.chapter || ''}</Text>
-                        <Text style={{ fontSize: 10, color: colors.ink3 }}>{formatDate(a.createdAt)}</Text>
+                      <View style={styles.annotationMetaRow}>
+                        <Text style={[styles.metaText10, { color: colors.ink3 }]} numberOfLines={1}>{a.chapter || ''}</Text>
+                        <Text style={[styles.metaText10, { color: colors.ink3 }]}>{formatDate(a.createdAt)}</Text>
                       </View>
                     </Pressable>
 
@@ -326,7 +324,7 @@ const ListPanel = ({
                       hitSlop={8}
                       accessibilityRole="button"
                       accessibilityLabel="更換顏色"
-                      style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: a.color, marginTop: 3 }}
+                      style={[styles.colorSwatchButton, { backgroundColor: a.color }]}
                     />
                     <Pressable
                       onPress={() => { setColorPickerId(null); setPendingDeleteAnnId(pendingDeleteAnnId === a.id ? null : a.id); }}
@@ -334,43 +332,43 @@ const ListPanel = ({
                       accessibilityRole="button"
                       accessibilityLabel="刪除此註記"
                     >
-                      <Text style={{ fontSize: 12, color: pendingDeleteAnnId === a.id ? '#ef4444' : colors.ink3 }}>✕</Text>
+                      <Text style={[styles.metaText12, { color: pendingDeleteAnnId === a.id ? '#ef4444' : colors.ink3 }]}>✕</Text>
                     </Pressable>
                   </View>
 
                   {colorPickerId === a.id && (
-                    <View style={{ flexDirection: 'row', gap: 8, paddingLeft: 28 }}>
+                    <View style={styles.colorPickerRow}>
                       {HIGHLIGHT_COLORS.map((c) => (
                         <Pressable
                           key={c.value}
                           onPress={() => { onChangeAnnotationColor(a.id, c.value); setColorPickerId(null); }}
                           accessibilityRole="button"
                           accessibilityLabel={`${c.label}色`}
-                          style={{
-                            width: 22, height: 22, borderRadius: 11, backgroundColor: c.value,
-                            borderWidth: 2, borderColor: a.color === c.value ? colors.ink : 'transparent',
-                          }}
+                          style={[
+                            styles.colorOption,
+                            { backgroundColor: c.value, borderColor: a.color === c.value ? colors.ink : 'transparent' },
+                          ]}
                         />
                       ))}
                     </View>
                   )}
 
                   {pendingDeleteAnnId === a.id && (
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 28 }}>
-                      <Text style={{ fontSize: 11, color: '#ef4444' }}>確定刪除？</Text>
-                      <Pressable onPress={() => setPendingDeleteAnnId(null)} style={{ paddingHorizontal: 8, height: 22, borderRadius: 5, backgroundColor: colors.paperBg2, alignItems: 'center', justifyContent: 'center' }}>
-                        <Text style={{ fontSize: 11, color: colors.ink3 }}>取消</Text>
+                    <View style={styles.confirmRowIndented}>
+                      <Text style={styles.confirmDeleteText11}>確定刪除？</Text>
+                      <Pressable onPress={() => setPendingDeleteAnnId(null)} style={[styles.smallCancelButton, { backgroundColor: colors.paperBg2 }]}>
+                        <Text style={[styles.actionText11, { color: colors.ink3 }]}>取消</Text>
                       </Pressable>
                       <Pressable
                         onPress={() => { onDeleteAnnotation(a.id); setSelectedAnnIds((prev) => { const n = new Set(prev); n.delete(a.id); return n; }); setPendingDeleteAnnId(null); }}
-                        style={{ paddingHorizontal: 8, height: 22, borderRadius: 5, backgroundColor: '#ef4444', alignItems: 'center', justifyContent: 'center' }}
+                        style={styles.smallDangerButton}
                       >
-                        <Text style={{ fontSize: 11, color: '#fff' }}>刪除</Text>
+                        <Text style={styles.whiteText11}>刪除</Text>
                       </Pressable>
                     </View>
                   )}
 
-                  <View style={{ paddingLeft: 28 }}>
+                  <View style={styles.notePaddingLeft}>
                     {editingNoteId === a.id ? (
                       <View>
                         <TextInput
@@ -380,38 +378,34 @@ const ListPanel = ({
                           placeholder="寫下你的感想…"
                           placeholderTextColor={colors.ink3}
                           multiline
-                          style={{
-                            minHeight: 60, borderRadius: 7, borderWidth: 1, borderColor: colors.progressFill,
-                            backgroundColor: colors.paperBg2, color: colors.ink, fontSize: 13, lineHeight: 20,
-                            padding: 8, textAlignVertical: 'top',
-                          }}
+                          style={[
+                            styles.noteInput,
+                            { borderColor: colors.progressFill, backgroundColor: colors.paperBg2, color: colors.ink },
+                          ]}
                         />
-                        <View style={{ flexDirection: 'row', gap: 6, marginTop: 6 }}>
-                          <Pressable onPress={() => saveNote(a.id)} style={{ height: 24, paddingHorizontal: 10, borderRadius: 5, backgroundColor: colors.progressFill, alignItems: 'center', justifyContent: 'center' }}>
-                            <Text style={{ fontSize: 11, color: '#fff' }}>儲存</Text>
+                        <View style={styles.noteButtonRow}>
+                          <Pressable onPress={() => saveNote(a.id)} style={[styles.smallActionButton, { backgroundColor: colors.progressFill }]}>
+                            <Text style={styles.whiteText11}>儲存</Text>
                           </Pressable>
-                          <Pressable onPress={cancelNote} style={{ height: 24, paddingHorizontal: 10, borderRadius: 5, backgroundColor: colors.paperBg2, alignItems: 'center', justifyContent: 'center' }}>
-                            <Text style={{ fontSize: 11, color: colors.ink3 }}>取消</Text>
+                          <Pressable onPress={cancelNote} style={[styles.smallActionButton, { backgroundColor: colors.paperBg2 }]}>
+                            <Text style={[styles.actionText11, { color: colors.ink3 }]}>取消</Text>
                           </Pressable>
                           {a.note && (
-                            <Pressable onPress={() => deleteNote(a.id)} style={{ height: 24, paddingHorizontal: 10, borderRadius: 5, alignItems: 'center', justifyContent: 'center' }}>
-                              <Text style={{ fontSize: 11, color: '#ef4444' }}>刪除筆記</Text>
+                            <Pressable onPress={() => deleteNote(a.id)} style={styles.smallActionButton}>
+                              <Text style={styles.confirmDeleteText11}>刪除筆記</Text>
                             </Pressable>
                           )}
                         </View>
                       </View>
                     ) : a.note ? (
                       <Pressable onPress={() => startEditNote(a)} accessibilityRole="button" accessibilityLabel="編輯筆記">
-                        <View style={{
-                          backgroundColor: colors.paperBg2, borderRadius: 7, padding: 8,
-                          borderLeftWidth: 3, borderColor: colors.borderColor,
-                        }}>
-                          <Text style={{ fontSize: 12, color: colors.ink2, lineHeight: 18 }}>{a.note}</Text>
+                        <View style={[styles.noteDisplayBox, { backgroundColor: colors.paperBg2, borderColor: colors.borderColor }]}>
+                          <Text style={[styles.noteDisplayText, { color: colors.ink2 }]}>{a.note}</Text>
                         </View>
                       </Pressable>
                     ) : (
                       <Pressable onPress={() => startEditNote(a)} accessibilityRole="button" accessibilityLabel="新增感想">
-                        <Text style={{ fontSize: 11, color: colors.ink3 }}>＋ 新增感想</Text>
+                        <Text style={[styles.actionText11, { color: colors.ink3 }]}>＋ 新增感想</Text>
                       </Pressable>
                     )}
                   </View>
@@ -424,5 +418,288 @@ const ListPanel = ({
     </View>
   );
 };
+
+const styles = StyleSheet.create({
+  root: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 20,
+  },
+  tabsRow: {
+    flexDirection: 'row',
+    borderRadius: 8,
+    padding: 2,
+    gap: 2,
+    margin: 12,
+    marginTop: 20,
+  },
+  tabButton: {
+    flex: 1,
+    height: 30,
+    borderRadius: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tabButtonText: {
+    fontSize: 13,
+  },
+  scrollContent: {
+    paddingBottom: 24,
+  },
+  emptyStateText: {
+    textAlign: 'center',
+    fontSize: 12,
+    padding: 32,
+  },
+  bookmarkRow: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    gap: 6,
+  },
+  bookmarkLabel: {
+    fontSize: 13,
+  },
+  bookmarkMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  metaText10: {
+    fontSize: 10,
+  },
+  metaText12: {
+    fontSize: 12,
+  },
+  actionText11: {
+    fontSize: 11,
+  },
+  whiteText11: {
+    fontSize: 11,
+    color: '#fff',
+  },
+  confirmDeleteText11: {
+    fontSize: 11,
+    color: '#ef4444',
+  },
+  confirmRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  confirmRowIndented: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingLeft: 28,
+  },
+  smallCancelButton: {
+    paddingHorizontal: 8,
+    height: 22,
+    borderRadius: 5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  smallDangerButton: {
+    paddingHorizontal: 8,
+    height: 22,
+    borderRadius: 5,
+    backgroundColor: '#ef4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tocItem: {
+    paddingVertical: 10,
+    paddingRight: 16,
+  },
+  tocItemText: {
+    fontSize: 14,
+  },
+  bookinfoContent: {
+    padding: 20,
+    gap: 16,
+  },
+  bookinfoCover: {
+    aspectRatio: 2 / 3,
+    width: 140,
+    borderRadius: 4,
+    overflow: 'hidden',
+    alignSelf: 'center',
+  },
+  coverImageFull: {
+    width: '100%',
+    height: '100%',
+  },
+  coverPlaceholder: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    padding: 12,
+  },
+  coverPlaceholderTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  coverPlaceholderAuthor: {
+    fontSize: 10,
+    marginTop: 4,
+  },
+  bookTitle: {
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  bookAuthor: {
+    fontSize: 11,
+    marginTop: 4,
+  },
+  progressLabelRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  bookinfoProgressTrack: {
+    height: 3,
+    borderRadius: 2,
+  },
+  bookinfoProgressFill: {
+    height: '100%',
+    borderRadius: 2,
+  },
+  metaList: {
+    gap: 10,
+  },
+  infoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  infoValue: {
+    fontSize: 11,
+  },
+  copyButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 9,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  copyButtonText: {
+    fontSize: 13,
+  },
+  flex1: {
+    flex: 1,
+  },
+  notesHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+  },
+  exportButton: {
+    height: 26,
+    paddingHorizontal: 10,
+    borderRadius: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyNotesWrapper: {
+    padding: 32,
+  },
+  emptyNotesTitle: {
+    fontSize: 13,
+    marginBottom: 6,
+    textAlign: 'center',
+  },
+  emptyNotesSubtitle: {
+    fontSize: 12,
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  annotationRow: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    gap: 8,
+  },
+  annotationInnerRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  annotationCheckbox: {
+    width: 18,
+    height: 18,
+    borderRadius: 4,
+    marginTop: 3,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+  },
+  annotationText: {
+    fontSize: 13,
+    lineHeight: 20,
+    borderLeftWidth: 3,
+    paddingLeft: 10,
+  },
+  annotationMetaRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 6,
+  },
+  colorSwatchButton: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    marginTop: 3,
+  },
+  colorPickerRow: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingLeft: 28,
+  },
+  colorOption: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+  },
+  notePaddingLeft: {
+    paddingLeft: 28,
+  },
+  noteInput: {
+    minHeight: 60,
+    borderRadius: 7,
+    borderWidth: 1,
+    fontSize: 13,
+    lineHeight: 20,
+    padding: 8,
+    textAlignVertical: 'top',
+  },
+  noteButtonRow: {
+    flexDirection: 'row',
+    gap: 6,
+    marginTop: 6,
+  },
+  smallActionButton: {
+    height: 24,
+    paddingHorizontal: 10,
+    borderRadius: 5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  noteDisplayBox: {
+    borderRadius: 7,
+    padding: 8,
+    borderLeftWidth: 3,
+  },
+  noteDisplayText: {
+    fontSize: 12,
+    lineHeight: 18,
+  },
+});
 
 export default ListPanel;
