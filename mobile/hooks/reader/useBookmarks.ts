@@ -24,21 +24,15 @@ export const useBookmarks = (id: string | undefined, currentCfi: string, current
       label: currentChapterTitle || '書籤',
       addedAt: Date.now(),
     };
-    let next: Bookmark[] = [];
-    setBookmarks((prev) => {
-      next = toggleBookmarkList(prev, currentCfi, newBookmark);
-      return next;
-    });
+    const next = toggleBookmarkList(bookmarks, currentCfi, newBookmark);
+    setBookmarks(next);
     saveBookmarks(id, next).catch((err) => console.error('[reader] saveBookmarks 失敗', err));
   };
 
   const handleDeleteBookmark = (bookmarkId: string) => {
     if (!id) return;
-    let next: Bookmark[] = [];
-    setBookmarks((prev) => {
-      next = removeBookmarkList(prev, bookmarkId);
-      return next;
-    });
+    const next = removeBookmarkList(bookmarks, bookmarkId);
+    setBookmarks(next);
     saveBookmarks(id, next).catch((err) => console.error('[reader] saveBookmarks 失敗', err));
   };
 
