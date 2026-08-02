@@ -1,3 +1,22 @@
+let replaceCssRejectionGuardInstalled = false
+
+// epub.js bug 修補（保底）：book.destroy() 後 this.resources 變成 undefined，若此時
+// book.js 內部有任何非同步鏈（目前已知至少 replacements()、store() 兩處）仍在跑到
+// `this.resources.replaceCss()` 這一行，就會丟出未被接住的 "Cannot read properties of
+// undefined (reading 'replaceCss')"。patchBookPrototype 只包住 replacements() 這一個路徑，
+// 為了不用逐一找出 book.js 裡所有可能踩到的內部呼叫點，這裡改成直接攔截這個特定、已知無害
+// （book 已經沒人在乎的舊實例）的 unhandledrejection，避免它被 Next.js dev overlay 當成
+// 當機錯誤擋住畫面。只裝一次，多次呼叫是安全的。
+export const suppressReplaceCssRejection = () => {
+  if (replaceCssRejectionGuardInstalled || typeof window === 'undefined') return
+  window.addEventListener('unhandledrejection', (event) => {
+    if (event.reason instanceof TypeError && /reading 'replaceCss'/.test(event.reason.message)) {
+      event.preventDefault()
+    }
+  })
+  replaceCssRejectionGuardInstalled = true
+}
+
 export const patchBookPrototype = (bookProto: any) => {
   if (!bookProto.replacements || bookProto._replacementsGuard) return
   const orig = bookProto.replacements

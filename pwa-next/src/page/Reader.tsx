@@ -21,6 +21,7 @@ interface Props {
   bookPath: string
   bookId: string
   bookRecord: BookRecord | null
+  initialCfi?: string
   getCoverDataUrl: (id: string) => Promise<string | null>
   onBack: () => void
   darkMode: boolean
@@ -31,7 +32,7 @@ interface Props {
 
 
 
-const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMode, onToggleDark, onUpdateProgress, onApplyLatestVersion }: Props) => {
+const Reader = ({ bookPath, bookId, bookRecord, initialCfi, getCoverDataUrl, onBack, darkMode, onToggleDark, onUpdateProgress, onApplyLatestVersion }: Props) => {
   const viewerRef = useRef<HTMLDivElement>(null)
   const bookRef = useRef<Book | null>(null)
   const renditionRef = useRef<Rendition | null>(null)
@@ -115,7 +116,7 @@ const Reader = ({ bookPath, bookId, bookRecord, getCoverDataUrl, onBack, darkMod
     handleTTSPlay, handleTTSPause, handleTTSReset,
     swipeStartRef, isSelectingRef,
   } = useReaderEngine({
-    bookPath, bookId, bookRecord, darkMode, activePanel, onUpdateProgress,
+    bookPath, bookId, bookRecord, initialCfi, darkMode, activePanel, onUpdateProgress,
     viewerRef, bookRef, renditionRef, lastIframeClickRef,
     fontSize, fontFamily, script, lineHeight, letterSpacing, readingDirection,
     setFontFamily, setScript, resetScript,

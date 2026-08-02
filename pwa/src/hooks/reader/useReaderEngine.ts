@@ -667,6 +667,7 @@ export const useReaderEngine = (params: {
     fontSizeRef.current = fontSize
     try { renditionRef.current?.themes.override('font-size', `${fontSize}px`) } catch { /* epubjs 時序問題，忽略 */ }
     applyToCurrentDoc(doc => applyFontSizeOverride(doc, fontSize))
+    rerenderAnnotationPane()
     triggerScan()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fontSize, ready])
@@ -761,6 +762,7 @@ export const useReaderEngine = (params: {
       if (Math.abs(curWidth - newWidth) > 2 || Math.abs(curHeight - newHeight) > 2) {
         if (DEBUG_READER_LOG) console.log('[Reader] activePanel 變更，重設 rendition 尺寸', { curWidth, curHeight, newWidth, newHeight })
         try { rendition.resize(newWidth, newHeight) } catch { /* ignore */ }
+        rerenderAnnotationPane()
         triggerScan()
       }
     }, 80)

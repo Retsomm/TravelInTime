@@ -60,10 +60,23 @@ const pruneStaleContentDocs = () => {
   });
 };
 
+// 文字排版改變後，重新計算 marks-pane SVG 座標（pane.render 會重呼叫 getClientRects），
+// 否則已存在的劃線標記會停留在舊排版的位置，跟改版後的文字對不上。比照網頁版
+// useReaderEngine.ts 的 rerenderAnnotationPane。
+const rerenderAnnotationPane = () => {
+  setTimeout(() => {
+    rendition?.views().forEach((view: unknown) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (view as any).pane?.render();
+    });
+  }, 50);
+};
+
 const setTypography = (next: TypographySettings) => {
   typography = next;
   pruneStaleContentDocs();
   contentDocs.forEach((doc) => applyTypographyToDoc(doc, typography, baseScript));
+  rerenderAnnotationPane();
 };
 
 const applyDarkModeToOuterPage = (isDark: boolean) => {
@@ -787,6 +800,7 @@ window.addEventListener('resize', () => {
     } catch {
       /* epub.js 尚未就緒，忽略 */
     }
+    rerenderAnnotationPane();
   }, 150);
 });
 

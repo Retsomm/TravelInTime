@@ -9,7 +9,7 @@ import { useAnnotationStore, loadAnnotationsForBook, saveAnnotationsForBook } fr
 import type { Annotation } from '@/store/useAnnotationStore'
 import { saveProgress, loadProgress, saveBookSettings, loadBookSettings } from '@/hooks/useLibrary'
 import type { BookRecord } from '@/hooks/useLibrary'
-import { patchBookPrototype, patchIframeViewPrototype, patchRenditionPrototype } from '@/components/Reader/epubPatches'
+import { patchBookPrototype, patchIframeViewPrototype, patchRenditionPrototype, suppressReplaceCssRejection } from '@/components/Reader/epubPatches'
 import { applyDarkOverride, applyFontFamilyOverride, applyFontSizeOverride, applyLetterSpacingOverride, applyLineHeightOverride, applyTextSizeAdjustOverride, applyWritingModeOverride, normalizeFontFamily } from '@/components/Reader/readerStyles'
 import { convertDoc, getToSC, getToTC, restoreDoc } from '@/components/Reader/scriptConversion'
 import { DEBUG_TTS_FOLLOW, TTS_HIGHLIGHT_INTERVAL, TTS_NEW_PAGE_AUTO_FOLLOW_GUARD, TTS_PAGE_END_FIXED_LEAD, TTS_USER_INPUT_GRACE, clearTTSHighlight, clearTTSHighlights, collectContentDocuments, createRangeFromTextOffset, ensureTTSHighlightStyle, getBoundaryOffsetFromRange, getTTSRangeViewportState, getTextIndex, paintTTSHighlightOverlay, ttsTextIndexCache } from '@/components/Reader/ttsHighlight'
@@ -33,6 +33,7 @@ export const useReaderEngine = (params: {
   bookPath: string
   bookId: string
   bookRecord: BookRecord | null
+  initialCfi?: string
   darkMode: boolean
   activePanel: string | null
   onUpdateProgress?: (pct: number) => void
@@ -89,7 +90,7 @@ export const useReaderEngine = (params: {
   resetBookmarks: () => void
 }) => {
   const {
-    bookPath, bookId, bookRecord, darkMode, activePanel, onUpdateProgress,
+    bookPath, bookId, bookRecord, initialCfi, darkMode, activePanel, onUpdateProgress,
     viewerRef, bookRef, renditionRef, lastIframeClickRef,
     fontSize, fontFamily, script, lineHeight, letterSpacing, readingDirection,
     setFontFamily, setScript, resetScript,
@@ -225,6 +226,8 @@ export const useReaderEngine = (params: {
   useEffect(() => {
     const container = viewerRef.current
     if (!container) return
+
+    suppressReplaceCssRejection()
 
     let destroyed = false
 
@@ -512,6 +515,7 @@ export const useReaderEngine = (params: {
             removePendingAnnotation(renditionRef.current)
             setPopup(null)
           }
+
           const l = loc as AnyLoc
           setCurrentHref((l?.start?.href ?? '').split('#')[0])
           if (l?.start?.cfi) {
@@ -625,8 +629,18 @@ export const useReaderEngine = (params: {
               // rendition 呼叫 display。
               if (destroyed) return
               const savedCfi = loadProgress(bookId)
-              return rendition.display(savedCfi ?? undefined).catch(async (err: unknown) => {
-                console.warn('[Reader] display(savedCfi) 失敗:', err)
+              // initialCfi 來自「我的筆記」頁點擊個別註記時傳入的目標位置，優先於一般的
+              // 閱讀進度；只在這次開書時使用一次，不影響 savedCfi 本身的讀寫。
+              const targetCfi = initialCfi ?? savedCfi
+              return rendition.display(targetCfi ?? undefined).catch(async (err: unknown) => {
+                console.warn('[Reader] display(targetCfi) 失敗:', err)
+
+                // initialCfi 指向的位置解析失敗時，退回使用者原本的閱讀進度再試一次，
+                // 避免因為單一註記的 CFI 失效就連帶讓整本書都打不開。
+                if (initialCfi && savedCfi && savedCfi !== initialCfi) {
+                  try { return await rendition.display(savedCfi) }
+                  catch (eCfi) { console.warn('[Reader] fallback savedCfi 失敗:', eCfi) }
+                }
 
                 // fallback 1：數字索引 0（epubjs 支援 spine index）
                 try {
@@ -737,6 +751,7 @@ export const useReaderEngine = (params: {
     fontSizeRef.current = fontSize
     try { renditionRef.current?.themes.override('font-size', `${fontSize}px`) } catch { /* epubjs 時序問題，忽略 */ }
     applyToCurrentDoc(doc => applyFontSizeOverride(doc, fontSize))
+    rerenderAnnotationPane()
     triggerScan()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fontSize, ready])
@@ -831,6 +846,7 @@ export const useReaderEngine = (params: {
       if (Math.abs(curWidth - newWidth) > 2 || Math.abs(curHeight - newHeight) > 2) {
         if (DEBUG_READER_LOG) console.log('[Reader] activePanel 變更，重設 rendition 尺寸', { curWidth, curHeight, newWidth, newHeight })
         try { rendition.resize(newWidth, newHeight) } catch { /* ignore */ }
+        rerenderAnnotationPane()
         triggerScan()
       }
     }, 80)

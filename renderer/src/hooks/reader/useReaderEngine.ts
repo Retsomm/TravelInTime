@@ -697,6 +697,7 @@ export const useReaderEngine = (params: {
       const curHeight = (rendition as any).settings?.height
       if (Math.abs(curWidth - newWidth) > 2 || Math.abs(curHeight - newHeight) > 2) {
         try { rendition.resize(newWidth, newHeight) } catch { /* ignore */ }
+        rerenderAnnotationPane()
         triggerScan()
       }
     }, 80)
