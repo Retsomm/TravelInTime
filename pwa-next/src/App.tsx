@@ -17,6 +17,7 @@ const App = () => {
   const [view, setView] = useState<View>('library')
   const [activeBookUrl, setActiveBookUrl] = useState<string | null>(null)
   const [activeBookId, setActiveBookId] = useState<string>('')
+  const [initialCfi, setInitialCfi] = useState<string | undefined>(undefined)
   const [darkMode, setDarkMode] = useState(true)
   const [missingBook, setMissingBook] = useState<{ id: string; title: string } | null>(null)
   const recoverFileInputRef = useRef<HTMLInputElement>(null)
@@ -61,7 +62,7 @@ const App = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSignedIn])
 
-  const handleOpenBook = async (id: string) => {
+  const handleOpenBook = async (id: string, cfi?: string) => {
     const url = await getBookUrl(id)
     if (!url) {
       const record = records.find((r) => r.id === id)
@@ -71,6 +72,7 @@ const App = () => {
     touchBook(id)
     setActiveBookUrl(url)
     setActiveBookId(id)
+    setInitialCfi(cfi)
     setView('reader')
   }
 
@@ -78,13 +80,16 @@ const App = () => {
     await Promise.allSettled(files.map((file) => addBook(file)))
   }
 
-  // 從「我的筆記」頁點「開啟這本書」會連到 /?open=<bookId>，這裡接手打開並清掉網址參數。
+  // 從「我的筆記」頁點「開啟這本書」或個別註記會連到 /?open=<bookId>（可選 &cfi=<目標位置>），
+  // 這裡接手打開並清掉網址參數。cfi 存在時代表使用者點的是特定一則註記，優先跳轉到那個位置；
+  // 沒有 cfi 則沿用一般的「開啟這本書」行為，回到上次的閱讀進度。
   const router = useRouter()
   const searchParams = useSearchParams()
   useEffect(() => {
     const openId = searchParams.get('open')
     if (!openId) return
-    handleOpenBook(openId)
+    const cfi = searchParams.get('cfi') ?? undefined
+    handleOpenBook(openId, cfi)
     router.replace('/')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams])
@@ -107,6 +112,7 @@ const App = () => {
     if (activeBookUrl) URL.revokeObjectURL(activeBookUrl)
     setActiveBookUrl(null)
     setActiveBookId('')
+    setInitialCfi(undefined)
     setView('library')
   }
 
@@ -153,6 +159,7 @@ const App = () => {
           <Reader
             bookPath={activeBookUrl}
             bookId={activeBookId}
+            initialCfi={initialCfi}
             bookRecord={records.find((r) => r.id === activeBookId) ?? null}
             getCoverDataUrl={getCoverDataUrl}
             onBack={backToLibrary}

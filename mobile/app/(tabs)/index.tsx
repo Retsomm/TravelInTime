@@ -12,6 +12,7 @@ import {
   listBooks,
   removeBook,
   saveCoverImage,
+  seedDefaultBook,
   updateBookMeta,
 } from '../../lib/library';
 import { READER_HTML } from '../../lib/readerHtml.generated';
@@ -90,6 +91,16 @@ const LibraryScreen = () => {
       }
     });
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      seedDefaultBook().then((record) => {
+        if (!record) return;
+        refresh();
+        extractMetaFor(record).then(refresh);
+      });
+    }, [refresh, extractMetaFor])
+  );
 
   const handleExtractorMessage = useCallback(
     (event: { nativeEvent: { data: string } }) => {

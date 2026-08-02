@@ -88,7 +88,7 @@ const ReaderScreen = () => {
   const toggleListPanel = () => {
     setSettingsVisible(false);
     engine.clearSelectionState();
-    setListPanelTab((prev) => (prev ? null : 'bookmarks'));
+    setListPanelTab((prev) => (prev ? null : 'chapters'));
   };
 
   // 劃線模式：使用者實測回報「畫面中間三分之一窄帶長按選字沒有反應」，log 顯示觸控確實有

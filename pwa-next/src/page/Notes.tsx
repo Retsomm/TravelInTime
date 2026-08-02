@@ -104,30 +104,38 @@ const Notes = () => {
                       <span className={`font-ui-mono text-[10px] tracking-[0.04em] text-ink-3`}>
                         {n.chapter ? `${n.chapter} · ` : ''}{formatDate(n.createdAt)}
                       </span>
-                      {pendingDeleteId === n.id ? (
-                        <span className="flex items-center gap-1.5">
-                          <span className="font-ui-mono text-[10px] text-red-500">確定刪除？</span>
+                      <span className="flex items-center gap-2.5">
+                        <Link
+                          href={`/?open=${n.bookId}&cfi=${encodeURIComponent(n.cfi)}`}
+                          className="font-ui-mono text-[10px] tracking-[0.04em] text-ink-3"
+                        >
+                          跳至此處 →
+                        </Link>
+                        {pendingDeleteId === n.id ? (
+                          <span className="flex items-center gap-1.5">
+                            <span className="font-ui-mono text-[10px] text-red-500">確定刪除？</span>
+                            <button
+                              className="font-ui-mono text-[10px] text-red-500 py-0.5 px-1.5"
+                              onClick={() => handleDelete(n.bookId, n.id)}
+                            >
+                              刪除
+                            </button>
+                            <button
+                              className={`font-ui-mono text-[10px] py-0.5 px-1.5 text-ink-3`}
+                              onClick={() => setPendingDeleteId(null)}
+                            >
+                              取消
+                            </button>
+                          </span>
+                        ) : (
                           <button
-                            className="font-ui-mono text-[10px] text-red-500 py-0.5 px-1.5"
-                            onClick={() => handleDelete(n.bookId, n.id)}
+                            className={`font-ui-mono text-[10px] tracking-[0.04em] text-ink-3`}
+                            onClick={() => setPendingDeleteId(n.id)}
                           >
                             刪除
                           </button>
-                          <button
-                            className={`font-ui-mono text-[10px] py-0.5 px-1.5 text-ink-3`}
-                            onClick={() => setPendingDeleteId(null)}
-                          >
-                            取消
-                          </button>
-                        </span>
-                      ) : (
-                        <button
-                          className={`font-ui-mono text-[10px] tracking-[0.04em] text-ink-3`}
-                          onClick={() => setPendingDeleteId(n.id)}
-                        >
-                          刪除
-                        </button>
-                      )}
+                        )}
+                      </span>
                     </div>
                   </div>
                 ))}

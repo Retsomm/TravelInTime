@@ -9,7 +9,7 @@ import { useAnnotationStore, loadAnnotationsForBook, saveAnnotationsForBook } fr
 import type { Annotation } from '@/store/useAnnotationStore'
 import { saveProgress, loadProgress, saveBookSettings, loadBookSettings } from '@/hooks/useLibrary'
 import type { BookRecord } from '@/hooks/useLibrary'
-import { patchBookPrototype, patchIframeViewPrototype, patchRenditionPrototype } from '@/components/Reader/epubPatches'
+import { patchBookPrototype, patchIframeViewPrototype, patchRenditionPrototype, suppressReplaceCssRejection } from '@/components/Reader/epubPatches'
 import { applyDarkOverride, applyFontFamilyOverride, applyFontSizeOverride, applyLetterSpacingOverride, applyLineHeightOverride, applyTextSizeAdjustOverride, applyWritingModeOverride, normalizeFontFamily } from '@/components/Reader/readerStyles'
 import { convertDoc, getToSC, getToTC, restoreDoc } from '@/components/Reader/scriptConversion'
 import { DEBUG_TTS_FOLLOW, TTS_HIGHLIGHT_INTERVAL, TTS_NEW_PAGE_AUTO_FOLLOW_GUARD, TTS_PAGE_END_FIXED_LEAD, TTS_USER_INPUT_GRACE, clearTTSHighlight, clearTTSHighlights, collectContentDocuments, createRangeFromTextOffset, ensureTTSHighlightStyle, getBoundaryOffsetFromRange, getTTSRangeViewportState, getTextIndex, paintTTSHighlightOverlay, ttsTextIndexCache } from '@/components/Reader/ttsHighlight'
@@ -33,6 +33,7 @@ export const useReaderEngine = (params: {
   bookPath: string
   bookId: string
   bookRecord: BookRecord | null
+  initialCfi?: string
   darkMode: boolean
   activePanel: string | null
   onUpdateProgress?: (pct: number) => void
@@ -89,7 +90,7 @@ export const useReaderEngine = (params: {
   resetBookmarks: () => void
 }) => {
   const {
-    bookPath, bookId, bookRecord, darkMode, activePanel, onUpdateProgress,
+    bookPath, bookId, bookRecord, initialCfi, darkMode, activePanel, onUpdateProgress,
     viewerRef, bookRef, renditionRef, lastIframeClickRef,
     fontSize, fontFamily, script, lineHeight, letterSpacing, readingDirection,
     setFontFamily, setScript, resetScript,
@@ -157,6 +158,7 @@ export const useReaderEngine = (params: {
   const [sleepRemaining, setSleepRemaining] = useState<number | null>(null)
   const sleepIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const sleepMinutesRef = useRef(0)
+  const sleepSecondsLeftRef = useRef<number | null>(null)
   // 供鍵盤事件存取最新的 prevPage/nextPage（避免閉包 stale 問題）
   const prevPageRef = useRef<() => void>(() => {})
   const nextPageRef = useRef<() => void>(() => {})
@@ -221,10 +223,164 @@ export const useReaderEngine = (params: {
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
   }, [])
 
+  const noteUserInteraction = () => {
+    ttsUserInputUntilRef.current = Date.now() + TTS_USER_INPUT_GRACE
+  }
+
+  const clearAllTTSHighlights = () => {
+    const docs = collectContentDocuments(viewerRef.current, ttsContentDocsRef.current)
+    clearTTSHighlights(docs)
+    clearTTSHighlight(currentDocRef.current)
+    clearTTSHighlight(ttsHighlightedDocRef.current)
+    ttsHighlightedDocRef.current = null
+  }
+
+  const clearOtherTTSHighlights = (activeDoc: Document) => {
+    const docs = collectContentDocuments(viewerRef.current, ttsContentDocsRef.current)
+    for (const doc of docs) {
+      if (doc !== activeDoc) clearTTSHighlight(doc)
+    }
+    if (ttsHighlightedDocRef.current && ttsHighlightedDocRef.current !== activeDoc) {
+      clearTTSHighlight(ttsHighlightedDocRef.current)
+    }
+  }
+
+  const measureCurrentPageEdgeOffset = (doc: Document, loc: AnyLoc, edge: 'start' | 'end'): number | null => {
+    const cfi = loc?.[edge]?.cfi as string | undefined
+    if (!cfi) return null
+
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const range = (renditionRef.current as any)?.getRange?.(cfi) as Range | null | undefined
+      const offset = getBoundaryOffsetFromRange(doc, range, edge)
+      const textLength = getTextIndex(doc)?.total ?? ttsChapterTextLengthRef.current
+      if (offset === null) return null
+      return Math.max(0, Math.min(offset, textLength))
+    } catch (err) {
+      if (DEBUG_TTS_FOLLOW) {
+        console.warn(`[TTS:follow] ${edge}.cfi 轉 offset 失敗`, {
+          cfi,
+          error: err instanceof Error ? err.message : String(err),
+        })
+      }
+      return null
+    }
+  }
+
+  const measureCurrentPageEndOffset = (doc: Document, loc?: AnyLoc): number | null =>
+    measureCurrentPageEdgeOffset(doc, loc, 'end')
+
+  const measureCurrentPageStartOffset = (doc: Document, loc?: AnyLoc): number | null =>
+    measureCurrentPageEdgeOffset(doc, loc, 'start')
+
+  const refreshTTSPageEndOffset = (label: string, loc?: AnyLoc) => {
+    const doc = currentDocRef.current
+    const visibleSpineIdx = loc?.start?.index as number | undefined
+    if (!doc || !ttsActiveRef.current || visibleSpineIdx !== ttsVisibleSpineIndexRef.current) return
+
+    const pageStartOffset = measureCurrentPageStartOffset(doc, loc)
+    const pageEndOffset = measureCurrentPageEndOffset(doc, loc)
+    ttsCurrentPageStartOffsetRef.current = pageStartOffset
+    ttsVisiblePageEndOffsetRef.current = pageEndOffset
+    if (DEBUG_TTS_FOLLOW) {
+      console.log(`[TTS:follow] ${label}`, {
+        absoluteOffset: ttsLastAbsoluteOffsetRef.current,
+        pageStartOffset,
+        pageEndOffset,
+        displayed: loc?.start?.displayed,
+        startCfi: loc?.start?.cfi,
+        endCfi: loc?.end?.cfi,
+      })
+    }
+  }
+
+  const unlockTTSAutoFollow = (label: string, loc?: AnyLoc) => {
+    const pending = ttsAutoFollowPendingRef.current
+    refreshTTSPageEndOffset(label, loc)
+    if (DEBUG_TTS_FOLLOW && pending && pending.fromPageStartOffset !== null && pending.fromPageEndOffset !== null) {
+      const nextPageStartOffset = ttsCurrentPageStartOffsetRef.current
+      if (nextPageStartOffset !== null) {
+        console.log('[TTS:follow] relocated 後頁界線參考', {
+          fromPageStartOffset: pending.fromPageStartOffset,
+          fromPageEndOffset: pending.fromPageEndOffset,
+          nextPageStartOffset,
+          endToNextStartDelta: pending.fromPageEndOffset - nextPageStartOffset,
+        })
+      }
+    }
+    ttsAutoFollowBusyRef.current = false
+    ttsAutoFollowPendingRef.current = null
+    ttsAutoFollowUnlockTimerRef.current = null
+  }
+
+  const requestTTSAutoNextPage = (
+    displayed: { page: number; total: number } | undefined,
+    absoluteOffset: number,
+    pageStartOffset: number | null,
+    pageEndOffset: number | null,
+  ) => {
+    if (ttsAutoFollowBusyRef.current) return
+
+    const now = Date.now()
+    if (now - ttsAutoFollowLastAtRef.current < 650) {
+      if (DEBUG_TTS_FOLLOW) console.log('[TTS:follow] skip next: 節流中', {
+        msSinceLast: now - ttsAutoFollowLastAtRef.current,
+        displayed,
+      })
+      return
+    }
+
+    const sequence = ++ttsAutoFollowSequenceRef.current
+    ttsAutoFollowBusyRef.current = true
+    ttsAutoFollowLastAtRef.current = now
+    ttsAutoFollowPendingRef.current = {
+      sequence,
+      fromPage: displayed?.page ?? 1,
+      fromOffset: absoluteOffset,
+      fromPageStartOffset: pageStartOffset,
+      fromPageEndOffset: pageEndOffset,
+    }
+
+    if (ttsAutoFollowUnlockTimerRef.current) clearTimeout(ttsAutoFollowUnlockTimerRef.current)
+    ttsAutoFollowUnlockTimerRef.current = setTimeout(() => {
+      if (ttsAutoFollowPendingRef.current?.sequence !== sequence) return
+      console.warn('[TTS:follow] relocated 未如期觸發，fallback 解鎖自動翻頁', { displayed, absoluteOffset, sequence })
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      unlockTTSAutoFollow('relocated fallback 用 end.cfi 更新頁尾', (renditionRef.current as any)?.currentLocation?.())
+    }, 2500)
+
+    Promise.resolve(renditionRef.current?.next())
+      .catch((err: unknown) => {
+        console.warn('[TTS] 自動跟讀翻頁失敗:', err)
+        if (ttsAutoFollowPendingRef.current?.sequence === sequence) {
+          ttsAutoFollowBusyRef.current = false
+          ttsAutoFollowPendingRef.current = null
+          if (ttsAutoFollowUnlockTimerRef.current) {
+            clearTimeout(ttsAutoFollowUnlockTimerRef.current)
+            ttsAutoFollowUnlockTimerRef.current = null
+          }
+        }
+      })
+  }
+
+  const cancelScheduledTTSHighlight = () => {
+    if (ttsHighlightFrameRef.current !== null) {
+      cancelAnimationFrame(ttsHighlightFrameRef.current)
+      ttsHighlightFrameRef.current = null
+    }
+    if (ttsHighlightTimerRef.current !== null) {
+      clearTimeout(ttsHighlightTimerRef.current)
+      ttsHighlightTimerRef.current = null
+    }
+    ttsPendingHighlightRef.current = null
+  }
+
   // 初始化書本
   useEffect(() => {
     const container = viewerRef.current
     if (!container) return
+
+    suppressReplaceCssRejection()
 
     let destroyed = false
 
@@ -512,6 +668,7 @@ export const useReaderEngine = (params: {
             removePendingAnnotation(renditionRef.current)
             setPopup(null)
           }
+
           const l = loc as AnyLoc
           setCurrentHref((l?.start?.href ?? '').split('#')[0])
           if (l?.start?.cfi) {
@@ -625,8 +782,18 @@ export const useReaderEngine = (params: {
               // rendition 呼叫 display。
               if (destroyed) return
               const savedCfi = loadProgress(bookId)
-              return rendition.display(savedCfi ?? undefined).catch(async (err: unknown) => {
-                console.warn('[Reader] display(savedCfi) 失敗:', err)
+              // initialCfi 來自「我的筆記」頁點擊個別註記時傳入的目標位置，優先於一般的
+              // 閱讀進度；只在這次開書時使用一次，不影響 savedCfi 本身的讀寫。
+              const targetCfi = initialCfi || savedCfi
+              return rendition.display(targetCfi ?? undefined).catch(async (err: unknown) => {
+                console.warn('[Reader] display(targetCfi) 失敗:', err)
+
+                // initialCfi 指向的位置解析失敗時，退回使用者原本的閱讀進度再試一次，
+                // 避免因為單一註記的 CFI 失效就連帶讓整本書都打不開。
+                if (initialCfi && savedCfi && savedCfi !== initialCfi) {
+                  try { return await rendition.display(savedCfi) }
+                  catch (eCfi) { console.warn('[Reader] fallback savedCfi 失敗:', eCfi) }
+                }
 
                 // fallback 1：數字索引 0（epubjs 支援 spine index）
                 try {
@@ -731,16 +898,6 @@ export const useReaderEngine = (params: {
     })
   }
 
-  // 字體大小（獨立，不影響其他設定）
-  useEffect(() => {
-    if (!ready) return
-    fontSizeRef.current = fontSize
-    try { renditionRef.current?.themes.override('font-size', `${fontSize}px`) } catch { /* epubjs 時序問題，忽略 */ }
-    applyToCurrentDoc(doc => applyFontSizeOverride(doc, fontSize))
-    triggerScan()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fontSize, ready])
-
   // 文字排版改變後，重新計算 marks-pane SVG 座標（pane.render 會重呼叫 getClientRects）
   const rerenderAnnotationPane = () => {
     setTimeout(() => {
@@ -750,6 +907,17 @@ export const useReaderEngine = (params: {
       })
     }, 50)
   }
+
+  // 字體大小（獨立，不影響其他設定）
+  useEffect(() => {
+    if (!ready) return
+    fontSizeRef.current = fontSize
+    try { renditionRef.current?.themes.override('font-size', `${fontSize}px`) } catch { /* epubjs 時序問題，忽略 */ }
+    applyToCurrentDoc(doc => applyFontSizeOverride(doc, fontSize))
+    rerenderAnnotationPane()
+    triggerScan()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fontSize, ready])
 
   const getVisibleContentDocument = (): Document | null => {
     const viewer = viewerRef.current
@@ -831,6 +999,7 @@ export const useReaderEngine = (params: {
       if (Math.abs(curWidth - newWidth) > 2 || Math.abs(curHeight - newHeight) > 2) {
         if (DEBUG_READER_LOG) console.log('[Reader] activePanel 變更，重設 rendition 尺寸', { curWidth, curHeight, newWidth, newHeight })
         try { rendition.resize(newWidth, newHeight) } catch { /* ignore */ }
+        rerenderAnnotationPane()
         triggerScan()
       }
     }, 80)
@@ -909,158 +1078,6 @@ export const useReaderEngine = (params: {
     renditionRef.current?.display(target).catch((err: unknown) => {
       console.warn('[Reader] 跳轉至章節失敗:', err)
     })
-  }
-
-  const noteUserInteraction = () => {
-    ttsUserInputUntilRef.current = Date.now() + TTS_USER_INPUT_GRACE
-  }
-
-  const clearAllTTSHighlights = () => {
-    const docs = collectContentDocuments(viewerRef.current, ttsContentDocsRef.current)
-    clearTTSHighlights(docs)
-    clearTTSHighlight(currentDocRef.current)
-    clearTTSHighlight(ttsHighlightedDocRef.current)
-    ttsHighlightedDocRef.current = null
-  }
-
-  const clearOtherTTSHighlights = (activeDoc: Document) => {
-    const docs = collectContentDocuments(viewerRef.current, ttsContentDocsRef.current)
-    for (const doc of docs) {
-      if (doc !== activeDoc) clearTTSHighlight(doc)
-    }
-    if (ttsHighlightedDocRef.current && ttsHighlightedDocRef.current !== activeDoc) {
-      clearTTSHighlight(ttsHighlightedDocRef.current)
-    }
-  }
-
-  const measureCurrentPageEdgeOffset = (doc: Document, loc: AnyLoc, edge: 'start' | 'end'): number | null => {
-    const cfi = loc?.[edge]?.cfi as string | undefined
-    if (!cfi) return null
-
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const range = (renditionRef.current as any)?.getRange?.(cfi) as Range | null | undefined
-      const offset = getBoundaryOffsetFromRange(doc, range, edge)
-      const textLength = getTextIndex(doc)?.total ?? ttsChapterTextLengthRef.current
-      if (offset === null) return null
-      return Math.max(0, Math.min(offset, textLength))
-    } catch (err) {
-      if (DEBUG_TTS_FOLLOW) {
-        console.warn(`[TTS:follow] ${edge}.cfi 轉 offset 失敗`, {
-          cfi,
-          error: err instanceof Error ? err.message : String(err),
-        })
-      }
-      return null
-    }
-  }
-
-  const measureCurrentPageEndOffset = (doc: Document, loc?: AnyLoc): number | null =>
-    measureCurrentPageEdgeOffset(doc, loc, 'end')
-
-  const measureCurrentPageStartOffset = (doc: Document, loc?: AnyLoc): number | null =>
-    measureCurrentPageEdgeOffset(doc, loc, 'start')
-
-  const refreshTTSPageEndOffset = (label: string, loc?: AnyLoc) => {
-    const doc = currentDocRef.current
-    const visibleSpineIdx = loc?.start?.index as number | undefined
-    if (!doc || !ttsActiveRef.current || visibleSpineIdx !== ttsVisibleSpineIndexRef.current) return
-
-    const pageStartOffset = measureCurrentPageStartOffset(doc, loc)
-    const pageEndOffset = measureCurrentPageEndOffset(doc, loc)
-    ttsCurrentPageStartOffsetRef.current = pageStartOffset
-    ttsVisiblePageEndOffsetRef.current = pageEndOffset
-    if (DEBUG_TTS_FOLLOW) {
-      console.log(`[TTS:follow] ${label}`, {
-        absoluteOffset: ttsLastAbsoluteOffsetRef.current,
-        pageStartOffset,
-        pageEndOffset,
-        displayed: loc?.start?.displayed,
-        startCfi: loc?.start?.cfi,
-        endCfi: loc?.end?.cfi,
-      })
-    }
-  }
-
-  const unlockTTSAutoFollow = (label: string, loc?: AnyLoc) => {
-    const pending = ttsAutoFollowPendingRef.current
-    refreshTTSPageEndOffset(label, loc)
-    if (DEBUG_TTS_FOLLOW && pending && pending.fromPageStartOffset !== null && pending.fromPageEndOffset !== null) {
-      const nextPageStartOffset = ttsCurrentPageStartOffsetRef.current
-      if (nextPageStartOffset !== null) {
-        console.log('[TTS:follow] relocated 後頁界線參考', {
-          fromPageStartOffset: pending.fromPageStartOffset,
-          fromPageEndOffset: pending.fromPageEndOffset,
-          nextPageStartOffset,
-          endToNextStartDelta: pending.fromPageEndOffset - nextPageStartOffset,
-        })
-      }
-    }
-    ttsAutoFollowBusyRef.current = false
-    ttsAutoFollowPendingRef.current = null
-    ttsAutoFollowUnlockTimerRef.current = null
-  }
-
-  const requestTTSAutoNextPage = (
-    displayed: { page: number; total: number } | undefined,
-    absoluteOffset: number,
-    pageStartOffset: number | null,
-    pageEndOffset: number | null,
-  ) => {
-    if (ttsAutoFollowBusyRef.current) return
-
-    const now = Date.now()
-    if (now - ttsAutoFollowLastAtRef.current < 650) {
-      if (DEBUG_TTS_FOLLOW) console.log('[TTS:follow] skip next: 節流中', {
-        msSinceLast: now - ttsAutoFollowLastAtRef.current,
-        displayed,
-      })
-      return
-    }
-
-    const sequence = ++ttsAutoFollowSequenceRef.current
-    ttsAutoFollowBusyRef.current = true
-    ttsAutoFollowLastAtRef.current = now
-    ttsAutoFollowPendingRef.current = {
-      sequence,
-      fromPage: displayed?.page ?? 1,
-      fromOffset: absoluteOffset,
-      fromPageStartOffset: pageStartOffset,
-      fromPageEndOffset: pageEndOffset,
-    }
-
-    if (ttsAutoFollowUnlockTimerRef.current) clearTimeout(ttsAutoFollowUnlockTimerRef.current)
-    ttsAutoFollowUnlockTimerRef.current = setTimeout(() => {
-      if (ttsAutoFollowPendingRef.current?.sequence !== sequence) return
-      console.warn('[TTS:follow] relocated 未如期觸發，fallback 解鎖自動翻頁', { displayed, absoluteOffset, sequence })
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      unlockTTSAutoFollow('relocated fallback 用 end.cfi 更新頁尾', (renditionRef.current as any)?.currentLocation?.())
-    }, 2500)
-
-    Promise.resolve(renditionRef.current?.next())
-      .catch((err: unknown) => {
-        console.warn('[TTS] 自動跟讀翻頁失敗:', err)
-        if (ttsAutoFollowPendingRef.current?.sequence === sequence) {
-          ttsAutoFollowBusyRef.current = false
-          ttsAutoFollowPendingRef.current = null
-          if (ttsAutoFollowUnlockTimerRef.current) {
-            clearTimeout(ttsAutoFollowUnlockTimerRef.current)
-            ttsAutoFollowUnlockTimerRef.current = null
-          }
-        }
-      })
-  }
-
-  const cancelScheduledTTSHighlight = () => {
-    if (ttsHighlightFrameRef.current !== null) {
-      cancelAnimationFrame(ttsHighlightFrameRef.current)
-      ttsHighlightFrameRef.current = null
-    }
-    if (ttsHighlightTimerRef.current !== null) {
-      clearTimeout(ttsHighlightTimerRef.current)
-      ttsHighlightTimerRef.current = null
-    }
-    ttsPendingHighlightRef.current = null
   }
 
   const scheduleTTSHighlight = (absoluteOffset: number, allowAutoFollow = true, source: TTSProgressSource = 'boundary') => {
@@ -1481,6 +1498,7 @@ export const useReaderEngine = (params: {
       clearInterval(sleepIntervalRef.current)
       sleepIntervalRef.current = null
     }
+    sleepSecondsLeftRef.current = null
     setSleepRemaining(null)
   }
 
@@ -1489,26 +1507,31 @@ export const useReaderEngine = (params: {
       clearInterval(sleepIntervalRef.current)
       sleepIntervalRef.current = null
     }
-    if (minutes <= 0) { setSleepRemaining(null); return }
-    setSleepRemaining(minutes * 60)
+    if (minutes <= 0) {
+      sleepSecondsLeftRef.current = null
+      setSleepRemaining(null)
+      return
+    }
+    const totalSeconds = minutes * 60
+    sleepSecondsLeftRef.current = totalSeconds
+    setSleepRemaining(totalSeconds)
     sleepIntervalRef.current = setInterval(() => {
-      setSleepRemaining(prev => (prev !== null && prev > 0) ? prev - 1 : prev)
+      const prev = sleepSecondsLeftRef.current
+      if (prev === null || prev <= 0) return
+      const next = prev - 1
+      sleepSecondsLeftRef.current = next
+      setSleepRemaining(next)
+      if (next === 0) {
+        if (sleepIntervalRef.current !== null) {
+          clearInterval(sleepIntervalRef.current)
+          sleepIntervalRef.current = null
+        }
+        cancelScheduledTTSHighlight()
+        clearAllTTSHighlights()
+        stopRef.current()
+      }
     }, 1000)
   }
-
-  useEffect(() => {
-    if (sleepRemaining === 0) {
-      if (sleepIntervalRef.current !== null) {
-        clearInterval(sleepIntervalRef.current)
-        sleepIntervalRef.current = null
-      }
-      setSleepRemaining(null)
-      cancelScheduledTTSHighlight()
-      clearAllTTSHighlights()
-      stop()
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sleepRemaining, stop])
 
   const handleSleepChange = (minutes: number) => {
     setSleepMinutes(minutes)
