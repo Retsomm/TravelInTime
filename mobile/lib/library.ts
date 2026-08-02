@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Asset } from 'expo-asset';
 import { Directory, File, Paths } from 'expo-file-system';
 
 export interface BookRecord {
@@ -41,6 +42,7 @@ export interface BookSettings {
 }
 
 const META_KEY = 'tit:library:meta';
+const DEFAULT_BOOK_SEEDED_KEY = 'tit:defaultBookSeeded';
 const progressKey = (id: string) => `tit:progress:${id}`;
 const settingsKey = (id: string) => `tit:settings:${id}`;
 const bookmarksKey = (id: string) => `tit:bookmarks:${id}`;
@@ -127,6 +129,46 @@ export const addBook = async (): Promise<BookRecord | null> => {
   };
 
   return updateMeta((records) => [[record, ...records], record]);
+};
+
+// 封測期間讓使用者一開啟 App 就有書可以體驗完整功能，不用自己先找 epub 匯入。
+// 用 AsyncStorage flag 只在「第一次開啟 App」時植入一次；即使使用者之後把這本書刪除，
+// flag 仍然是 true，不會又重新長出來。同一個 session 內用共用的 promise 擋掉重複觸發
+// （例如 useFocusEffect 短時間內被叫兩次），避免植入兩份範例書。
+let seedDefaultBookPromise: Promise<BookRecord | null> | null = null;
+
+export const seedDefaultBook = (): Promise<BookRecord | null> => {
+  if (!seedDefaultBookPromise) {
+    seedDefaultBookPromise = (async () => {
+      const alreadySeeded = await AsyncStorage.getItem(DEFAULT_BOOK_SEEDED_KEY);
+      if (alreadySeeded) return null;
+      await AsyncStorage.setItem(DEFAULT_BOOK_SEEDED_KEY, '1');
+
+      const asset = Asset.fromModule(require('../assets/books/sample-book.epub'));
+      await asset.downloadAsync();
+      if (!asset.localUri) return null;
+
+      const dir = booksDir();
+      if (!dir.exists) dir.create({ intermediates: true });
+
+      const id = generateId();
+      const filename = `${id}.epub`;
+      const destination = new File(dir, filename);
+      await new File(asset.localUri).copy(destination);
+
+      const record: BookRecord = {
+        id,
+        title: '台灣的有機農業',
+        author: '吳東傑',
+        filename,
+        addedAt: Date.now(),
+        lastOpenedAt: Date.now(),
+      };
+
+      return updateMeta((records) => [[record, ...records], record]);
+    })();
+  }
+  return seedDefaultBookPromise;
 };
 
 export const getBookFileUri = (record: BookRecord): string => new File(booksDir(), record.filename).uri;
