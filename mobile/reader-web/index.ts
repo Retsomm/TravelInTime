@@ -167,7 +167,13 @@ const turnPage = (direction: 'prev' | 'next') => {
   lastNavDirection = direction;
   const action = direction === 'prev' ? rendition.prev() : rendition.next();
   Promise.resolve(action)
-    .then(() => unlockNavSoon())
+    .then(() => {
+      unlockNavSoon();
+      // 劃線模式中若真的有合法翻頁發生（例如朗讀跟讀自動翻頁），把鎖定基準更新成翻頁後的
+      // 新位置，避免下面的 scrollLeft 防護把這次合法翻頁的結果鎖回舊頁——防護只該擋掉
+      // 「不是經由這裡發動」的意外位移，不該連正常呼叫 turnPage() 翻頁都鎖住。
+      if (annotationModeEnabled) lockCurrentScrollLeft();
+    })
     .catch(() => unlockNav());
 };
 
@@ -302,19 +308,92 @@ const gotoTarget = async (rawTarget: string) => {
 
 // 翻頁手勢：點擊畫面最外層（非 epub.js 內容 iframe）的左三分之一／右三分之一區塊翻頁，
 // 中間三分之一保留給文字選取／劃線註記手勢使用（見 setAnnotationMode 的說明）。
+let annotationModeEnabled = false;
+// epub.js 的 DefaultViewManager 在 paginated flow 下把 .epub-container 設成
+// overflow:hidden，翻頁完全靠 JS 直接改 container.scrollLeft 實現（見 node_modules/epubjs/
+// src/managers/default/index.js 的 next()/prev()），不是靠使用者手勢捲動。但 WebKit／
+// Chromium 對「文字選取範圍延伸到 overflow:hidden 容器邊界」有個已知行為：即使該容器不接受
+// 一般觸控捲動手勢，瀏覽器仍可能為了讓選取範圍保持可見，強制把它 scrollIntoView，直接改動
+// container.scrollLeft。這個位移不是經由 turnPage() 發動，但 rendition 的 scroll→relocate
+// 回報邏輯（見 DefaultViewManager.onScroll／EVENTS.MANAGERS.SCROLLED）不分青紅皂白，只要
+// scrollLeft 變了就當成翻頁回報，畫面看起來就像「框選文字時被強制翻頁」——這跟 tap-zone
+// 點擊翻頁是完全不同的路徑，只擋點擊沒辦法擋到這個。
+// 劃線模式開啟時鎖住當下的 scrollLeft，之後偵測到「沒有經過 turnPage() 就跑掉」的 scrollLeft
+// 位移，立刻鎖回原值，取消掉這個非預期的強制捲動。
+let lockedScrollLeft: number | null = null;
+
+const getEpubContainer = (): HTMLElement | null =>
+  document.querySelector('.epub-container') as HTMLElement | null;
+
+const lockCurrentScrollLeft = () => {
+  const container = getEpubContainer();
+  lockedScrollLeft = container ? container.scrollLeft : null;
+};
+
 const setAnnotationMode = (enabled: boolean) => {
-  debugLog('[setAnnotationMode]', enabled);
+  annotationModeEnabled = enabled;
   ['tap-zone-prev', 'tap-zone-next'].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.style.pointerEvents = enabled ? 'none' : 'auto';
   });
+  if (enabled) {
+    lockCurrentScrollLeft();
+  } else {
+    lockedScrollLeft = null;
+  }
+  // 除錯用：把設定完之後「瀏覽器實際算出來的」computed style 讀回來記錄，跟我們剛剛寫入的
+  // inline style 值放在一起比對——如果 computed 值跟預期不符，代表有其他規則蓋掉了這個
+  // pointer-events 設定，那才是「點擊翻頁」在劃線模式中還會發生的真正原因。
+  const computed = ['tap-zone-prev', 'tap-zone-next'].map((id) => {
+    const el = document.getElementById(id);
+    return el ? `${id}=${getComputedStyle(el).pointerEvents}` : `${id}=(找不到元素)`;
+  });
+  debugLog('[setAnnotationMode]', 'enabled=', enabled, 'lockedScrollLeft=', lockedScrollLeft, computed.join(' '));
 };
+
+// 用 capture phase 掛在 document 上：scroll 事件預設不冒泡，但 capture phase 仍會沿著祖先鏈
+// 往下派送到實際目標，不需要另外抓 .epub-container 的參照、也不必在每次換書重新渲染 rendition
+// 後重掛一次監聽器。除錯階段先記錄「劃線模式中發生的所有 scroll」，不管 target 是不是
+// .epub-container，才能確認我們原本猜測「只有 .epub-container 會被強制捲動」是否成立。
+document.addEventListener('scroll', (e) => {
+  if (!annotationModeEnabled) return;
+  const target = e.target as HTMLElement | null;
+  const isEpubContainer = Boolean(target?.classList?.contains('epub-container'));
+  debugLog(
+    '[annotation-scroll]', '劃線模式中偵測到 scroll 事件',
+    'target=', target?.tagName, target?.className || target?.id || '(無 class/id)',
+    'isEpubContainer=', isEpubContainer,
+    'scrollLeft=', (target as HTMLElement)?.scrollLeft,
+    'lockedScrollLeft=', lockedScrollLeft
+  );
+  if (!isEpubContainer || lockedScrollLeft === null || !target) return;
+  if (target.scrollLeft !== lockedScrollLeft) {
+    debugLog('[annotation-scroll-lock] 鎖回原位', target.scrollLeft, '->', lockedScrollLeft);
+    target.scrollLeft = lockedScrollLeft;
+  }
+}, true);
 
 const registerTapZone = (id: string, baseDirection: 'prev' | 'next') => {
   const el = document.getElementById(id);
   if (!el) return;
+  // 除錯用：如果劃線模式開啟時這個監聽器還收到 touchstart，代表 pointer-events:none 沒有
+  // 真的擋掉這塊區域的觸控（例如被其他 CSS 規則、或某個瀏覽器/WebView 版本的已知落差蓋掉），
+  // 這樣就能直接鎖定是「pointer-events 沒生效」而不是別的原因。
+  el.addEventListener('touchstart', (e: TouchEvent) => {
+    const t = e.touches[0];
+    debugLog(
+      '[tap-zone touchstart]', id,
+      'annotationModeEnabled=', annotationModeEnabled,
+      'computedPointerEvents=', getComputedStyle(el).pointerEvents,
+      'x=', Math.round(t?.clientX ?? -1), 'y=', Math.round(t?.clientY ?? -1)
+    );
+  }, { passive: true });
   el.addEventListener('click', () => {
-    debugLog('[tap-zone]', id, '被點擊，觸發翻頁（提醒：這塊區域會整個擋掉底下的文字選取手勢）');
+    debugLog(
+      '[tap-zone click]', id, '被點擊，觸發翻頁',
+      'annotationModeEnabled=', annotationModeEnabled,
+      'computedPointerEvents=', getComputedStyle(el).pointerEvents
+    );
     const direction = typography.readingDirection === 'rtl'
       ? (baseDirection === 'prev' ? 'next' : 'prev')
       : baseDirection;
@@ -576,8 +655,18 @@ const loadBook = async (base64: string, cfi: string | null, initialAnnotations: 
       });
       doc.addEventListener('touchstart', (e: TouchEvent) => {
         const t = e.touches[0];
-        debugLog('[content touchstart]', 'x=', Math.round(t?.clientX ?? -1), 'y=', Math.round(t?.clientY ?? -1));
+        debugLog(
+          '[content touchstart]', 'annotationModeEnabled=', annotationModeEnabled,
+          'x=', Math.round(t?.clientX ?? -1), 'y=', Math.round(t?.clientY ?? -1)
+        );
       });
+      doc.addEventListener('touchmove', (e: TouchEvent) => {
+        const t = e.touches[0];
+        debugLog(
+          '[content touchmove]', 'annotationModeEnabled=', annotationModeEnabled,
+          'x=', Math.round(t?.clientX ?? -1), 'y=', Math.round(t?.clientY ?? -1)
+        );
+      }, { passive: true });
       // 每次新章節/頁面內容渲染完，順便確認這一頁該顯示的標記是不是真的有畫出來——
       // epub.js 的 Annotations 類別本身也是掛在 hooks.render 自動重掛標記，可能有「render
       // 觸發時 contents 還沒完全就緒」的競態，這裡用同一套 verify+reinject 補一次保險。
@@ -624,7 +713,26 @@ const loadBook = async (base64: string, cfi: string | null, initialAnnotations: 
       const previousCfi = (lastRelocatedLoc as any)?.start?.cfi ?? null;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const locAny = loc as any;
-      const stuckOnNext = lastNavDirection === 'next' && previousCfi !== null && locAny?.start?.cfi === previousCfi;
+      debugLog(
+        '[relocated]', 'annotationModeEnabled=', annotationModeEnabled,
+        'cfi=', locAny?.start?.cfi, 'previousCfi=', previousCfi,
+        'epub-container.scrollLeft=', getEpubContainer()?.scrollLeft,
+        'lockedScrollLeft=', lockedScrollLeft
+      );
+      // 真正根因（已用除錯日誌實測確認，見對話紀錄）：這裡的「連續卡在同一個 CFI」偵測
+      // 原本只是為了處理 turnPage() 呼叫 next() 但 epub.js 真的卡在最後一頁不動的情境。
+      // 劃線模式中完全沒有呼叫 turnPage()（tap-zone 已停用），但長按拖曳選取文字延伸到
+      // .epub-container 邊界時，WebKit/Chromium 仍會為了讓選取範圍可見強制捲動這個容器
+      // （即使它是 overflow:hidden），這個非預期的 scrollLeft 位移一樣會觸發 epub.js 的
+      // scroll → relocated 回報。上面的 scrollLeft 鎖定機制雖然會把位置修正回來，但修正
+      // 前後各觸發一次 relocated，兩次回報的 cfi 剛好相同，湊巧符合這裡的「卡住」訊號；
+      // 而 lastNavDirection 是只有 turnPage() 才會更新的全域值，進入劃線模式前最後一次
+      // 真實翻頁殘留的方向仍然是 'next'，兩個條件一湊齊，就會誤判成「真的卡住」，直接把
+      // gotoTarget() 導去下一章——這才是使用者回報「框選文字時被強制翻頁」的真正原因，
+      // 是章節被强制跳走，不是單純的翻頁 UI 誤觸。劃線模式中本來就不該有任何一種翻頁在
+      // 發生，這裡直接整段跳過，不只是治標地讓判斷條件湊不齊。
+      const stuckOnNext = !annotationModeEnabled
+        && lastNavDirection === 'next' && previousCfi !== null && locAny?.start?.cfi === previousCfi;
       lastRelocatedLoc = loc;
       postRelocated(loc, previousCfi);
       if (stuckOnNext) {
