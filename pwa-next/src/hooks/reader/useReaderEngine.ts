@@ -7,8 +7,10 @@ import { DEFAULT_SETTINGS, useReaderStore } from '@/store/useReaderStore'
 import type { Script } from '@/store/useReaderStore'
 import { useAnnotationStore, loadAnnotationsForBook, saveAnnotationsForBook } from '@/store/useAnnotationStore'
 import type { Annotation } from '@/store/useAnnotationStore'
-import { saveProgress, loadProgress, saveBookSettings, loadBookSettings } from '@/hooks/useLibrary'
+import { saveBookSettings, loadBookSettings } from '@/hooks/useLibrary'
 import type { BookRecord } from '@/hooks/useLibrary'
+import { progressService } from '@/services/progressService'
+import { useSaveProgress } from '@/hooks/reader/useProgress'
 import { patchBookPrototype, patchIframeViewPrototype, patchRenditionPrototype, suppressReplaceCssRejection } from '@/components/Reader/epubPatches'
 import { applyDarkOverride, applyFontFamilyOverride, applyFontSizeOverride, applyLetterSpacingOverride, applyLineHeightOverride, applyTextSizeAdjustOverride, applyWritingModeOverride, normalizeFontFamily } from '@/components/Reader/readerStyles'
 import { convertDoc, getToSC, getToTC, restoreDoc } from '@/components/Reader/scriptConversion'
@@ -73,6 +75,7 @@ export const useReaderEngine = (params: {
   triggerScan: () => void
   cancelScan: () => void
   resetScanState: () => void
+  hydrateFromCache: () => void
 
   setPopup: (v: PopupState) => void
   setEditPopup: (v: EditPopupState) => void
@@ -96,7 +99,7 @@ export const useReaderEngine = (params: {
     setFontFamily, setScript, resetScript,
     fontSizeRef, fontFamilyRef, lineHeightRef, letterSpacingRef,
     playing, ttsPaused, speak, pause, resume, stop, resetTTS, ttsActiveRef,
-    chapterPagesRef, currentChapterPageRef, bookBufferRef, scanAllChapterPages, triggerScan, cancelScan, resetScanState,
+    chapterPagesRef, currentChapterPageRef, bookBufferRef, scanAllChapterPages, triggerScan, cancelScan, resetScanState, hydrateFromCache,
     setPopup, setEditPopup, pendingAnnotationCfiRef, addEpubAnnotation, addPendingAnnotation, removePendingAnnotation,
     pageInfo, setPageInfo,
     loadForBook, clearAnnotations, resetBookmarks,
@@ -104,6 +107,19 @@ export const useReaderEngine = (params: {
 
   const bookRecordRef = useRef(bookRecord)
   useEffect(() => { bookRecordRef.current = bookRecord }, [bookRecord])
+
+  // 進度同步的 Hook 層：本機立即寫 + cache 立即同步 + debounce 1200–1500ms 後才打網路
+  // （見 services/progressService.ts）。頁面離開前（分頁關閉/重新整理）或這個 hook 卸載
+  // （換書、返回書庫）時強制 flush 最後一次，避免 debounce 視窗內的最後幾次翻頁沒推上雲端。
+  const saveProgress = useSaveProgress(bookId)
+  useEffect(() => {
+    const handlePageHide = () => progressService.flushAll()
+    window.addEventListener('pagehide', handlePageHide)
+    return () => {
+      window.removeEventListener('pagehide', handlePageHide)
+      progressService.flush(bookId)
+    }
+  }, [bookId])
 
   const scriptRef = useRef<Script>('tc')
   const baseScriptRef = useRef<Script>('tc') // 書本原始語言，切換時用來判斷方向
@@ -438,6 +454,10 @@ export const useReaderEngine = (params: {
         if (destroyed) return
 
         bookBufferRef.current = buffer
+        // 開新書當下先嘗試把上次完整掃描這本書留下的每章頁數快取灌回來（字型設定要完全一致
+        // 才會生效，見 pageCountCache.ts），這樣第一次 relocated 事件算出來的全書頁數估計
+        // 就是準的，不用等這次背景掃描器重新跑一輪全書才會校正成正確總頁數。
+        hydrateFromCache()
         const book = ePub(buffer)
         bookRef.current = book
 
@@ -672,7 +692,7 @@ export const useReaderEngine = (params: {
           const l = loc as AnyLoc
           setCurrentHref((l?.start?.href ?? '').split('#')[0])
           if (l?.start?.cfi) {
-            saveProgress(bookId, l.start.cfi)
+            saveProgress(l.start.cfi)
             setCurrentCfi(l.start.cfi)
           }
           setAtStart(l?.atStart ?? false)
@@ -781,7 +801,7 @@ export const useReaderEngine = (params: {
               // 等待期間元件可能已經卸載（換書／離開閱讀畫面），不能再對已卸載的
               // rendition 呼叫 display。
               if (destroyed) return
-              const savedCfi = loadProgress(bookId)
+              const savedCfi = progressService.local.load(bookId)?.cfi ?? null
               // initialCfi 來自「我的筆記」頁點擊個別註記時傳入的目標位置，優先於一般的
               // 閱讀進度；只在這次開書時使用一次，不影響 savedCfi 本身的讀寫。
               const targetCfi = initialCfi || savedCfi

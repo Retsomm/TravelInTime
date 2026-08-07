@@ -63,7 +63,8 @@ const Reader = ({ bookPath, bookId, bookRecord, initialCfi, getCoverDataUrl, onB
     triggerScan,
     cancelScan,
     resetScanState,
-  } = useChapterPageScan({ viewerRef, bookRef, renditionRef, fontSizeRef, fontFamilyRef, lineHeightRef, letterSpacingRef, ttsActiveRef, setPageInfo })
+    hydrateFromCache,
+  } = useChapterPageScan({ bookId, viewerRef, bookRef, renditionRef, fontSizeRef, fontFamilyRef, lineHeightRef, letterSpacingRef, ttsActiveRef, setPageInfo })
 
   // 依當前 location 找出 TOC 中對應的章節標題（book/rendition 準備好前回傳空字串）
   const getChapterTitle = (): string => {
@@ -123,7 +124,7 @@ const Reader = ({ bookPath, bookId, bookRecord, initialCfi, getCoverDataUrl, onB
     fontSizeRef, fontFamilyRef, lineHeightRef, letterSpacingRef,
     playing, ttsPaused, speak, pause, resume, stop, resetTTS, ttsActiveRef,
     pageInfo, setPageInfo,
-    chapterPagesRef, currentChapterPageRef, bookBufferRef, scanAllChapterPages, triggerScan, cancelScan, resetScanState,
+    chapterPagesRef, currentChapterPageRef, bookBufferRef, scanAllChapterPages, triggerScan, cancelScan, resetScanState, hydrateFromCache,
     setPopup, setEditPopup, pendingAnnotationCfiRef, addEpubAnnotation, addPendingAnnotation, removePendingAnnotation,
     loadForBook, clearAnnotations, resetBookmarks,
   })

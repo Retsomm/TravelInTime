@@ -13,11 +13,14 @@
 // 可能在雲端資料庫還沒有這本書的列之前就先抵達，會撞外鍵違反錯誤（跟先前那個「匯入書本
 // 先於接上同步」的 bug 是同一個根因，只是這次是請求送出順序的競速，不是程式碼邏輯漏掉呼叫）。
 
-let syncEnabled = false
-
-export const setSyncEnabled = (enabled: boolean) => {
-  syncEnabled = enabled
-}
+// syncEnabled 開關搬到 services/syncGate.ts，跟新的 Service 層（progressService 等）共用，
+// 這裡的 setSyncEnabled 保留 re-export 只是不動 App.tsx 的既有呼叫點。
+import { setSyncEnabled, getSyncEnabled } from '@/services/syncGate'
+export { setSyncEnabled }
+// enqueue 也搬到 services/syncQueue.ts 共用同一份 per-bookId 佇列——progressService.ts 的
+// pushDebounced 现在會跟這裡的 syncBook 共用同一把鍵，維持「book 先於 progress/bookmarks/
+// annotations 送達」這個順序保證，不能各自维护一份 Map（那樣兩邊佇列互不相干，順序保證就破了）。
+import { enqueue } from '@/services/syncQueue'
 
 // 回傳這次請求是否成功（HTTP ok），呼叫端可以據此決定要不要繼續依賴這筆寫入的後續操作
 // （例如 Book 沒寫成功就不該接著送外鍵依賴它的 progress/bookmarks/annotations）。
@@ -26,7 +29,7 @@ export const setSyncEnabled = (enabled: boolean) => {
 const PUSH_TIMEOUT_MS = 10000
 
 const push = (url: string, method: 'PUT' | 'DELETE', body?: unknown): Promise<boolean> => {
-  if (!syncEnabled) return Promise.resolve(false)
+  if (!getSyncEnabled()) return Promise.resolve(false)
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), PUSH_TIMEOUT_MS)
   return fetch(url, {
@@ -45,13 +48,6 @@ const push = (url: string, method: 'PUT' | 'DELETE', body?: unknown): Promise<bo
 // 一來 progress/bookmarks/annotations 是整份覆蓋的寫入，回應順序顛倒會讓舊快照蓋掉新快照；
 // 二來 progress/bookmarks/annotations 在雲端資料庫外鍵依賴 book 那筆列，若 syncBook 還沒送達
 // 就送出，會撞外鍵違反錯誤——共用隊列讓 book 的寫入一定排在同一本書後續寫入之前。
-const queues = new Map<string, Promise<boolean>>()
-
-const enqueue = (key: string, task: () => Promise<boolean>): Promise<boolean> => {
-  const next = (queues.get(key) ?? Promise.resolve(true)).then(task)
-  queues.set(key, next)
-  return next
-}
 
 export const syncBook = (id: string, title: string, author: string, filename: string): Promise<boolean> =>
   enqueue(id, () => push(`/api/books/${id}`, 'PUT', { title, author, filename }))
