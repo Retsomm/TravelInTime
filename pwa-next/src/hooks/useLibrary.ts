@@ -1,62 +1,12 @@
-import { useState } from 'react'
-import { META_KEY, bookmarksKey, progressKey, settingsKey } from '@/constants/storageKeys'
-import { idbGet, idbPut, idbDelete } from '@/utils/indexedDb'
+import { useCallback, useState } from 'react'
+import { settingsKey } from '@/constants/storageKeys'
+import { bookService } from '@/services/bookService'
 import { extractMeta } from '@/utils/epubMetadata'
-import { syncBook, syncRemoveBook, syncProgress, syncBookmarks } from '@/utils/cloudSync'
 
-export interface BookRecord {
-  id: string
-  title: string
-  author: string
-  filename: string
-  addedAt: number
-  lastOpenedAt: number
-  hasCover: boolean
-  progress?: number
-}
+export type { BookRecord } from '@/services/bookService'
+import type { BookRecord } from '@/services/bookService'
 
-// ── LocalStorage helpers ───────────────────────────────────────────────
-
-const loadMeta = (): BookRecord[] => {
-  try {
-    return JSON.parse(localStorage.getItem(META_KEY) ?? '[]')
-  } catch {
-    return []
-  }
-}
-
-const saveMeta = (records: BookRecord[]) =>
-  localStorage.setItem(META_KEY, JSON.stringify(records))
-
-// ── Bookmarks ──────────────────────────────────────────────────────────
-
-export interface Bookmark {
-  id: string
-  cfi: string
-  label: string
-  addedAt: number
-}
-
-export const loadBookmarks = (bookId: string): Bookmark[] => {
-  try { return JSON.parse(localStorage.getItem(bookmarksKey(bookId)) ?? '[]') } catch { return [] }
-}
-
-export const saveBookmarks = (bookId: string, bookmarks: Bookmark[]) => {
-  localStorage.setItem(bookmarksKey(bookId), JSON.stringify(bookmarks))
-  syncBookmarks(bookId, bookmarks)
-}
-
-// ── Reading progress ───────────────────────────────────────────────────
-
-export const saveProgress = (bookId: string, cfi: string) => {
-  localStorage.setItem(progressKey(bookId), cfi)
-  syncProgress(bookId, cfi)
-}
-
-export const loadProgress = (bookId: string): string | null =>
-  localStorage.getItem(progressKey(bookId))
-
-// ── Book settings ──────────────────────────────────────────────────────
+// ── Book settings（純本機排版偏好，Prisma 沒有對應 model，不上雲端同步）───────
 
 export interface BookSettings {
   fontSize: number
@@ -79,50 +29,42 @@ export const loadBookSettings = (bookId: string): BookSettings | null => {
   }
 }
 
-// ── 內容綁定 id ─────────────────────────────────────────────────────────
-// 用檔案內容算 SHA-256，確保同一本書不管在哪裝置、匯入幾次都算出同一個 id，
-// 這樣重新匯入後才能跟雲端資料庫裡的舊進度/書籤/註記接回去。
-const hashFileContent = async (buffer: ArrayBuffer): Promise<string> => {
-  const digest = await crypto.subtle.digest('SHA-256', buffer)
-  return Array.from(new Uint8Array(digest))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('')
-}
-
 // ── Hook ───────────────────────────────────────────────────────────────
+// addBook 的三個分支（新書／重複匯入／檔案遺失復原）維持原本的控制流程不變，
+// 只是把底層的 localStorage/IndexedDB/雲端同步呼叫換成 bookService 提供的版本。
 
 export const useLibrary = () => {
-  const [records, setRecords] = useState<BookRecord[]>(loadMeta)
+  const [records, setRecords] = useState<BookRecord[]>(bookService.local.listMeta)
 
   const addBook = async (file: File): Promise<string> => {
     const buffer = await file.arrayBuffer()
-    const id = await hashFileContent(buffer)
+    const id = await bookService.local.hashFileContent(buffer)
 
-    const existingRecord = loadMeta().find((r) => r.id === id)
-    const fileExists = (await idbGet('files', id)) !== null
+    const existingRecord = bookService.local.listMeta().find((r) => r.id === id)
+    const fileExists = (await bookService.local.getFile(id)) !== null
 
     if (existingRecord && fileExists) {
       // 重複匯入同一本書：資料都在，直接接回既有紀錄，不覆蓋既有進度/書籤/註記。
       touchBook(id)
-      syncBook(id, existingRecord.title, existingRecord.author, existingRecord.filename)
+      bookService.remote.syncBook(id, existingRecord.title, existingRecord.author, existingRecord.filename)
       return id
     }
 
     if (existingRecord && !fileExists) {
       // 書本檔案遺失後的復原匯入：書庫清單裡的紀錄還在，只是 IndexedDB 裡的檔案內容不見了，
       // 這裡只補回檔案本體，不能再走下面「新書」的路徑，否則會產生重複的書庫項目。
-      await idbPut('files', id, buffer)
+      await bookService.local.putFile(id, buffer)
       touchBook(id)
-      syncBook(id, existingRecord.title, existingRecord.author, existingRecord.filename)
+      bookService.remote.syncBook(id, existingRecord.title, existingRecord.author, existingRecord.filename)
 
       // 封面圖存在同一個 IndexedDB 資料庫的另一個 store，檔案遺失時很可能也一併消失了，
       // 這裡重新萃取補回，避免 hasCover 是 true 但實際讀不到封面圖。
       extractMeta(buffer, file.name).then(({ coverDataUrl }) => {
         if (!coverDataUrl) return
-        idbPut('covers', id, coverDataUrl)
+        bookService.local.putCover(id, coverDataUrl)
         setRecords((prev) => {
           const next = prev.map((r) => (r.id === id ? { ...r, hasCover: true } : r))
-          saveMeta(next)
+          bookService.local.saveMeta(next)
           return next
         })
       })
@@ -130,7 +72,7 @@ export const useLibrary = () => {
       return id
     }
 
-    await idbPut('files', id, buffer)
+    await bookService.local.putFile(id, buffer)
 
     const initial: BookRecord = {
       id,
@@ -143,47 +85,44 @@ export const useLibrary = () => {
     }
     setRecords((prev) => {
       const next = [initial, ...prev]
-      saveMeta(next)
+      bookService.local.saveMeta(next)
       return next
     })
-    syncBook(id, initial.title, initial.author, initial.filename)
+    bookService.remote.syncBook(id, initial.title, initial.author, initial.filename)
 
     extractMeta(buffer, file.name).then(({ title, author, coverDataUrl }) => {
-      if (coverDataUrl) idbPut('covers', id, coverDataUrl)
+      if (coverDataUrl) bookService.local.putCover(id, coverDataUrl)
       setRecords((prev) => {
         const next = prev.map((r) =>
           r.id === id ? { ...r, title, author, hasCover: !!coverDataUrl } : r,
         )
-        saveMeta(next)
+        bookService.local.saveMeta(next)
         return next
       })
-      syncBook(id, title, author, initial.filename)
+      bookService.remote.syncBook(id, title, author, initial.filename)
     })
 
     return id
   }
 
   const getBookUrl = async (id: string): Promise<string | null> => {
-    const buffer = await idbGet<ArrayBuffer>('files', id)
+    const buffer = await bookService.local.getFile(id)
     if (!buffer) return null
     return URL.createObjectURL(new Blob([buffer], { type: 'application/epub+zip' }))
   }
 
-  const getCoverDataUrl = (id: string): Promise<string | null> =>
-    idbGet<string>('covers', id)
+  const getCoverDataUrl = (id: string): Promise<string | null> => bookService.local.getCover(id)
 
   const removeBook = async (id: string) => {
-    await idbDelete('files', id)
-    await idbDelete('covers', id)
-    localStorage.removeItem(progressKey(id))
+    await bookService.local.deleteFile(id)
+    await bookService.local.deleteCover(id)
     localStorage.removeItem(settingsKey(id))
-    localStorage.removeItem(bookmarksKey(id))
     setRecords((prev) => {
       const next = prev.filter((r) => r.id !== id)
-      saveMeta(next)
+      bookService.local.saveMeta(next)
       return next
     })
-    syncRemoveBook(id)
+    bookService.remote.syncRemoveBook(id)
   }
 
   const touchBook = (id: string) => {
@@ -191,7 +130,7 @@ export const useLibrary = () => {
       const next = prev.map((r) =>
         r.id === id ? { ...r, lastOpenedAt: Date.now() } : r,
       )
-      saveMeta(next)
+      bookService.local.saveMeta(next)
       return next
     })
   }
@@ -201,10 +140,19 @@ export const useLibrary = () => {
       const next = prev.map((r) =>
         r.id === id ? { ...r, progress: Math.max(0, Math.min(1, pct)) } : r,
       )
-      saveMeta(next)
+      bookService.local.saveMeta(next)
       return next
     })
   }
 
-  return { records, addBook, getBookUrl, getCoverDataUrl, removeBook, touchBook, updateProgress }
+  // 讀取／還原路徑（useCloudRestore.ts、Notes.tsx 自己的還原 effect）算完合併結果後
+  // 呼叫這個函式把結果寫回 React state + localStorage。用 useCallback 維持穩定參照——
+  // 這個函式會被放進呼叫端 useEffect 的 dependency array，不穩定會導致 effect 每次
+  // render 都重跑，參見 useAnnotations.ts 那次 "Maximum update depth exceeded" 的教訓。
+  const replaceRecords = useCallback((next: BookRecord[]) => {
+    bookService.local.saveMeta(next)
+    setRecords(next)
+  }, [])
+
+  return { records, addBook, getBookUrl, getCoverDataUrl, removeBook, touchBook, updateProgress, replaceRecords }
 }

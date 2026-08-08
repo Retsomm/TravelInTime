@@ -6,13 +6,13 @@ import ChapterPanel from '@/components/ChapterPanel'
 import SettingsPanel from '@/components/SettingsPanel'
 import useTTS from '@/hooks/useTTS'
 import { useReaderStore } from '@/store/useReaderStore'
-import { useAnnotationStore } from '@/store/useAnnotationStore'
 import type { BookRecord } from '@/hooks/useLibrary'
 import { HIGHLIGHT_COLORS } from '@/components/Reader/annotationUtils'
 import BookInfoPanel from '@/components/Reader/BookInfoPanel'
 import BookmarkList from '@/components/Reader/BookmarkList'
 import { findChapterTitleByHref, findNearestChapterLabel } from '@/components/Reader/tocLookup'
 import { useBookmarks } from '@/hooks/reader/useBookmarks'
+import { useAnnotations } from '@/hooks/reader/useAnnotations'
 import { useAnnotationPopups } from '@/hooks/reader/useAnnotationPopups'
 import { useChapterPageScan } from '@/hooks/reader/useChapterPageScan'
 import { useReaderEngine } from '@/hooks/reader/useReaderEngine'
@@ -48,8 +48,15 @@ const Reader = ({ bookPath, bookId, bookRecord, initialCfi, getCoverDataUrl, onB
   const lineHeightRef = useRef(lineHeight)
   const fontFamilyRef = useRef(fontFamily)
   const letterSpacingRef = useRef(letterSpacing)
-  const clearAnnotations = useAnnotationStore((s) => s.clearAll)
-  const loadForBook = useAnnotationStore((s) => s.loadForBook)
+  const {
+    annotations,
+    loadForBook,
+    addAnnotation,
+    removeAnnotation,
+    updateColor: updateAnnotationColor,
+    updateNote,
+    clearAll: clearAnnotations,
+  } = useAnnotations(bookId)
   const { playing, paused: ttsPaused, speak, pause, resume, stop, reset: resetTTS, voices, selectedVoice, setSelectedVoice, rate, setRate } = useTTS()
   const ttsActiveRef = useRef(false)
   useEffect(() => { ttsActiveRef.current = playing || ttsPaused }, [playing, ttsPaused])
@@ -106,7 +113,10 @@ const Reader = ({ bookPath, bookId, bookRecord, initialCfi, getCoverDataUrl, onB
     handleDeleteMark,
     handleEditColor,
     handleNavigateToAnnotation,
-  } = useAnnotationPopups({ renditionRef, viewerRef, lastIframeClickRef, getChapterTitle })
+  } = useAnnotationPopups({
+    renditionRef, viewerRef, lastIframeClickRef, getChapterTitle,
+    annotations, addAnnotation, updateColor: updateAnnotationColor, removeAnnotation,
+  })
 
   const {
     ready, toc, currentHref, bookTitle, chapterRemaining, atStart, atEnd, currentCfi,
@@ -343,6 +353,8 @@ const Reader = ({ bookPath, bookId, bookRecord, initialCfi, getCoverDataUrl, onB
         )}
         {activePanel === 'notes' && (
           <NotePanel
+            annotations={annotations}
+            onUpdateNote={updateNote}
             onNavigate={handleNavigateToAnnotation}
             onChangeColor={handleChangeColor}
             onRemoveAnnotation={handleDeleteMark}
@@ -434,6 +446,8 @@ const Reader = ({ bookPath, bookId, bookRecord, initialCfi, getCoverDataUrl, onB
               )}
               {mobilePanelTab === 'notes' && (
                 <NotePanel
+                  annotations={annotations}
+                  onUpdateNote={updateNote}
                   onNavigate={handleNavigateToAnnotation}
                   onChangeColor={handleChangeColor}
                   onRemoveAnnotation={handleDeleteMark}

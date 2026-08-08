@@ -1,4 +1,4 @@
-import type { Bookmark } from '@/hooks/useLibrary'
+import type { Bookmark } from '@/services/bookmarkService'
 
 export const sortBookmarksByAddedAt = (bookmarks: Bookmark[]): Bookmark[] =>
   [...bookmarks].sort((a, b) => a.addedAt - b.addedAt)
@@ -10,7 +10,7 @@ export const toggleBookmark = (bookmarks: Bookmark[], cfi: string, label: string
   if (bookmarks.some((b) => b.cfi === cfi)) {
     return bookmarks.filter((b) => b.cfi !== cfi)
   }
-  return [...bookmarks, { id, cfi, label, addedAt }]
+  return [...bookmarks, { id, cfi, label, addedAt, updatedAt: addedAt }]
 }
 
 export const formatBookmarkDate = (addedAt: number): string =>
