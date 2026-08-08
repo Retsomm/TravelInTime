@@ -9,6 +9,11 @@ tags:
 > 本文件目的：這是跨多次對話的大工程，單一對話的 context 不會保留，所以把決策與計畫寫在這裡，
 > 之後任何一次對話（不論是不是同一個 Claude session）都能從這裡接續，不用重新討論一次。
 
+> **2026-08-08 更新**：本文件記載的同步機制（`utils/cloudSync.ts` 手刻 fire-and-forget、
+> 書籤/註記「整包覆蓋」PUT）已在後續的 Client/Service/Hook 分層重構中被整個取代並刪除。
+> 本文件保留作為背景/技術棧決策的歷史紀錄，**現在的同步架構與進度請看
+> [CLIENT_SERVICE_HOOK_REFACTOR.md](CLIENT_SERVICE_HOOK_REFACTOR.md)**。
+
 **現況：Phase 1、Phase 2（雲端同步核心、書本檔案遺失復原、登入提示強化）、Phase 3 的
 「我的筆記」頁面，都已完成寫碼並經使用者驗證。Phase 4 的四個測試情境已於 2026-08-01
 全數由使用者驗證通過。PWA 安裝/離線（service worker app shell 快取）寫完但尚未實測，
