@@ -13,8 +13,12 @@ tags:
 **現況（2026-08-18）：跨裝置雲端同步功能已全數移除（使用者決定放棄，原因是 Phase 1 卡住的
 跨裝置同步 bug 一直沒查出根因，見下方「已放棄的雲端同步」）。pwa-next 現在是純本機儲存，
 沒有登入機制、沒有後端 API route、沒有資料庫。三個子專案（`pwa-next`／`renderer`／`mobile`）
-接下來只做「本機儲存版」的 Client/Service/Hook 分層，不含任何雲端/帳號功能。renderer／mobile
-完全還沒開始動工。**
+接下來只做「本機儲存版」的 Client/Service/Hook 分層，不含任何雲端/帳號功能。renderer 的本機
+資料層分層已完成實作並已 commit＋push 到 `dev`（commit `f294026`，見下方 Phase 進度）——
+**這是使用者明確要求「現在就推，之後有問題再補修法」下的例外**，過程中發現並修正的翻頁
+進度存檔問題（`relocated` 事件雜訊覆蓋真正進度）使用者確認「好很多，只差一頁」但**尚未
+確認完全解決**，還在持續追蹤，`constants/debug.ts` 的 `DEBUG_ANNOTATIONS`／`DEBUG_PROGRESS`
+目前刻意保持開啟以便繼續除錯；mobile 完全還沒開始動工。
 
 ---
 
@@ -89,13 +93,51 @@ hooks/     Hook 層：把 Service 包成給元件用的 API（useState/useCallba
 
 ## Phase 進度（2026-08-18 全面改版：雲端相關 Phase 全部取消，改成本機版）
 
-### pwa-next — 拆除雲端同步（已完成，見上方「已放棄的雲端同步」；待使用者驗證後才能 commit）
+### pwa-next — 拆除雲端同步（已完成並已 commit＋push，見上方「已放棄的雲端同步」）
 
-### renderer — 本機資料層分層（未開始）
-拆掉雲端計畫後，renderer 現有 hooks 需要的改動應該不大：原本就是「pwa-next hooks 拿掉雲端
-呼叫的版本」，現在 pwa-next 拆完雲端後兩邊的形狀更接近了，可以直接比對 pwa-next 現有的
-`services/*.ts`／`hooks/reader/use*.ts` 決定 renderer 要不要抽出同樣的 Service/Hook 分層，
-或者現有寫法已經夠接近就不用大動。
+### renderer — 本機資料層分層（已完成實作並已 commit＋push 到 `dev`，commit `f294026`）
+新增 `services/{bookService,bookmarkService,progressService,annotationService}.ts`（`{ local: {...} }`
+形狀，鏡射 pwa-next 對應檔案）。原本 `store/useAnnotationStore.ts`（Zustand + 模組級
+`.subscribe()` 自動存檔，帶有「先 unsub 再 clearAll」排序陷阱，跟 pwa-next 重構前的舊版
+`useReaderEngine.ts` 是同一類模式）整個刪除，改成鏡射 pwa-next `hooks/reader/useAnnotations.ts`
+的 `useState`/`useCallback` 版本（`hooks/reader/useAnnotations.ts`，新增）。`useReaderEngine.ts`
+不再對 annotation store 做 subscribe 自動存檔，改成每個 mutation 自帶 persist；書本內「relocated
+後補畫缺漏 SVG 標記」這段 renderer 既有邏輯保留（pwa-next 沒有對應段落，不確定分岔原因，
+故未比照刪除），只是讀取來源從 zustand `getState()` 換成 `annotationsRef`（由 `Reader.tsx` 用
+`useEffect` 同步）。`useLibrary.ts`／`useBookmarks.ts`／`useAnnotationPopups.ts`／`NotePanel.tsx`
+等改成呼叫對應 service／透過 props 拿 annotations，而非直接讀 zustand store。**沒有搬**
+pwa-next 的 `addBook` 內容雜湊去重 id 策略、`annotationService` 的 `updatedAt`＋格式驗證
+（renderer 既有註記資料沒有 `updatedAt` 欄位，硬加驗證會讓舊資料在下次讀取時被判定格式不符
+整批消失，此風險判斷後放棄搬這段，只保留鏡射「抽 service＋消除 subscribe 陷阱」這個核心目的）。
+`yarn build`（`tsc && vite build`）驗證通過，renderer 沒有 `lint` script。
+
+過程中使用者實測抓到兩個跟這次改動有關的問題，已修正：
+1. **新增註記後劃線 SVG 沒顯示**：文字選取範圍的終點若剛好落在下一段落開頭（CFI 的 end
+   offset 為 0 且指向不同節點），epub.js 把這個 CFI 還原成 Range 畫底線時會塌縮成 0 寬度、
+   完全看不到（註記本身資料正常，只是視覺上看不到線）。修法：`useReaderEngine.ts` 的
+   `'selected'` 事件裡偵測到這種情形時，用 `components/Reader/annotationUtils.ts` 新增的
+   `trimSelectionEndSpillover()` 把選取終點收斂回前一個文字節點結尾，再用 epub.js 的
+   `contents.cfiFromRange()` 重新產生 CFI。使用者已測試確認 OK。
+2. **離開書本再重新打開，閱讀進度跳回開頭或很早的位置**：`relocated` 事件的存檔邏輯本身跟
+   重構前完全一樣（只是換了 service 呼叫），代表是重構前就存在的舊 bug，這次測試才第一次
+   抓到。根因是開書 `ready` 後，epub.js 版面穩定過程／我們自己呼叫的 `display(savedCfi)`
+   還原呼叫，會觸發非使用者操作的 `relocated` 事件，回報的位置經常跟實際顯示的位置有落差
+   （懷疑是分頁計算的 off-by-one），而原本的存檔邏輯是「每次 relocated 都直接存」，導致
+   這些雜訊事件覆蓋掉使用者真正的進度、且會隨每次開關書累加，越測越偏。目前修法：
+   - 存檔改用 debounce（`PROGRESS_SAVE_DEBOUNCE_MS`，見 `useReaderEngine.ts`），relocated
+     事件連續一段時間沒有再觸發才真的寫入，離開書本時強制 flush 待寫入的值（但只在這次
+     開書後 debounce 至少成功寫入過一次才 flush，避免把還沒穩定的雜訊寫進去）。
+   - 額外標記「下一次 relocated 是程式自己呼叫 `display(savedCfi)` 還原造成」，明確跳過
+     那一次不存。
+   - 使用者最後一輪回報「好很多，現在只差一頁」——**已大幅改善但尚未確認完全解決**，
+     `constants/debug.ts` 的 `DEBUG_PROGRESS` 開關保持開啟以便後續繼續追蹤這個殘留的
+     一頁落差；之後任何一次對話接手這個問題，可以先看這個開關印出的
+     `[Progress]` 系列 log（開書載入的 savedCfi、每次 relocated 的 debounce 起停、離開時
+     flush 的值）重建當下狀況，不用重新加 log。
+
+**這次 commit＋push 是使用者在進度問題尚未確認完全解決的狀態下，明確要求「現在就推，之後
+有問題再補修法」——不是依照專案「使用者驗證過才能 commit」常規流程走的，之後接手的對話
+需要知道這個殘留的一頁落差問題還開著。**
 
 ### mobile — 本機資料層分層（未開始）
 拆 `mobile/lib/library.ts` 目前身兼「儲存 client」跟「資料模型定義」的雙重角色，比照 pwa-next
@@ -117,6 +159,18 @@ hooks/     Hook 層：把 Service 包成給元件用的 API（useState/useCallba
   renderer/mobile 之後只做本機儲存版的分層。當次對話完成 pwa-next 的全面拆除（見上方
   「已放棄的雲端同步」段落），`yarn build`/`yarn lint` 驗證通過，**尚未經使用者瀏覽器實測**，
   依規則等驗證通過才能 commit。
+- 2026-08-18（另一次對話）：使用者選擇先做 renderer 的本機資料層分層。比對 pwa-next 現有
+  `services/*.ts`／`hooks/reader/use*.ts` 的實際寫法（非文件描述，直接讀程式碼）後動手，
+  發現 pwa-next 早已把 annotation 從 Zustand 換成 `useAnnotations(bookId)` hook（理由記在
+  該檔案開頭的長註解：subscribe 模式的排序陷阱），renderer 當時還停留在同一類舊模式，因此
+  這次一併把 renderer 的 annotation 狀態管理也換掉，不只是抽 service。實作前先用 EnterPlanMode
+  寫了完整檔案異動清單並取得使用者核准，執行時發現 pwa-next 的 `annotationService` 有
+  `updatedAt`＋格式驗證，但 renderer 舊資料沒有這個欄位，判斷會导致舊註記被驗證邏輯整批清空，
+  因此**沒有**搬這段，只搬「抽 service＋消除 subscribe 陷阱」的核心部分。實作完成、
+  `yarn build` 通過，經使用者瀏覽器實測後已 commit＋push 到 `dev`（commit `f294026`）——
+  這是使用者明確要求「現在就推，之後有問題再補修法」下的例外，過程中發現並修正的翻頁
+  進度存檔問題（`relocated` 事件雜訊覆蓋真正進度）使用者確認「好很多，只差一頁」但
+  **尚未確認完全解決**，還在持續追蹤（見上方現況說明）。
 
 ---
 

@@ -46,6 +46,12 @@ const useTTS = () => {
   // iOS keepalive timer ref
   const keepaliveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
+  // 語速滑桿拖曳時 onChange 會連續觸發，需防抖動避免密集呼叫 cancel()+speak() 卡死語音引擎
+  const rateChangeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const RATE_CHANGE_DEBOUNCE = 400
+  // Chrome 對 cancel() 後立即 speak() 有已知的 race condition，插入短暫延遲降低觸發機率
+  const CANCEL_SPEAK_DELAY = 150
+
   useEffect(() => { rateRef.current = rate }, [rate])
   useEffect(() => { selectedVoiceRef.current = selectedVoice }, [selectedVoice])
 
@@ -259,9 +265,14 @@ const useTTS = () => {
     }
 
     utteranceRef.current = utterance
-    console.log('[TTS] speak()', { generation, textLength: text.length, offset: textOffsetRef.current, voice: voice?.name })
-    window.speechSynthesis.speak(utterance)
-    startKeepalive()
+    // Chrome 已知問題：cancel() 後同一 tick 內立即 speak() 容易讓瀏覽器行程內部的語音佇列狀態卡死
+    // （卡死後會跨分頁/跨重整持續，須完全關閉瀏覽器程式才會重置），故延遲一小段時間再呼叫 speak()
+    setTimeout(() => {
+      if (generationRef.current !== generation) return
+      console.log('[TTS] speak()', { generation, textLength: text.length, offset: textOffsetRef.current, voice: voice?.name })
+      window.speechSynthesis.speak(utterance)
+      startKeepalive()
+    }, CANCEL_SPEAK_DELAY)
   }
 
   const playFromOffset = (offset: number) => {
@@ -281,6 +292,10 @@ const useTTS = () => {
   const stop = () => {
     console.log('[TTS] stop() 被呼叫', { generation: generationRef.current })
     generationRef.current++ // 令所有舊 callback 失效
+    if (rateChangeTimerRef.current !== null) {
+      clearTimeout(rateChangeTimerRef.current)
+      rateChangeTimerRef.current = null
+    }
     stopKeepalive()
     window.speechSynthesis.cancel()
     utteranceRef.current = null
@@ -403,20 +418,29 @@ const useTTS = () => {
   }
 
   // 語速變更：若正在朗讀，從當前位置重啟（不觸發 onEnd、不重置 onBoundary）
+  // 滑桿拖曳中 onChange 會連續觸發，重啟動作需防抖動，避免密集 cancel()+speak() 卡死語音引擎
   const handleSetRate = (newRate: number) => {
     setRate(newRate)
     rateRef.current = newRate
 
     if (!playingRef.current || !currentTextRef.current) return
 
-    const absolutePos = textOffsetRef.current + charIndexRef.current
-    const remaining = currentTextRef.current.slice(absolutePos)
-    if (!remaining.trim()) return
+    if (rateChangeTimerRef.current !== null) clearTimeout(rateChangeTimerRef.current)
+    const generationAtSchedule = generationRef.current
+    rateChangeTimerRef.current = setTimeout(() => {
+      rateChangeTimerRef.current = null
+      if (generationRef.current !== generationAtSchedule) return
+      if (!playingRef.current || !currentTextRef.current) return
 
-    textOffsetRef.current = absolutePos
-    charIndexRef.current = 0
-    // playing 狀態維持 true，直接重建 utterance
-    playFromOffset(absolutePos)
+      const absolutePos = textOffsetRef.current + charIndexRef.current
+      const remaining = currentTextRef.current.slice(absolutePos)
+      if (!remaining.trim()) return
+
+      textOffsetRef.current = absolutePos
+      charIndexRef.current = 0
+      // playing 狀態維持 true，直接重建 utterance
+      playFromOffset(absolutePos)
+    }, RATE_CHANGE_DEBOUNCE)
   }
 
   const getProgress = () => textOffsetRef.current + charIndexRef.current

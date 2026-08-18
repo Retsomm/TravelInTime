@@ -1,4 +1,4 @@
-import type { Bookmark } from '@/hooks/useLibrary'
+import type { Bookmark } from '@/services/bookmarkService'
 
 export const sortBookmarksByAddedAt = (bookmarks: Bookmark[]): Bookmark[] =>
   [...bookmarks].sort((a, b) => a.addedAt - b.addedAt)

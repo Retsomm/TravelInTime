@@ -1,4 +1,4 @@
-import type { Bookmark } from '@/hooks/useLibrary'
+import type { Bookmark } from '@/services/bookmarkService'
 import { MONO, SERIF } from '@/components/Reader/bookCoverStyles'
 import { formatBookmarkDate, sortBookmarksByAddedAt } from '@/components/Reader/bookmarkUtils'
 

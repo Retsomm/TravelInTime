@@ -5,13 +5,16 @@ import type { TocItem } from '@/components/ChapterPanel'
 import type { TTSProgressSource } from '@/hooks/useTTS'
 import { FONT_OPTIONS, useReaderStore } from '@/store/useReaderStore'
 import type { Script } from '@/store/useReaderStore'
-import { useAnnotationStore, loadAnnotationsForBook, saveAnnotationsForBook } from '@/store/useAnnotationStore'
-import type { Annotation } from '@/store/useAnnotationStore'
-import { saveProgress, loadProgress, saveBookSettings, loadBookSettings } from '@/hooks/useLibrary'
+import { annotationService } from '@/services/annotationService'
+import type { Annotation } from '@/services/annotationService'
+import { progressService } from '@/services/progressService'
+import { saveBookSettings, loadBookSettings } from '@/hooks/useLibrary'
+import { DEBUG_ANNOTATIONS, DEBUG_PROGRESS } from '@/constants/debug'
 import type { BookRecord } from '@/hooks/useLibrary'
 import { patchIframeViewPrototype, patchRenditionPrototype } from '@/components/Reader/epubPatches'
 import { applyDarkOverride, applyFontFamilyOverride, applyFontSizeOverride, applyLetterSpacingOverride, applyLineHeightOverride, applyWritingModeOverride, normalizeFontFamily } from '@/components/Reader/readerStyles'
 import { convertDoc, getToSC, getToTC, restoreDoc } from '@/components/Reader/scriptConversion'
+import { trimSelectionEndSpillover } from '@/components/Reader/annotationUtils'
 import { DEBUG_TTS_FOLLOW, TTS_HIGHLIGHT_ID, TTS_HIGHLIGHT_INTERVAL, TTS_NEW_PAGE_AUTO_FOLLOW_GUARD, TTS_PAGE_END_FIXED_LEAD, TTS_USER_INPUT_GRACE, clearTTSHighlight, clearTTSHighlights, collectContentDocuments, createRangeFromTextOffset, ensureTTSHighlightStyle, getBoundaryOffsetFromRange, getTextIndex, getTTSRangeViewportState, ttsTextIndexCache } from '@/components/Reader/ttsHighlight'
 import { computeAccurateTotal, computeChapterAverage, computeGlobalPage, clampProgressRatio, resolveInitialPageInfo } from '@/components/Reader/progressCalculations'
 import { resolveSpineTarget } from '@/components/Reader/tocLookup'
@@ -20,6 +23,10 @@ import { computeApproxOffsetFromPercentage, computeContinuousPage, computePageEn
 type PageInfo = { page: number; total: number }
 type PopupState = { x: number; y: number; cfi: string; text: string } | null
 type EditPopupState = { x: number; y: number; annotationId: string } | null
+
+// relocated 事件連續多久沒有再觸發，才把最新位置真的寫入閱讀進度（debounce，理由見下方
+// pendingProgressCfiRef 宣告處的說明）。
+const PROGRESS_SAVE_DEBOUNCE_MS = 800
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyLoc = any
@@ -77,6 +84,7 @@ export const useReaderEngine = (params: {
   pageInfo: PageInfo | null
   setPageInfo: (updater: PageInfo | null | ((prev: PageInfo | null) => PageInfo | null)) => void
 
+  annotationsRef: { current: Annotation[] }
   loadForBook: (annotations: Annotation[]) => void
   clearAnnotations: () => void
   resetBookmarks: () => void
@@ -91,11 +99,33 @@ export const useReaderEngine = (params: {
     chapterPagesRef, currentChapterPageRef, bookBufferRef, scanAllChapterPages, triggerScan, cancelScan, resetScanState,
     setPopup, setEditPopup, addEpubAnnotation,
     pageInfo, setPageInfo,
-    loadForBook, clearAnnotations, resetBookmarks,
+    annotationsRef, loadForBook, clearAnnotations, resetBookmarks,
   } = params
 
   const bookRecordRef = useRef(bookRecord)
   useEffect(() => { bookRecordRef.current = bookRecord }, [bookRecord])
+
+  // 開書剛 ready 後，epub.js 可能連續自行觸發好幾次沒有使用者操作的 relocated 事件（版面尺寸／
+  // 字型載入尚未完全穩定造成的重新分頁），實測這個「settling」過程可能持續超過 2 秒、次數也不固定，
+  // 用固定時間的寬限期猜不準。改用 debounce：每次 relocated 都只記下「目前最新位置」並重新啟動
+  // 一個短計時器，只有連續 PROGRESS_SAVE_DEBOUNCE_MS 內都沒有新的 relocated 事件時才真的寫入
+  // localStorage——settling 期間事件一波接一波，計時器一直被重新啟動、不會寫入；
+  // 使用者實際翻頁的操作間隔通常遠大於這個 debounce 時間，不受影響。
+  // 離開書本時（cleanup）要 flush 這個待寫入的值，否則使用者翻完最後一頁後沒等 debounce
+  // 時間到就關閉，那次翻頁會遺失——但只有在「這次開書後 debounce 已經至少成功寫入過一次」
+  // （hasSettledOnceRef）才能 flush：如果使用者是在 settling 風暴還沒停下來、debounce
+  // 一次都還沒真正寫入過的狀態下就把書關掉（例如剛開書馬上又關），flush 只會把 settling
+  // 中間某個雜訊位置寫進去，反而覆蓋掉原本正確的舊進度；這種情況寧可不寫，保留原本的值。
+  const pendingProgressCfiRef = useRef<string | null>(null)
+  const progressSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const hasSettledOnceRef = useRef(false)
+  // 開書還原流程裡，我們自己呼叫 rendition.display(savedCfi ?? fallback...) 之後，epub.js
+  // 緊接著回報的下一次 relocated 位置，實測常常跟剛顯示的位置有系統性落差（推測是分頁計算
+  // 的 off-by-one：display() 顯示的頁面「包含」savedCfi，但 relocated 回報的是那一頁的起點，
+  // 不一定等於 savedCfi 本身），不是使用者操作、也不代表使用者的閱讀進度往回退了。這個 flag
+  // 明確標記「下一次 relocated 是這次程式呼叫 display() 造成的」，只跳過那一次不存，其餘
+  // （包含使用者接下來的真實翻頁）照常走 debounce 儲存。
+  const suppressNextRelocatedSaveRef = useRef(false)
 
   const scriptRef = useRef<Script>('tc')
   const baseScriptRef = useRef<Script>('tc') // 書本原始語言，切換時用來判斷方向
@@ -189,6 +219,14 @@ export const useReaderEngine = (params: {
   useEffect(() => {
     const container = viewerRef.current
     if (!container) return
+    if (DEBUG_PROGRESS) console.log('[Progress] 開書 effect 開始', { bookId, bookPath })
+    pendingProgressCfiRef.current = null
+    hasSettledOnceRef.current = false
+    suppressNextRelocatedSaveRef.current = false
+    if (progressSaveTimerRef.current) {
+      clearTimeout(progressSaveTimerRef.current)
+      progressSaveTimerRef.current = null
+    }
 
     let destroyed = false
 
@@ -213,11 +251,6 @@ export const useReaderEngine = (params: {
       scriptRef.current = 'tc'
       fontFamilyRef.current = FONT_OPTIONS[0].value
     }
-
-    // 設定 annotation 自動儲存（先 unsub 再 clearAll，避免 clear 覆蓋 localStorage）
-    const unsubAnnotations = useAnnotationStore.subscribe((state) => {
-      saveAnnotationsForBook(bookId, state.annotations)
-    })
 
     fetch(bookPath)
       .then((res) => res.arrayBuffer())
@@ -353,12 +386,30 @@ export const useReaderEngine = (params: {
 
         // 監聽文字選取
         rendition.on('selected', (cfiRange: string, contents: unknown) => {
-          const c = contents as { window: Window }
+          const c = contents as { window: Window; cfiFromRange: (range: Range, ignoreClass?: string) => string }
           const selection = c.window.getSelection()
           if (!selection || selection.isCollapsed) { setPopup(null); return }
-          const text = selection.toString()
 
-          const range = selection.getRangeAt(0)
+          let range = selection.getRangeAt(0)
+          let text = selection.toString()
+          let finalCfi = cfiRange
+
+          // 選取範圍若剛好停在下一段落開頭（offset 0），epub.js 算出的 CFI 事後還原成 Range
+          // 畫底線時會塌縮成 0 寬度、完全看不到（註記本身仍正常存進清單）。偵測到這種情形時，
+          // 收斂選取終點到前一個文字節點的結尾，重新用 contents.cfiFromRange() 算 CFI。
+          const trimmed = trimSelectionEndSpillover(range)
+          if (trimmed) {
+            if (DEBUG_ANNOTATIONS) console.log('[Annotation] 選取範圍終點卡在段落開頭，已收斂', { originalCfi: cfiRange })
+            try {
+              finalCfi = c.cfiFromRange(trimmed)
+              range = trimmed
+              text = trimmed.toString()
+              if (DEBUG_ANNOTATIONS) console.log('[Annotation] 收斂後重新產生 CFI', { originalCfi: cfiRange, trimmedCfi: finalCfi })
+            } catch (err) {
+              if (DEBUG_ANNOTATIONS) console.log('[Annotation] cfiFromRange 失敗，回退用原始 CFI', { err })
+            }
+          }
+
           const rect = range.getBoundingClientRect()
           const iframe = viewerRef.current?.querySelector('iframe')
           const iframeRect = iframe?.getBoundingClientRect()
@@ -367,7 +418,7 @@ export const useReaderEngine = (params: {
           setPopup({
             x: iframeRect.left + rect.left + rect.width / 2,
             y: iframeRect.top + rect.top,
-            cfi: cfiRange,
+            cfi: finalCfi,
             text,
           })
         })
@@ -376,7 +427,21 @@ export const useReaderEngine = (params: {
           const l = loc as AnyLoc
           setCurrentHref((l?.start?.href ?? '').split('#')[0])
           if (l?.start?.cfi) {
-            saveProgress(bookId, l.start.cfi)
+            if (suppressNextRelocatedSaveRef.current) {
+              suppressNextRelocatedSaveRef.current = false
+              if (DEBUG_PROGRESS) console.log('[Progress] relocated 來自程式自己的 display() 還原呼叫，跳過這次不存', { bookId, cfi: l.start.cfi, href: l?.start?.href })
+            } else {
+              pendingProgressCfiRef.current = l.start.cfi
+              if (progressSaveTimerRef.current) clearTimeout(progressSaveTimerRef.current)
+              if (DEBUG_PROGRESS) console.log('[Progress] relocated，重新啟動 debounce 計時器', { bookId, cfi: l.start.cfi, href: l?.start?.href })
+              progressSaveTimerRef.current = setTimeout(() => {
+                if (pendingProgressCfiRef.current) {
+                  if (DEBUG_PROGRESS) console.log('[Progress] debounce 到期，寫入進度', { bookId, cfi: pendingProgressCfiRef.current })
+                  progressService.local.save(bookId, pendingProgressCfiRef.current)
+                  hasSettledOnceRef.current = true
+                }
+              }, PROGRESS_SAVE_DEBOUNCE_MS)
+            }
             setCurrentCfi(l.start.cfi)
           }
           setAtStart(l?.atStart ?? false)
@@ -386,16 +451,21 @@ export const useReaderEngine = (params: {
           // （hooks.content.register 觸發時 contents 可能尚未完全就緒），延遲後對目前章節的
           // 註記逐一檢查，缺漏的重新呼叫 addEpubAnnotation 補畫
           const relocatedSpineIdx = l?.start?.index as number | undefined
+          if (DEBUG_ANNOTATIONS) console.log('[Annotation] relocated 事件', { href: l?.start?.href, cfi: l?.start?.cfi, relocatedSpineIdx, annotationsRefCountAtFire: annotationsRef.current.length })
           if (relocatedSpineIdx !== undefined) {
             setTimeout(() => {
               const rendition2 = renditionRef.current
               if (!rendition2) return
-              const anns = useAnnotationStore.getState().annotations
+              const anns = annotationsRef.current
+              if (DEBUG_ANNOTATIONS) console.log('[Annotation] relocated 350ms 補救檢查開始', { relocatedSpineIdx, totalAnnotations: anns.length, ids: anns.map((a) => a.id) })
               for (const ann of anns) {
-                if (document.querySelector(`g.ann-${ann.id} line`)) continue
+                const foundInDom = !!document.querySelector(`g.ann-${ann.id} line`)
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 const annSpineIdx = (bookRef.current as any)?.spine?.get(ann.cfi)?.index
+                if (DEBUG_ANNOTATIONS) console.log('[Annotation] relocated 補救逐筆檢查', { id: ann.id, cfi: ann.cfi, foundInDom, annSpineIdx, relocatedSpineIdx, matched: annSpineIdx === relocatedSpineIdx })
+                if (foundInDom) continue
                 if (annSpineIdx !== relocatedSpineIdx) continue
+                if (DEBUG_ANNOTATIONS) console.log('[Annotation] relocated 補救：remove + addEpubAnnotation 重繪', { id: ann.id, cfi: ann.cfi })
                 try { rendition2.annotations.remove(ann.cfi, 'underline') } catch { /* ignore */ }
                 addEpubAnnotation(rendition2, ann)
               }
@@ -487,8 +557,9 @@ export const useReaderEngine = (params: {
 
             // 載入此書已儲存的 annotation，並透過 epub.js 內建系統（SVG）渲染
             // 使用 SVG overlay 取代 DOM mark，完全避免 EpubCFI.toRange 的 DOMException 問題
-            loadForBook(loadAnnotationsForBook(bookId))
-            const restored = useAnnotationStore.getState().annotations
+            const restored = annotationService.local.load(bookId)
+            if (DEBUG_ANNOTATIONS) console.log('[Annotation] book.ready 還原', { bookId, count: restored.length, ids: restored.map((a) => a.id) })
+            loadForBook(restored)
             restored.forEach((ann) => addEpubAnnotation(rendition, ann))
 
             // 等待上面的翻頁方向修正完成，確保第一次 display() 不會跟 direction()/layout()
@@ -497,9 +568,18 @@ export const useReaderEngine = (params: {
               // 等待期間元件可能已經卸載（換書／離開閱讀畫面），不能再對已卸載的
               // rendition 呼叫 display。
               if (destroyed) return
-              const savedCfi = loadProgress(bookId)
-              return rendition.display(savedCfi ?? undefined).catch(async (err: unknown) => {
+              const savedCfi = progressService.local.load(bookId)?.cfi ?? null
+              if (DEBUG_PROGRESS) console.log('[Progress] 開書載入', { bookId, savedCfi })
+              // 接下來這串 display(savedCfi)／fallback 鏈，不管最後哪一個呼叫真正成功，
+              // 都是程式自己還原閱讀位置造成的，不是使用者操作；標記起來，讓 relocated
+              // handler 跳過由此觸發的下一次事件，不要把它當成真正的閱讀進度存起來。
+              suppressNextRelocatedSaveRef.current = true
+              return rendition.display(savedCfi ?? undefined).then((res) => {
+                if (DEBUG_PROGRESS) console.log('[Progress] display(savedCfi) 成功', { bookId, savedCfi })
+                return res
+              }).catch(async (err: unknown) => {
                 console.warn('[Reader] display(savedCfi) 失敗:', err)
+                if (DEBUG_PROGRESS) console.log('[Progress] display(savedCfi) 失敗，進入 fallback 鏈', { bookId, savedCfi, err })
 
                 // fallback 1：數字索引 0（epubjs 支援 spine index）
                 try {
@@ -547,6 +627,20 @@ export const useReaderEngine = (params: {
 
     return () => {
       destroyed = true
+      // 離開書本時強制 flush 待寫入的進度：使用者翻完最後一頁後可能沒等 debounce 計時器到期
+      // 就關閉書本，這裡不能只清掉計時器了事，否則那次翻頁的進度會遺失。
+      if (progressSaveTimerRef.current) {
+        clearTimeout(progressSaveTimerRef.current)
+        progressSaveTimerRef.current = null
+      }
+      if (pendingProgressCfiRef.current && hasSettledOnceRef.current) {
+        if (DEBUG_PROGRESS) console.log('[Progress] 離開時強制 flush 待寫入進度', { bookId, cfi: pendingProgressCfiRef.current })
+        progressService.local.save(bookId, pendingProgressCfiRef.current)
+      } else if (pendingProgressCfiRef.current && DEBUG_PROGRESS) {
+        console.log('[Progress] 離開時有待寫入進度，但這次開書從未成功 settle 過，捨棄不寫（避免覆蓋成雜訊）', { bookId, discardedCfi: pendingProgressCfiRef.current })
+      }
+      pendingProgressCfiRef.current = null
+      if (DEBUG_PROGRESS) console.log('[Progress] 開書 effect cleanup（離開/換書）', { bookId, currentlyPersistedCfi: progressService.local.load(bookId)?.cfi ?? null })
       document.getElementById('tit-epub-layout-fix')?.remove()
       // 離開書本前儲存目前閱讀設定
       const { fontSize: fs, fontFamily: ff, script: sc, lineHeight: lh, letterSpacing: ls, readingDirection: rd } = useReaderStore.getState()
@@ -589,7 +683,6 @@ export const useReaderEngine = (params: {
         sleepIntervalRef.current = null
       }
       stopRef.current()
-      unsubAnnotations() // 先 unsub，再 clearAll，避免儲存空陣列覆蓋 localStorage
       clearAnnotations()
       renditionRef.current = null
       bookRef.current?.destroy()
