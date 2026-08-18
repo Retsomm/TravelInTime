@@ -426,8 +426,10 @@ const useTTS = () => {
     if (!playingRef.current || !currentTextRef.current) return
 
     if (rateChangeTimerRef.current !== null) clearTimeout(rateChangeTimerRef.current)
+    const generationAtSchedule = generationRef.current
     rateChangeTimerRef.current = setTimeout(() => {
       rateChangeTimerRef.current = null
+      if (generationRef.current !== generationAtSchedule) return
       if (!playingRef.current || !currentTextRef.current) return
 
       const absolutePos = textOffsetRef.current + charIndexRef.current

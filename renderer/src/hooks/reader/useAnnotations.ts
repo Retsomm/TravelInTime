@@ -31,13 +31,14 @@ export const useAnnotations = (bookId: string) => {
   // render+effect 週期的延遲，在使用者快速翻頁加註記時可能導致 ref 還沒更新到最新值）。
   const annotationsRef = useRef(annotations)
 
-  const persist = useCallback((next: Annotation[]) => {
+  const persist = useCallback((next: Annotation[]): boolean => {
     const ok = annotationService.local.save(bookId, next)
     if (DEBUG_ANNOTATIONS) console.log('[Annotation] persist', { bookId, ok, count: next.length, ids: next.map((a) => a.id) })
     if (ok) {
       annotationsRef.current = next
       setAnnotations(next)
     }
+    return ok
   }, [bookId])
 
   // 提供給 useReaderEngine.ts 在開書當下明確載入這本書已存的註記，並直接回傳同一份陣列——
@@ -50,24 +51,24 @@ export const useAnnotations = (bookId: string) => {
     setAnnotations(loaded)
   }, [bookId])
 
-  const addAnnotation = useCallback((a: Omit<Annotation, 'id' | 'createdAt'>): string => {
+  const addAnnotation = useCallback((a: Omit<Annotation, 'id' | 'createdAt'>): { id: string; ok: boolean } => {
     const id = crypto.randomUUID()
-    if (DEBUG_ANNOTATIONS) console.log('[Annotation] addAnnotation 呼叫', { id, cfi: a.cfi, baseCount: annotations.length, annotationsRefCount: annotationsRef.current.length })
-    persist([...annotations, { ...a, id, createdAt: Date.now() }])
-    return id
-  }, [annotations, persist])
+    if (DEBUG_ANNOTATIONS) console.log('[Annotation] addAnnotation 呼叫', { id, cfi: a.cfi, refCount: annotationsRef.current.length })
+    const ok = persist([...annotationsRef.current, { ...a, id, createdAt: Date.now() }])
+    return { id, ok }
+  }, [persist])
 
-  const removeAnnotation = useCallback((id: string) => {
-    persist(annotations.filter((a) => a.id !== id))
-  }, [annotations, persist])
+  const removeAnnotation = useCallback((id: string): boolean => {
+    return persist(annotationsRef.current.filter((a) => a.id !== id))
+  }, [persist])
 
-  const updateColor = useCallback((id: string, color: string) => {
-    persist(annotations.map((a) => (a.id === id ? { ...a, color } : a)))
-  }, [annotations, persist])
+  const updateColor = useCallback((id: string, color: string): boolean => {
+    return persist(annotationsRef.current.map((a) => (a.id === id ? { ...a, color } : a)))
+  }, [persist])
 
-  const updateNote = useCallback((id: string, note: string) => {
-    persist(annotations.map((a) => (a.id === id ? { ...a, note: note.trim() || undefined } : a)))
-  }, [annotations, persist])
+  const updateNote = useCallback((id: string, note: string): boolean => {
+    return persist(annotationsRef.current.map((a) => (a.id === id ? { ...a, note: note.trim() || undefined } : a)))
+  }, [persist])
 
   // 只清記憶體狀態、不觸發持久化，對應舊版 Zustand store 的 clearAll（離開/切換書本時呼叫，
   // 不是「使用者要求刪除全部註記」的操作，不該把空陣列寫回 localStorage）。不依賴

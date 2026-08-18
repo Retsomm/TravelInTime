@@ -21,7 +21,14 @@ const local = {
       return []
     }
   },
-  saveMeta: (records: BookRecord[]) => localStorage.setItem(META_KEY, JSON.stringify(records)),
+  saveMeta: (records: BookRecord[]): boolean => {
+    try {
+      localStorage.setItem(META_KEY, JSON.stringify(records))
+      return true
+    } catch {
+      return false
+    }
+  },
   getFile: (id: string) => idbGet<ArrayBuffer>('files', id),
   putFile: (id: string, buffer: ArrayBuffer) => idbPut('files', id, buffer),
   deleteFile: (id: string) => idbDelete('files', id),

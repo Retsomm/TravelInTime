@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { bookmarksKey, progressKey, settingsKey } from '@/constants/storageKeys'
 import { bookService } from '@/services/bookService'
+import { annotationService } from '@/services/annotationService'
 import { extractMeta } from '@/utils/epubMetadata'
 
 export type { BookRecord } from '@/services/bookService'
@@ -49,11 +50,17 @@ export const useLibrary = () => {
       lastOpenedAt: Date.now(),
       hasCover: false,
     }
+    let saveOk = true
     setRecords((prev) => {
       const next = [initial, ...prev]
-      bookService.local.saveMeta(next)
-      return next
+      saveOk = bookService.local.saveMeta(next)
+      return saveOk ? next : prev
     })
+
+    if (!saveOk) {
+      await bookService.local.deleteFile(id)
+      throw new Error('儲存書本資料失敗，可能是儲存空間已滿')
+    }
 
     extractMeta(buffer, file.name).then(({ title, author, coverDataUrl }) => {
       if (coverDataUrl) bookService.local.putCover(id, coverDataUrl)
@@ -83,6 +90,7 @@ export const useLibrary = () => {
     localStorage.removeItem(progressKey(id))
     localStorage.removeItem(settingsKey(id))
     localStorage.removeItem(bookmarksKey(id))
+    annotationService.local.remove(id)
     setRecords((prev) => {
       const next = prev.filter((r) => r.id !== id)
       bookService.local.saveMeta(next)

@@ -14,7 +14,8 @@ const annotationsKey = (bookId: string) => `tit-annotations-${bookId}`
 const local = {
   load: (bookId: string): Annotation[] => {
     try {
-      return JSON.parse(localStorage.getItem(annotationsKey(bookId)) ?? '[]')
+      const parsed: unknown = JSON.parse(localStorage.getItem(annotationsKey(bookId)) ?? '[]')
+      return Array.isArray(parsed) ? parsed : []
     } catch {
       return []
     }
@@ -27,6 +28,7 @@ const local = {
       return false
     }
   },
+  remove: (bookId: string) => localStorage.removeItem(annotationsKey(bookId)),
 }
 
 export const annotationService = { local }

@@ -167,7 +167,10 @@ pwa-next 的 `addBook` 內容雜湊去重 id 策略、`annotationService` 的 `u
   寫了完整檔案異動清單並取得使用者核准，執行時發現 pwa-next 的 `annotationService` 有
   `updatedAt`＋格式驗證，但 renderer 舊資料沒有這個欄位，判斷會导致舊註記被驗證邏輯整批清空，
   因此**沒有**搬這段，只搬「抽 service＋消除 subscribe 陷阱」的核心部分。實作完成、
-  `yarn build` 通過，**尚未經使用者瀏覽器實測**，依規則停在工作目錄未 commit。
+  `yarn build` 通過，經使用者瀏覽器實測後已 commit＋push 到 `dev`（commit `f294026`）——
+  這是使用者明確要求「現在就推，之後有問題再補修法」下的例外，過程中發現並修正的翻頁
+  進度存檔問題（`relocated` 事件雜訊覆蓋真正進度）使用者確認「好很多，只差一頁」但
+  **尚未確認完全解決**，還在持續追蹤（見上方現況說明）。
 
 ---
 

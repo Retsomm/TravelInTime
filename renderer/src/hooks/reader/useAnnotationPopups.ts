@@ -13,9 +13,9 @@ export const useAnnotationPopups = (params: {
   lastIframeClickRef: React.RefObject<{ x: number; y: number }>
   getChapterTitle: () => string
   annotations: Annotation[]
-  addAnnotation: (a: Omit<Annotation, 'id' | 'createdAt'>) => string
-  updateColor: (id: string, color: string) => void
-  removeAnnotation: (id: string) => void
+  addAnnotation: (a: Omit<Annotation, 'id' | 'createdAt'>) => { id: string; ok: boolean }
+  updateColor: (id: string, color: string) => boolean
+  removeAnnotation: (id: string) => boolean
 }) => {
   const { renditionRef, viewerRef, lastIframeClickRef, getChapterTitle, annotations, addAnnotation, updateColor, removeAnnotation } = params
   const [popup, setPopup] = useState<PopupState>(null)
@@ -123,7 +123,11 @@ export const useAnnotationPopups = (params: {
     if (win) win.getSelection()?.removeAllRanges()
 
     const ann = { cfi: popup.cfi, text: popup.text, color, chapter: getChapterTitle() }
-    const id = addAnnotation(ann)
+    const { id, ok } = addAnnotation(ann)
+    if (!ok) {
+      setPopup(null)
+      return
+    }
     if (DEBUG_ANNOTATIONS) {
       const iframe = viewerRef.current?.querySelector('iframe')
       const iframeRect = iframe?.getBoundingClientRect()
@@ -167,19 +171,19 @@ export const useAnnotationPopups = (params: {
 
   const handleChangeColor = (id: string, color: string) => {
     const ann = annotations.find((a) => a.id === id)
+    if (!updateColor(id, color)) return
     if (ann && renditionRef.current) {
       try { renditionRef.current.annotations.remove(ann.cfi, 'underline') } catch { /* ignore */ }
       addEpubAnnotation(renditionRef.current, { cfi: ann.cfi, color, id })
     }
-    updateColor(id, color)
   }
 
   const handleDeleteMark = (id: string) => {
     const ann = annotations.find((a) => a.id === id)
+    if (!removeAnnotation(id)) return
     if (ann) {
       try { renditionRef.current?.annotations.remove(ann.cfi, 'underline') } catch { /* ignore */ }
     }
-    removeAnnotation(id)
     setEditPopup(null)
   }
 
