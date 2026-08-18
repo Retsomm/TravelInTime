@@ -42,6 +42,11 @@ export const applyDarkOverride = (doc: Document, isDark: boolean) => {
 // 純粹是網路請求雜訊。這裡在內容剛載入時就把指向外部網址的 @font-face 規則移除，
 // 減少不必要的失敗請求。
 export const stripExternalFontFace = (doc: Document) => {
+  // doc 通常是 epub.js 內容 iframe 的 document，跟本 App 主視窗不同 realm，
+  // 用主視窗的 CSSFontFaceRule 建構子做 instanceof 一定判斷失敗（跨 realm 物件
+  // 的 prototype chain 不同），要改用該 document 自己所屬 window 的建構子；
+  // 若拿不到（例如 doc.defaultView 為 null）則退回用數值常數 FONT_FACE_RULE 判斷。
+  const FontFaceRuleCtor = doc.defaultView?.CSSFontFaceRule
   Array.from(doc.styleSheets).forEach((sheet) => {
     let rules: CSSRuleList
     try {
@@ -51,7 +56,8 @@ export const stripExternalFontFace = (doc: Document) => {
     }
     for (let i = rules.length - 1; i >= 0; i--) {
       const rule = rules[i]
-      if (rule instanceof CSSFontFaceRule && /url\((['"]?)https?:\/\//i.test(rule.style.getPropertyValue('src'))) {
+      const isFontFaceRule = FontFaceRuleCtor ? rule instanceof FontFaceRuleCtor : rule.type === CSSRule.FONT_FACE_RULE
+      if (isFontFaceRule && /url\((['"]?)https?:\/\//i.test((rule as CSSFontFaceRule).style.getPropertyValue('src'))) {
         try { sheet.deleteRule(i) } catch { /* ignore */ }
       }
     }

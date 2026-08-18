@@ -12,11 +12,21 @@ export interface Annotation {
 
 const annotationsKey = (bookId: string) => `tit-annotations-${bookId}`
 
+const isValidAnnotation = (value: unknown): value is Annotation => {
+  if (!value || typeof value !== 'object') return false
+  const a = value as Record<string, unknown>
+  return typeof a.id === 'string' && typeof a.cfi === 'string' && typeof a.text === 'string'
+    && typeof a.color === 'string' && typeof a.chapter === 'string'
+    && typeof a.createdAt === 'number' && typeof a.updatedAt === 'number'
+}
+
 const local = {
   load: (bookId: string): Annotation[] => {
     try {
       const raw = localStorage.getItem(annotationsKey(bookId))
-      return raw ? (JSON.parse(raw) as Annotation[]) : []
+      if (!raw) return []
+      const parsed: unknown = JSON.parse(raw)
+      return Array.isArray(parsed) && parsed.every(isValidAnnotation) ? parsed : []
     } catch {
       return []
     }
