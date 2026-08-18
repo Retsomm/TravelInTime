@@ -35,6 +35,29 @@ export const applyDarkOverride = (doc: Document, isDark: boolean) => {
   })
 }
 
+// 部分書本（例如某些從網路小說平台爬下來的 EPUB）內建 CSS 會有 @font-face 指向外部 CDN
+// 的字型檔（例如 fastly.jsdelivr.net 上的字型），但本 App 已經用 !important 強制覆寫
+// font-family（見 applyFontFamilyOverride），書本原本指定的字型從未真的被用來畫字，這些
+// @font-face 只會造成瀏覽器嘗試抓取一個用不到、常常也抓不到（404）的外部字型檔，
+// 純粹是網路請求雜訊。這裡在內容剛載入時就把指向外部網址的 @font-face 規則移除，
+// 減少不必要的失敗請求。
+export const stripExternalFontFace = (doc: Document) => {
+  Array.from(doc.styleSheets).forEach((sheet) => {
+    let rules: CSSRuleList
+    try {
+      rules = sheet.cssRules
+    } catch {
+      return // 跨來源樣式表無法讀取 cssRules，略過
+    }
+    for (let i = rules.length - 1; i >= 0; i--) {
+      const rule = rules[i]
+      if (rule instanceof CSSFontFaceRule && /url\((['"]?)https?:\/\//i.test(rule.style.getPropertyValue('src'))) {
+        try { sheet.deleteRule(i) } catch { /* ignore */ }
+      }
+    }
+  })
+}
+
 const WEB_FONT_URLS: Record<string, string> = {
   Huninn: 'https://fonts.googleapis.com/css2?family=Huninn&display=swap',
   'Noto Serif TC': 'https://fonts.googleapis.com/css2?family=Noto+Serif+TC&display=swap',

@@ -1,7 +1,7 @@
 import { useCallback, useRef } from 'react'
 import ePub from 'epubjs'
 import type { Book, Rendition } from 'epubjs'
-import { applyFontFamilyOverride, applyLetterSpacingOverride, applyLineHeightOverride } from '@/components/Reader/readerStyles'
+import { applyFontFamilyOverride, applyLetterSpacingOverride, applyLineHeightOverride, stripExternalFontFace } from '@/components/Reader/readerStyles'
 import { computeAccurateTotal, computeChapterAverage, computeGlobalPage } from '@/components/Reader/progressCalculations'
 import { loadPageCountCache, savePageCountCache, matchesCurrentSettings } from '@/components/Reader/pageCountCache'
 
@@ -92,6 +92,7 @@ export const useChapterPageScan = (params: {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const doc = (view as any).document as Document | undefined
       if (!doc) return
+      stripExternalFontFace(doc)
       applyFontFamilyOverride(doc, fontFamilyRef.current)
       applyLineHeightOverride(doc, lineHeightRef.current)
       applyLetterSpacingOverride(doc, letterSpacingRef.current)

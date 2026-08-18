@@ -21,8 +21,13 @@ const local = {
       return []
     }
   },
-  save: (bookId: string, annotations: Annotation[]) => {
-    localStorage.setItem(annotationsKey(bookId), JSON.stringify(annotations))
+  save: (bookId: string, annotations: Annotation[]): boolean => {
+    try {
+      localStorage.setItem(annotationsKey(bookId), JSON.stringify(annotations))
+      return true
+    } catch {
+      return false
+    }
   },
 }
 

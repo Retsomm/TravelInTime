@@ -18,8 +18,13 @@ const local = {
       return []
     }
   },
-  save: (bookId: string, bookmarks: Bookmark[]) => {
-    localStorage.setItem(bookmarksKey(bookId), JSON.stringify(bookmarks))
+  save: (bookId: string, bookmarks: Bookmark[]): boolean => {
+    try {
+      localStorage.setItem(bookmarksKey(bookId), JSON.stringify(bookmarks))
+      return true
+    } catch {
+      return false
+    }
   },
 }
 

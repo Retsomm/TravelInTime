@@ -25,8 +25,9 @@ export const useAnnotations = (bookId: string) => {
   const [annotations, setAnnotations] = useState<Annotation[]>(() => annotationService.local.load(bookId))
 
   const persist = useCallback((next: Annotation[]) => {
-    annotationService.local.save(bookId, next)
-    setAnnotations(next)
+    if (annotationService.local.save(bookId, next)) {
+      setAnnotations(next)
+    }
   }, [bookId])
 
   // 提供給 useReaderEngine.ts 在開書當下明確載入這本書已存的註記，並直接回傳同一份陣列——

@@ -71,8 +71,8 @@ commit 之前的內容）。使用者在這次卡住後決定不再追查，直�
 
 ## 三層架構設計摘要（本機版，2026-08-18 更新）
 
-```
-services/  Service 層：純函式，資料模型 + 本機 CRUD（storage 依平台而定），不 import React
+```text
+services/  Service 層：封裝資料模型 + 本機 CRUD（storage 依平台而定），不 import React
 hooks/     Hook 層：把 Service 包成給元件用的 API（useState/useCallback，不需要 TanStack Query
            ——沒有遠端資料要協調快取，pwa-next 已把 @tanstack/react-query 整個移除）
 ```
