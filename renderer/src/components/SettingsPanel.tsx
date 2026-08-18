@@ -214,7 +214,10 @@ const SettingsPanel = ({
                 </span>
               )}
             </div>
-            <div style={{ ...segBg, display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)' }}>
+            <div
+              className="grid grid-cols-7"
+              style={{ background: paperBg2, border: `1px solid ${borderCol}`, borderRadius: 8, padding: 2, gap: 2 }}
+            >
               {([0, 15, 30, 45, 60, 90, 120] as const).map((m) => (
                 <SegBtn key={m} active={ttsSleepMinutes === m} onClick={() => onTTSSleepChange(m)} paperBg={paperBg} inkCol={inkCol} ink3Col={ink3Col}>
                   {m === 0 ? '關' : String(m)}
