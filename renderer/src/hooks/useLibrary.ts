@@ -1,55 +1,10 @@
 import { useState } from 'react'
-import { META_KEY, bookmarksKey, progressKey, settingsKey } from '@/constants/storageKeys'
-import { idbGet, idbPut, idbDelete } from '@/utils/indexedDb'
+import { bookmarksKey, progressKey, settingsKey } from '@/constants/storageKeys'
+import { bookService } from '@/services/bookService'
 import { extractMeta } from '@/utils/epubMetadata'
 
-export interface BookRecord {
-  id: string
-  title: string
-  author: string
-  filename: string
-  addedAt: number
-  lastOpenedAt: number
-  hasCover: boolean
-  progress?: number
-}
-
-// ── LocalStorage helpers ───────────────────────────────────────────────
-
-const loadMeta = (): BookRecord[] => {
-  try {
-    return JSON.parse(localStorage.getItem(META_KEY) ?? '[]')
-  } catch {
-    return []
-  }
-}
-
-const saveMeta = (records: BookRecord[]) =>
-  localStorage.setItem(META_KEY, JSON.stringify(records))
-
-// ── Bookmarks ──────────────────────────────────────────────────────────
-
-export interface Bookmark {
-  id: string
-  cfi: string
-  label: string
-  addedAt: number
-}
-
-export const loadBookmarks = (bookId: string): Bookmark[] => {
-  try { return JSON.parse(localStorage.getItem(bookmarksKey(bookId)) ?? '[]') } catch { return [] }
-}
-
-export const saveBookmarks = (bookId: string, bookmarks: Bookmark[]) =>
-  localStorage.setItem(bookmarksKey(bookId), JSON.stringify(bookmarks))
-
-// ── Reading progress ───────────────────────────────────────────────────
-
-export const saveProgress = (bookId: string, cfi: string) =>
-  localStorage.setItem(progressKey(bookId), cfi)
-
-export const loadProgress = (bookId: string): string | null =>
-  localStorage.getItem(progressKey(bookId))
+export type { BookRecord } from '@/services/bookService'
+import type { BookRecord } from '@/services/bookService'
 
 // ── Book settings ──────────────────────────────────────────────────────
 
@@ -77,13 +32,13 @@ export const loadBookSettings = (bookId: string): BookSettings | null => {
 // ── Hook ───────────────────────────────────────────────────────────────
 
 export const useLibrary = () => {
-  const [records, setRecords] = useState<BookRecord[]>(loadMeta)
+  const [records, setRecords] = useState<BookRecord[]>(bookService.local.listMeta)
 
   const addBook = async (file: File): Promise<string> => {
     const buffer = await file.arrayBuffer()
     const id = crypto.randomUUID()
 
-    await idbPut('files', id, buffer)
+    await bookService.local.putFile(id, buffer)
 
     const initial: BookRecord = {
       id,
@@ -96,17 +51,17 @@ export const useLibrary = () => {
     }
     setRecords((prev) => {
       const next = [initial, ...prev]
-      saveMeta(next)
+      bookService.local.saveMeta(next)
       return next
     })
 
     extractMeta(buffer, file.name).then(({ title, author, coverDataUrl }) => {
-      if (coverDataUrl) idbPut('covers', id, coverDataUrl)
+      if (coverDataUrl) bookService.local.putCover(id, coverDataUrl)
       setRecords((prev) => {
         const next = prev.map((r) =>
           r.id === id ? { ...r, title, author, hasCover: !!coverDataUrl } : r,
         )
-        saveMeta(next)
+        bookService.local.saveMeta(next)
         return next
       })
     })
@@ -115,23 +70,22 @@ export const useLibrary = () => {
   }
 
   const getBookUrl = async (id: string): Promise<string | null> => {
-    const buffer = await idbGet<ArrayBuffer>('files', id)
+    const buffer = await bookService.local.getFile(id)
     if (!buffer) return null
     return URL.createObjectURL(new Blob([buffer], { type: 'application/epub+zip' }))
   }
 
-  const getCoverDataUrl = (id: string): Promise<string | null> =>
-    idbGet<string>('covers', id)
+  const getCoverDataUrl = (id: string): Promise<string | null> => bookService.local.getCover(id)
 
   const removeBook = async (id: string) => {
-    await idbDelete('files', id)
-    await idbDelete('covers', id)
+    await bookService.local.deleteFile(id)
+    await bookService.local.deleteCover(id)
     localStorage.removeItem(progressKey(id))
     localStorage.removeItem(settingsKey(id))
     localStorage.removeItem(bookmarksKey(id))
     setRecords((prev) => {
       const next = prev.filter((r) => r.id !== id)
-      saveMeta(next)
+      bookService.local.saveMeta(next)
       return next
     })
   }
@@ -141,7 +95,7 @@ export const useLibrary = () => {
       const next = prev.map((r) =>
         r.id === id ? { ...r, lastOpenedAt: Date.now() } : r,
       )
-      saveMeta(next)
+      bookService.local.saveMeta(next)
       return next
     })
   }
@@ -151,7 +105,7 @@ export const useLibrary = () => {
       const next = prev.map((r) =>
         r.id === id ? { ...r, progress: Math.max(0, Math.min(1, pct)) } : r,
       )
-      saveMeta(next)
+      bookService.local.saveMeta(next)
       return next
     })
   }

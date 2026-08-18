@@ -13,8 +13,9 @@ tags:
 **現況（2026-08-18）：跨裝置雲端同步功能已全數移除（使用者決定放棄，原因是 Phase 1 卡住的
 跨裝置同步 bug 一直沒查出根因，見下方「已放棄的雲端同步」）。pwa-next 現在是純本機儲存，
 沒有登入機制、沒有後端 API route、沒有資料庫。三個子專案（`pwa-next`／`renderer`／`mobile`）
-接下來只做「本機儲存版」的 Client/Service/Hook 分層，不含任何雲端/帳號功能。renderer／mobile
-完全還沒開始動工。**
+接下來只做「本機儲存版」的 Client/Service/Hook 分層，不含任何雲端/帳號功能。renderer 的本機
+資料層分層已完成實作（見下方 Phase 進度），**尚未經使用者瀏覽器實測，依規則等驗證通過才能
+commit**；mobile 完全還沒開始動工。
 
 ---
 
@@ -91,11 +92,23 @@ hooks/     Hook 層：把 Service 包成給元件用的 API（useState/useCallba
 
 ### pwa-next — 拆除雲端同步（已完成，見上方「已放棄的雲端同步」；待使用者驗證後才能 commit）
 
-### renderer — 本機資料層分層（未開始）
-拆掉雲端計畫後，renderer 現有 hooks 需要的改動應該不大：原本就是「pwa-next hooks 拿掉雲端
-呼叫的版本」，現在 pwa-next 拆完雲端後兩邊的形狀更接近了，可以直接比對 pwa-next 現有的
-`services/*.ts`／`hooks/reader/use*.ts` 決定 renderer 要不要抽出同樣的 Service/Hook 分層，
-或者現有寫法已經夠接近就不用大動。
+### renderer — 本機資料層分層（已完成實作，待使用者瀏覽器驗證）
+新增 `services/{bookService,bookmarkService,progressService,annotationService}.ts`（`{ local: {...} }`
+形狀，鏡射 pwa-next 對應檔案）。原本 `store/useAnnotationStore.ts`（Zustand + 模組級
+`.subscribe()` 自動存檔，帶有「先 unsub 再 clearAll」排序陷阱，跟 pwa-next 重構前的舊版
+`useReaderEngine.ts` 是同一類模式）整個刪除，改成鏡射 pwa-next `hooks/reader/useAnnotations.ts`
+的 `useState`/`useCallback` 版本（`hooks/reader/useAnnotations.ts`，新增）。`useReaderEngine.ts`
+不再對 annotation store 做 subscribe 自動存檔，改成每個 mutation 自帶 persist；書本內「relocated
+後補畫缺漏 SVG 標記」這段 renderer 既有邏輯保留（pwa-next 沒有對應段落，不確定分岔原因，
+故未比照刪除），只是讀取來源從 zustand `getState()` 換成 `annotationsRef`（由 `Reader.tsx` 用
+`useEffect` 同步）。`useLibrary.ts`／`useBookmarks.ts`／`useAnnotationPopups.ts`／`NotePanel.tsx`
+等改成呼叫對應 service／透過 props 拿 annotations，而非直接讀 zustand store。**沒有搬**
+pwa-next 的 `addBook` 內容雜湊去重 id 策略、`annotationService` 的 `updatedAt`＋格式驗證
+（renderer 既有註記資料沒有 `updatedAt` 欄位，硬加驗證會讓舊資料在下次讀取時被判定格式不符
+整批消失，此風險判斷後放棄搬這段，只保留鏡射「抽 service＋消除 subscribe 陷阱」這個核心目的）。
+`yarn build`（`tsc && vite build`）驗證通過，renderer 沒有 `lint` script。**尚未經使用者
+瀏覽器實際操作驗證**（開書翻頁存進度、加書籤、劃線註記、換顏色、寫感想筆記、換章節後標記是否
+仍顯示、排版設定還原、刪除書籤等），依規則要等使用者測過確認沒問題才能 commit。
 
 ### mobile — 本機資料層分層（未開始）
 拆 `mobile/lib/library.ts` 目前身兼「儲存 client」跟「資料模型定義」的雙重角色，比照 pwa-next
@@ -117,6 +130,15 @@ hooks/     Hook 層：把 Service 包成給元件用的 API（useState/useCallba
   renderer/mobile 之後只做本機儲存版的分層。當次對話完成 pwa-next 的全面拆除（見上方
   「已放棄的雲端同步」段落），`yarn build`/`yarn lint` 驗證通過，**尚未經使用者瀏覽器實測**，
   依規則等驗證通過才能 commit。
+- 2026-08-18（另一次對話）：使用者選擇先做 renderer 的本機資料層分層。比對 pwa-next 現有
+  `services/*.ts`／`hooks/reader/use*.ts` 的實際寫法（非文件描述，直接讀程式碼）後動手，
+  發現 pwa-next 早已把 annotation 從 Zustand 換成 `useAnnotations(bookId)` hook（理由記在
+  該檔案開頭的長註解：subscribe 模式的排序陷阱），renderer 當時還停留在同一類舊模式，因此
+  這次一併把 renderer 的 annotation 狀態管理也換掉，不只是抽 service。實作前先用 EnterPlanMode
+  寫了完整檔案異動清單並取得使用者核准，執行時發現 pwa-next 的 `annotationService` 有
+  `updatedAt`＋格式驗證，但 renderer 舊資料沒有這個欄位，判斷會导致舊註記被驗證邏輯整批清空，
+  因此**沒有**搬這段，只搬「抽 service＋消除 subscribe 陷阱」的核心部分。實作完成、
+  `yarn build` 通過，**尚未經使用者瀏覽器實測**，依規則停在工作目錄未 commit。
 
 ---
 

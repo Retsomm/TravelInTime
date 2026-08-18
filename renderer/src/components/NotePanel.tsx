@@ -1,6 +1,5 @@
 import { useRef, useState, useEffect } from 'react'
-import { useAnnotationStore } from '@/store/useAnnotationStore'
-import type { Annotation } from '@/store/useAnnotationStore'
+import type { Annotation } from '@/hooks/reader/useAnnotations'
 import { SERIF, MONO } from '@/constants/fonts'
 import { HIGHLIGHT_PALETTE } from '@/constants/highlightColors'
 import { exportAnnotations } from '@/utils/annotationExport'
@@ -8,6 +7,8 @@ import { formatDate } from '@/utils/dateFormat'
 import { useThemeColors } from '@/hooks/useThemeColors'
 
 interface Props {
+  annotations: Annotation[]
+  onUpdateNote: (id: string, note: string) => void
   onNavigate: (cfi: string) => void
   onChangeColor: (id: string, color: string) => void
   onRemoveAnnotation: (id: string) => void
@@ -15,8 +16,7 @@ interface Props {
   bookTitle: string
 }
 
-const NotePanel = ({ onNavigate, onChangeColor, onRemoveAnnotation, darkMode, bookTitle }: Props) => {
-  const { annotations, updateNote } = useAnnotationStore()
+const NotePanel = ({ annotations, onUpdateNote, onNavigate, onChangeColor, onRemoveAnnotation, darkMode, bookTitle }: Props) => {
   const [pickerOpenId, setPickerOpenId] = useState<string | null>(null)
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -36,14 +36,14 @@ const NotePanel = ({ onNavigate, onChangeColor, onRemoveAnnotation, darkMode, bo
   }
 
   const saveNote = (id: string) => {
-    updateNote(id, editingNoteText)
+    onUpdateNote(id, editingNoteText)
     setEditingNoteId(null)
   }
 
   const cancelNote = () => setEditingNoteId(null)
 
   const deleteNote = (id: string) => {
-    updateNote(id, '')
+    onUpdateNote(id, '')
     setEditingNoteId(null)
   }
 
