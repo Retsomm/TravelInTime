@@ -27,7 +27,6 @@ export const useAnnotations = (bookId: string) => {
   const persist = useCallback((next: Annotation[]) => {
     annotationService.local.save(bookId, next)
     setAnnotations(next)
-    annotationService.pushNow(bookId)
   }, [bookId])
 
   // 提供給 useReaderEngine.ts 在開書當下明確載入這本書已存的註記，並直接回傳同一份陣列——
@@ -44,9 +43,8 @@ export const useAnnotations = (bookId: string) => {
   }, [annotations, persist])
 
   const removeAnnotation = useCallback((id: string) => {
-    annotationService.local.recordDeleted(bookId, id)
     persist(annotations.filter((a) => a.id !== id))
-  }, [bookId, annotations, persist])
+  }, [annotations, persist])
 
   const updateColor = useCallback((id: string, color: string) => {
     persist(annotations.map((a) => (a.id === id ? { ...a, color, updatedAt: Date.now() } : a)))

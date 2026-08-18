@@ -4,7 +4,6 @@ import type { BookRecord } from '@/hooks/useLibrary'
 import { IconMoon, IconNote, IconPlus, IconRefresh, IconSearch, IconSun } from '@/components/Library/icons'
 import BookCard from '@/components/Library/BookCard'
 import ConfirmModal from '@/components/Library/ConfirmModal'
-import AuthStatus from '@/components/Library/AuthStatus'
 
 interface Props {
   records: BookRecord[]
@@ -70,7 +69,6 @@ const Library = ({ records, getCoverDataUrl, onAddBooks, onOpenBook, onRemoveBoo
         <div className="flex items-center justify-between px-4 py-3 pt-[max(env(safe-area-inset-top),12px)]">
           <div className="flex-1" />
           <div className="flex items-center gap-1">
-            <AuthStatus />
             <button className={`p-2 rounded-full transition text-ink-3`} onClick={onToggleDark} aria-label={darkMode ? '切換為淺色主題' : '切換為深色主題'}>
               {darkMode ? <IconSun /> : <IconMoon />}
             </button>
@@ -157,7 +155,6 @@ const Library = ({ records, getCoverDataUrl, onAddBooks, onOpenBook, onRemoveBoo
             </div>
 
             <div className="ml-auto flex items-center gap-2">
-              <AuthStatus />
               <button className={`p-2 rounded-full transition text-ink-3`} onClick={onToggleDark} title={darkMode ? '淺色' : '深色'} aria-label={darkMode ? '切換為淺色主題' : '切換為深色主題'}>
                 {darkMode ? <IconSun /> : <IconMoon />}
               </button>

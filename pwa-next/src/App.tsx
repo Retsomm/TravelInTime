@@ -2,22 +2,15 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { useUser } from '@clerk/nextjs'
 import Library from '@/page/Library'
 import Reader from '@/page/Reader'
 import MissingBookModal from '@/components/Library/MissingBookModal'
 import { useLibrary } from '@/hooks/useLibrary'
-import { setSyncEnabled } from '@/services/syncGate'
-import { useCloudRestoreMutation } from '@/hooks/useCloudRestore'
 
 type View = 'library' | 'reader'
 
-// 一個瀏覽器分頁只自動還原一次，避免使用者掛著分頁時每次重新取得焦點/切換視圖
-// 都重新打一輪全量還原（GET 書庫 + 逐本書 GET 進度/書籤/註記）。
-const RESTORE_ONCE_KEY = 'tit-cloud-restore-done'
-
 const App = () => {
-  const { records, addBook, getBookUrl, getCoverDataUrl, removeBook, touchBook, updateProgress, replaceRecords } = useLibrary()
+  const { records, addBook, getBookUrl, getCoverDataUrl, removeBook, touchBook, updateProgress } = useLibrary()
   const [view, setView] = useState<View>('library')
   const [activeBookUrl, setActiveBookUrl] = useState<string | null>(null)
   const [activeBookId, setActiveBookId] = useState<string>('')
@@ -25,31 +18,12 @@ const App = () => {
   const [darkMode, setDarkMode] = useState(true)
   const [missingBook, setMissingBook] = useState<{ id: string; title: string } | null>(null)
   const recoverFileInputRef = useRef<HTMLInputElement>(null)
-  const { isSignedIn } = useUser()
-  const restoreMutation = useCloudRestoreMutation(replaceRecords)
 
-  // 每個 Service 層的 sync 函式都要先查這個開關才會真的發請求，未登入時完全不送出，
-  // 不是「送出去再被 401 擋掉」。這個 effect 要排在下面的還原 effect 之前
-  // （React 同一個元件裡的 effect 依宣告順序執行），不然還原當下開關還沒打開。
   // 把 dark class 同步到 <html>，讓 body 的 background-color（globals.css 的
   // var(--color-paper)）能跟著切換，避免深色模式下 body 背景色停留在預設淺色。
   useEffect(() => {
     document.documentElement.classList.toggle('dark', darkMode)
   }, [darkMode])
-
-  useEffect(() => {
-    setSyncEnabled(!!isSignedIn)
-  }, [isSignedIn])
-
-  // 登入時觸發一次讀取／還原：跟雲端資料合併書庫清單/進度/書籤/註記，取代舊版
-  // 只寫不讀的登入補推 effect（見 useCloudRestore.ts 的完整合併邏輯說明）。
-  useEffect(() => {
-    if (!isSignedIn) return
-    if (sessionStorage.getItem(RESTORE_ONCE_KEY) === '1') return
-    sessionStorage.setItem(RESTORE_ONCE_KEY, '1')
-    restoreMutation.mutate()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isSignedIn])
 
   const handleOpenBook = async (id: string, cfi?: string) => {
     const url = await getBookUrl(id)
