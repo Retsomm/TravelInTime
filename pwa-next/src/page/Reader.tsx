@@ -391,7 +391,7 @@ const Reader = ({ bookPath, bookId, bookRecord, initialCfi, getCoverDataUrl, onB
             <BookmarkList
               bookmarks={bookmarks}
               pendingDeleteId={bookmarkPendingDeleteId}
-              onSelect={(cfi) => { renditionRef.current?.display(cfi).catch(() => {}); setActivePanel(null) }}
+              onSelect={(cfi) => { renditionRef.current?.display(cfi).catch(() => {}) }}
               onTogglePendingDelete={(id) => setBookmarkPendingDeleteId(bookmarkPendingDeleteId === id ? null : id)}
               onConfirmDelete={(id) => { handleDeleteBookmark(id); setBookmarkPendingDeleteId(null) }}
               onCancelDelete={() => setBookmarkPendingDeleteId(null)}
