@@ -220,7 +220,7 @@ const SettingsPanel = ({
 
             <View style={styles.rateRow}>
               <Text style={[styles.smallMuted12, { color: colors.ink3 }]}>語速</Text>
-              {stepper(`${ttsRate.toFixed(1)}×`, () => onTTSRateChange(parseFloat(Math.max(0.5, ttsRate - 0.1).toFixed(1))), () => onTTSRateChange(parseFloat(Math.min(2, ttsRate + 0.1).toFixed(1))))}
+              {stepper(`${ttsRate.toFixed(1)}×`, () => onTTSRateChange(parseFloat(Math.max(0.5, ttsRate - 0.1).toFixed(1))), () => onTTSRateChange(parseFloat(Math.min(2.5, ttsRate + 0.1).toFixed(1))))}
             </View>
           </View>
 
@@ -234,7 +234,7 @@ const SettingsPanel = ({
               )}
             </View>
             <View style={[styles.segWrap, { backgroundColor: colors.paperBg2, justifyContent: 'space-between' }]}>
-              {([0, 15, 30, 45, 60] as const).map((m) => (
+              {([0, 15, 30, 45, 60, 90, 120] as const).map((m) => (
                 <Pressable
                   key={m}
                   style={[segBtn(ttsSleepMinutes === m), { flex: 1 }]}

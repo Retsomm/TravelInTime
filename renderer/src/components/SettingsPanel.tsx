@@ -194,7 +194,7 @@ const SettingsPanel = ({
             <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 10 }}>
               <span style={{ fontSize: 12, color: ink3Col, width: 28, flexShrink: 0 }}>語速</span>
               <input
-                type="range" min="0.5" max="2" step="0.1" value={ttsRate}
+                type="range" min="0.5" max="2.5" step="0.1" value={ttsRate}
                 onChange={(e) => onTTSRateChange(+e.target.value)}
                 style={{ flex: 1, accentColor: accentCol }}
               />
@@ -214,8 +214,8 @@ const SettingsPanel = ({
                 </span>
               )}
             </div>
-            <div style={{ ...segBg, display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)' }}>
-              {([0, 15, 30, 45, 60] as const).map((m) => (
+            <div style={{ ...segBg, display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)' }}>
+              {([0, 15, 30, 45, 60, 90, 120] as const).map((m) => (
                 <SegBtn key={m} active={ttsSleepMinutes === m} onClick={() => onTTSSleepChange(m)} paperBg={paperBg} inkCol={inkCol} ink3Col={ink3Col}>
                   {m === 0 ? '關' : String(m)}
                 </SegBtn>
