@@ -5,10 +5,12 @@ import type { TocItem } from '@/components/ChapterPanel'
 import type { TTSProgressSource } from '@/hooks/useTTS'
 import { DEFAULT_SETTINGS, useReaderStore } from '@/store/useReaderStore'
 import type { Script } from '@/store/useReaderStore'
-import { useAnnotationStore, loadAnnotationsForBook, saveAnnotationsForBook } from '@/store/useAnnotationStore'
-import type { Annotation } from '@/store/useAnnotationStore'
-import { saveProgress, loadProgress, saveBookSettings, loadBookSettings } from '@/hooks/useLibrary'
+import { annotationService } from '@/services/annotationService'
+import type { Annotation } from '@/services/annotationService'
+import { saveBookSettings, loadBookSettings } from '@/hooks/useLibrary'
 import type { BookRecord } from '@/hooks/useLibrary'
+import { progressService } from '@/services/progressService'
+import { useSaveProgress } from '@/hooks/reader/useProgress'
 import { patchBookPrototype, patchIframeViewPrototype, patchRenditionPrototype, suppressReplaceCssRejection } from '@/components/Reader/epubPatches'
 import { applyDarkOverride, applyFontFamilyOverride, applyFontSizeOverride, applyLetterSpacingOverride, applyLineHeightOverride, applyTextSizeAdjustOverride, applyWritingModeOverride, normalizeFontFamily } from '@/components/Reader/readerStyles'
 import { convertDoc, getToSC, getToTC, restoreDoc } from '@/components/Reader/scriptConversion'
@@ -18,6 +20,12 @@ import { resolveSpineTarget } from '@/components/Reader/tocLookup'
 import { computeApproxOffsetFromPercentage, computeContinuousPage, computePageEntryGuard, computePageTurnOffset, locateApproxOffsetByFuzzyMatch, shouldAdvanceTTSPage, snapOffsetToWordStart } from '@/components/Reader/ttsFollowCalculations'
 
 const DEBUG_READER_LOG = false
+
+// 劃線色塊選單（HIGHLIGHT_COLORS 5 色 + Google 搜尋 + 複製，共 7 顆 w-7 圓形按鈕）
+// 用 translateX(-50%) 從中心點定位，這個半寬要 >= 選單實際渲染出來的半寬，選取靠近
+// 螢幕邊緣的文字時選單才不會被切掉。7×28px 按鈕 + 6 個 gap-1.5(6px) + p-2 padding(16px)
+// ≈ 250px，半寬 125px，這裡抓 128px 留一點餘裕。HIGHLIGHT_COLORS 增減顏色時要一併調整。
+const HIGHLIGHT_POPUP_HALF_WIDTH = 128
 
 type PageInfo = { page: number; total: number }
 type PopupState = { left: number; top: number; cfi: string; text: string } | null
@@ -73,6 +81,7 @@ export const useReaderEngine = (params: {
   triggerScan: () => void
   cancelScan: () => void
   resetScanState: () => void
+  hydrateFromCache: () => void
 
   setPopup: (v: PopupState) => void
   setEditPopup: (v: EditPopupState) => void
@@ -96,7 +105,7 @@ export const useReaderEngine = (params: {
     setFontFamily, setScript, resetScript,
     fontSizeRef, fontFamilyRef, lineHeightRef, letterSpacingRef,
     playing, ttsPaused, speak, pause, resume, stop, resetTTS, ttsActiveRef,
-    chapterPagesRef, currentChapterPageRef, bookBufferRef, scanAllChapterPages, triggerScan, cancelScan, resetScanState,
+    chapterPagesRef, currentChapterPageRef, bookBufferRef, scanAllChapterPages, triggerScan, cancelScan, resetScanState, hydrateFromCache,
     setPopup, setEditPopup, pendingAnnotationCfiRef, addEpubAnnotation, addPendingAnnotation, removePendingAnnotation,
     pageInfo, setPageInfo,
     loadForBook, clearAnnotations, resetBookmarks,
@@ -104,6 +113,19 @@ export const useReaderEngine = (params: {
 
   const bookRecordRef = useRef(bookRecord)
   useEffect(() => { bookRecordRef.current = bookRecord }, [bookRecord])
+
+  // 進度同步的 Hook 層：本機立即寫 + cache 立即同步 + debounce 1200–1500ms 後才打網路
+  // （見 services/progressService.ts）。頁面離開前（分頁關閉/重新整理）或這個 hook 卸載
+  // （換書、返回書庫）時強制 flush 最後一次，避免 debounce 視窗內的最後幾次翻頁沒推上雲端。
+  const saveProgress = useSaveProgress(bookId)
+  useEffect(() => {
+    const handlePageHide = () => progressService.flushAll()
+    window.addEventListener('pagehide', handlePageHide)
+    return () => {
+      window.removeEventListener('pagehide', handlePageHide)
+      progressService.flush(bookId)
+    }
+  }, [bookId])
 
   const scriptRef = useRef<Script>('tc')
   const baseScriptRef = useRef<Script>('tc') // 書本原始語言，切換時用來判斷方向
@@ -424,11 +446,6 @@ export const useReaderEngine = (params: {
       letterSpacingRef.current = DEFAULT_SETTINGS.letterSpacing
     }
 
-    // 設定 annotation 自動儲存（先 unsub 再 clearAll，避免 clear 覆蓋 localStorage）
-    const unsubAnnotations = useAnnotationStore.subscribe((state) => {
-      saveAnnotationsForBook(bookId, state.annotations)
-    })
-
     fetch(bookPath)
       .then((res) => {
         if (!res.ok) throw new Error(`載入書本檔案失敗: ${res.status} ${res.statusText}`)
@@ -438,6 +455,10 @@ export const useReaderEngine = (params: {
         if (destroyed) return
 
         bookBufferRef.current = buffer
+        // 開新書當下先嘗試把上次完整掃描這本書留下的每章頁數快取灌回來（字型設定要完全一致
+        // 才會生效，見 pageCountCache.ts），這樣第一次 relocated 事件算出來的全書頁數估計
+        // 就是準的，不用等這次背景掃描器重新跑一輪全書才會校正成正確總頁數。
+        hydrateFromCache()
         const book = ePub(buffer)
         bookRef.current = book
 
@@ -606,7 +627,7 @@ export const useReaderEngine = (params: {
                 const rawX = iframeRect.left + rect.left + rect.width / 2
                 const rawY = Math.max(iframeRect.top + rect.top, 80)
                 setPopup({
-                  left: Math.min(Math.max(rawX, 98), window.innerWidth - 98),
+                  left: Math.min(Math.max(rawX, HIGHLIGHT_POPUP_HALF_WIDTH), window.innerWidth - HIGHLIGHT_POPUP_HALF_WIDTH),
                   top: rawY - 52 >= 8 ? rawY - 52 : Math.min(rawY + 8, window.innerHeight - 52),
                   cfi,
                   text,
@@ -655,7 +676,7 @@ export const useReaderEngine = (params: {
           const rawX = iframeRect.left + rect.left + rect.width / 2
           const rawY = iframeRect.top + rect.top
           setPopup({
-            left: Math.min(Math.max(rawX, 98), window.innerWidth - 98),
+            left: Math.min(Math.max(rawX, HIGHLIGHT_POPUP_HALF_WIDTH), window.innerWidth - HIGHLIGHT_POPUP_HALF_WIDTH),
             top: rawY - 52 >= 8 ? rawY - 52 : Math.min(rawY + 8, window.innerHeight - 52),
             cfi: cfiRange,
             text,
@@ -672,7 +693,7 @@ export const useReaderEngine = (params: {
           const l = loc as AnyLoc
           setCurrentHref((l?.start?.href ?? '').split('#')[0])
           if (l?.start?.cfi) {
-            saveProgress(bookId, l.start.cfi)
+            saveProgress(l.start.cfi)
             setCurrentCfi(l.start.cfi)
           }
           setAtStart(l?.atStart ?? false)
@@ -770,10 +791,22 @@ export const useReaderEngine = (params: {
             setToc(((book.navigation as any).toc ?? []) as TocItem[])
 
             // 載入此書已儲存的 annotation，並透過 epub.js 內建系統（SVG）渲染
-            // 使用 SVG overlay 取代 DOM mark，完全避免 EpubCFI.toRange 的 DOMException 問題
-            loadForBook(loadAnnotationsForBook(bookId))
-            const restored = useAnnotationStore.getState().annotations
+            // 使用 SVG overlay 取代 DOM mark，完全避免 EpubCFI.toRange 的 DOMException 問題。
+            // 直接用這裡讀到的 restored 陣列做 SVG 渲染，不要透過 loadForBook 設定完
+            // React state 後再讀回來——React 的 setState 是非同步的，同一個 tick 讀不到剛設定的值。
+            const restored = annotationService.local.load(bookId)
+            loadForBook(restored)
             restored.forEach((ann) => addEpubAnnotation(rendition, ann))
+
+            // 背景跟雲端合併這本書的註記，補上其他裝置新增/刪除的東西——開書當下才是
+            // 「查一次其他裝置有沒有新東西」最自然的時機，登入時的整書庫還原一個瀏覽器
+            // 分頁只觸發一次，涵蓋不到「另一裝置剛新增、這個分頁早就登入過」的情境。
+            // 不 await，不阻塞開書；merge 完成後才補畫新標記，離線時直接維持本機資料。
+            annotationService.restoreForBook(bookId).then((merged) => {
+              if (destroyed || !renditionRef.current) return
+              loadForBook(merged)
+              merged.forEach((ann) => addEpubAnnotation(renditionRef.current!, ann))
+            })
 
             // 等待上面的翻頁方向修正完成，確保第一次 display() 不會跟 direction()/layout()
             // 內部可能觸發的重新導頁互相搶跑
@@ -781,7 +814,7 @@ export const useReaderEngine = (params: {
               // 等待期間元件可能已經卸載（換書／離開閱讀畫面），不能再對已卸載的
               // rendition 呼叫 display。
               if (destroyed) return
-              const savedCfi = loadProgress(bookId)
+              const savedCfi = progressService.local.load(bookId)?.cfi ?? null
               // initialCfi 來自「我的筆記」頁點擊個別註記時傳入的目標位置，優先於一般的
               // 閱讀進度；只在這次開書時使用一次，不影響 savedCfi 本身的讀寫。
               const targetCfi = initialCfi || savedCfi
@@ -879,7 +912,8 @@ export const useReaderEngine = (params: {
       setAtStart(false)
       setAtEnd(false)
       stopRef.current()
-      unsubAnnotations() // 先 unsub，再 clearAll，避免儲存空陣列覆蓋 localStorage
+      // clearAnnotations 只清記憶體狀態、不寫 localStorage（見 useAnnotations.ts 的 clearAll），
+      // 不會有舊版 Zustand subscribe 模式那個「清空覆蓋掉 localStorage 真實資料」的排序問題。
       clearAnnotations()
       renditionRef.current = null
       bookRef.current?.destroy()

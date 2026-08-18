@@ -6,14 +6,18 @@ import { useUser } from '@clerk/nextjs'
 import Library from '@/page/Library'
 import Reader from '@/page/Reader'
 import MissingBookModal from '@/components/Library/MissingBookModal'
-import { useLibrary, loadBookmarks, loadProgress } from '@/hooks/useLibrary'
-import { loadAnnotationsForBook } from '@/store/useAnnotationStore'
-import { syncBook, syncProgress, syncBookmarks, syncAnnotations, setSyncEnabled } from '@/utils/cloudSync'
+import { useLibrary } from '@/hooks/useLibrary'
+import { setSyncEnabled } from '@/services/syncGate'
+import { useCloudRestoreMutation } from '@/hooks/useCloudRestore'
 
 type View = 'library' | 'reader'
 
+// 一個瀏覽器分頁只自動還原一次，避免使用者掛著分頁時每次重新取得焦點/切換視圖
+// 都重新打一輪全量還原（GET 書庫 + 逐本書 GET 進度/書籤/註記）。
+const RESTORE_ONCE_KEY = 'tit-cloud-restore-done'
+
 const App = () => {
-  const { records, addBook, getBookUrl, getCoverDataUrl, removeBook, touchBook, updateProgress } = useLibrary()
+  const { records, addBook, getBookUrl, getCoverDataUrl, removeBook, touchBook, updateProgress, replaceRecords } = useLibrary()
   const [view, setView] = useState<View>('library')
   const [activeBookUrl, setActiveBookUrl] = useState<string | null>(null)
   const [activeBookId, setActiveBookId] = useState<string>('')
@@ -22,10 +26,11 @@ const App = () => {
   const [missingBook, setMissingBook] = useState<{ id: string; title: string } | null>(null)
   const recoverFileInputRef = useRef<HTMLInputElement>(null)
   const { isSignedIn } = useUser()
+  const restoreMutation = useCloudRestoreMutation(replaceRecords)
 
-  // cloudSync.ts 的每個 sync 函式都要先查這個開關才會真的發請求，未登入時完全不送出，
-  // 不是「送出去再被 401 擋掉」。這個 effect 一定要排在下面的登入補推 effect 之前
-  // （React 同一個元件裡的 effect 依宣告順序執行），不然補推當下開關還沒打開。
+  // 每個 Service 層的 sync 函式都要先查這個開關才會真的發請求，未登入時完全不送出，
+  // 不是「送出去再被 401 擋掉」。這個 effect 要排在下面的還原 effect 之前
+  // （React 同一個元件裡的 effect 依宣告順序執行），不然還原當下開關還沒打開。
   // 把 dark class 同步到 <html>，讓 body 的 background-color（globals.css 的
   // var(--color-paper)）能跟著切換，避免深色模式下 body 背景色停留在預設淺色。
   useEffect(() => {
@@ -36,29 +41,13 @@ const App = () => {
     setSyncEnabled(!!isSignedIn)
   }, [isSignedIn])
 
-  // 登入當下，把本機既有的書本/進度/書籤/註記全部背景推一次到雲端——
-  // 平常只有「資料異動時」才會觸發同步（見 cloudSync.ts 的呼叫點），
-  // 這裡補上「登入那一刻」把已經存在的舊資料也一次補推上去，否則要等
-  // 使用者剛好再異動到那本書才會補推。
-  // 每本書內部要先等 syncBook 完成才能推它的進度/書籤/註記（外鍵依賴，
-  // 雲端資料庫要先有這本書的列才能寫入子資料），不同書之間則可以平行推。
+  // 登入時觸發一次讀取／還原：跟雲端資料合併書庫清單/進度/書籤/註記，取代舊版
+  // 只寫不讀的登入補推 effect（見 useCloudRestore.ts 的完整合併邏輯說明）。
   useEffect(() => {
     if (!isSignedIn) return
-    Promise.all(
-      records.map(async (r) => {
-        const bookSynced = await syncBook(r.id, r.title, r.author, r.filename)
-        // Book 那筆列都沒寫成功，進度/書籤/註記會撞外鍵違反錯誤，不必送出
-        if (!bookSynced) return
-        const cfi = loadProgress(r.id)
-        const bookmarks = loadBookmarks(r.id)
-        const annotations = loadAnnotationsForBook(r.id)
-        await Promise.all([
-          cfi ? syncProgress(r.id, cfi) : undefined,
-          syncBookmarks(r.id, bookmarks),
-          syncAnnotations(r.id, annotations),
-        ])
-      }),
-    )
+    if (sessionStorage.getItem(RESTORE_ONCE_KEY) === '1') return
+    sessionStorage.setItem(RESTORE_ONCE_KEY, '1')
+    restoreMutation.mutate()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSignedIn])
 

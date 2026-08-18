@@ -185,7 +185,7 @@ const SettingsPanel = ({
               <label htmlFor="tts-rate" className="text-xs text-ink-3 w-7 shrink-0">語速</label>
               <input
                 id="tts-rate"
-                type="range" min="0.5" max="2" step="0.1" value={ttsRate}
+                type="range" min="0.5" max="2.5" step="0.1" value={ttsRate}
                 onChange={(e) => onTTSRateChange(+e.target.value)}
                 className="flex-1 accent-accent"
               />
@@ -205,8 +205,8 @@ const SettingsPanel = ({
                 </span>
               )}
             </div>
-            <div className={`${segBgClass} grid grid-cols-5`}>
-              {([0, 15, 30, 45, 60] as const).map((m) => (
+            <div className={`${segBgClass} grid grid-cols-7`}>
+              {([0, 15, 30, 45, 60, 90, 120] as const).map((m) => (
                 <SegBtn key={m} active={ttsSleepMinutes === m} onClick={() => onTTSSleepChange(m)}>
                   {m === 0 ? '關' : String(m)}
                 </SegBtn>

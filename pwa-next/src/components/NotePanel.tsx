@@ -1,11 +1,12 @@
 import { useRef, useState, useEffect } from 'react'
-import { useAnnotationStore } from '@/store/useAnnotationStore'
-import type { Annotation } from '@/store/useAnnotationStore'
+import type { Annotation } from '@/hooks/reader/useAnnotations'
 import { HIGHLIGHT_PALETTE } from '@/constants/highlightColors'
 import { exportAnnotations } from '@/utils/annotationExport'
 import { formatDate } from '@/utils/dateFormat'
 
 interface Props {
+  annotations: Annotation[]
+  onUpdateNote: (id: string, note: string) => void
   onNavigate: (cfi: string) => void
   onChangeColor: (id: string, color: string) => void
   onRemoveAnnotation: (id: string) => void
@@ -13,8 +14,8 @@ interface Props {
   embedded?: boolean
 }
 
-const NotePanel = ({ onNavigate, onChangeColor, onRemoveAnnotation, bookTitle, embedded }: Props) => {
-  const { annotations, updateNote } = useAnnotationStore()
+const NotePanel = ({ annotations, onUpdateNote, onNavigate, onChangeColor, onRemoveAnnotation, bookTitle, embedded }: Props) => {
+  const updateNote = onUpdateNote
   const [pickerOpenId, setPickerOpenId] = useState<string | null>(null)
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())

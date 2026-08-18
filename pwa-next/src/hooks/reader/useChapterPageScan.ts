@@ -3,11 +3,13 @@ import ePub from 'epubjs'
 import type { Book, Rendition } from 'epubjs'
 import { applyFontFamilyOverride, applyLetterSpacingOverride, applyLineHeightOverride } from '@/components/Reader/readerStyles'
 import { computeAccurateTotal, computeChapterAverage, computeGlobalPage } from '@/components/Reader/progressCalculations'
+import { loadPageCountCache, savePageCountCache, matchesCurrentSettings } from '@/components/Reader/pageCountCache'
 
 type PageInfo = { page: number; total: number }
 
 // 背景逐章渲染以取得精確全書頁數（反映當前字型、字距、行距），並在完成時校正 pageInfo。
 export const useChapterPageScan = (params: {
+  bookId: string
   viewerRef: React.RefObject<HTMLDivElement | null>
   bookRef: React.RefObject<Book | null>
   renditionRef: React.RefObject<Rendition | null>
@@ -18,13 +20,32 @@ export const useChapterPageScan = (params: {
   ttsActiveRef: { current: boolean }
   setPageInfo: (updater: (prev: PageInfo | null) => PageInfo | null) => void
 }) => {
-  const { viewerRef, bookRef, renditionRef, fontSizeRef, fontFamilyRef, lineHeightRef, letterSpacingRef, ttsActiveRef, setPageInfo } = params
+  const { bookId, viewerRef, bookRef, renditionRef, fontSizeRef, fontFamilyRef, lineHeightRef, letterSpacingRef, ttsActiveRef, setPageInfo } = params
 
   const chapterPagesRef = useRef<Map<number, number>>(new Map()) // spineIndex → 已渲染的章節總頁數
   const currentChapterPageRef = useRef<number>(1) // 當前章節內頁碼，供掃描完成後重算 page
   const bookBufferRef = useRef<ArrayBuffer | null>(null) // 儲存書本原始 buffer，供掃描用獨立 ePub 實例使用
   const scanAbortRef = useRef<{ aborted: boolean }>({ aborted: false })
   const scanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // 開新書、字型設定尚未確定改變前呼叫：如果上次完整掃描這本書時的字型設定
+  // 跟現在一致，直接把快取的每章頁數灌回 chapterPagesRef，讓第一次 relocated
+  // 算出來的全書頁數估計就是準的，不用等這次掃描器重新跑一輪全書。
+  const hydrateFromCache = useCallback(() => {
+    const cache = loadPageCountCache(bookId)
+    if (!cache) return
+    const matches = matchesCurrentSettings(cache, {
+      fontSize: fontSizeRef.current,
+      fontFamily: fontFamilyRef.current,
+      lineHeight: lineHeightRef.current,
+      letterSpacing: letterSpacingRef.current,
+    })
+    if (!matches) return
+    chapterPagesRef.current = new Map(
+      Object.entries(cache.chapterPages).map(([spineIdx, pages]) => [Number(spineIdx), pages]),
+    )
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bookId])
 
   const scanAllChapterPages = useCallback(async () => {
     const book = bookRef.current
@@ -112,7 +133,24 @@ export const useChapterPageScan = (params: {
           const accuratePage = (mainD && mainSpineIdx !== undefined)
             ? computeGlobalPage(mainSpineIdx, mainD.page, known, avg)
             : prev.page
-          return { page: accuratePage, total: Math.max(accurateTotal, accuratePage) }
+          // total 只能變大、不能變小：面板開關/視窗縮放會在 UI 過渡尺寸還沒穩定時就
+          // 觸發重新掃描（見 useReaderEngine.ts「設定面板開關時重新計算 epub 寬高」那段
+          // 呼叫的 triggerScan），拿過渡中的尺寸掃出來的 total 可能比實際偏低；比照
+          // useReaderEngine.ts 主 relocated handler 已經採用的 Math.max(prev.total, page)
+          // 防呆，這裡也不讓 total 比目前顯示的還小，避免使用者看到頁數突然變少。
+          const total = Math.max(accurateTotal, accuratePage, prev.total)
+          // 這次掃描算出的 accurateTotal 明顯比目前顯示的還低，代表很可能是在過渡尺寸下
+          // 掃描的可疑結果，不寫入快取，避免把不準的每章頁數污染到下次開書的初始估計。
+          if (accurateTotal >= prev.total) {
+            savePageCountCache(bookId, {
+              fontSize: fontSizeRef.current,
+              fontFamily: fontFamilyRef.current,
+              lineHeight: lineHeightRef.current,
+              letterSpacing: letterSpacingRef.current,
+              chapterPages: Object.fromEntries(known),
+            })
+          }
+          return { page: accuratePage, total }
         })
       }
     } finally {
@@ -151,5 +189,6 @@ export const useChapterPageScan = (params: {
     triggerScan,
     cancelScan,
     resetScanState,
+    hydrateFromCache,
   }
 }

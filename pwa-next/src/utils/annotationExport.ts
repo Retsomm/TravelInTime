@@ -1,4 +1,4 @@
-import type { Annotation } from '@/store/useAnnotationStore'
+import type { Annotation } from '@/hooks/reader/useAnnotations'
 
 export const exportAnnotations = (selected: Annotation[], bookTitle: string) => {
   const sorted = [...selected].sort((a, b) => a.createdAt - b.createdAt)

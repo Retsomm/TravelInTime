@@ -2,9 +2,11 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import { useUser } from '@clerk/nextjs'
 import { useLibrary } from '@/hooks/useLibrary'
-import { loadAnnotationsForBook, saveAnnotationsForBook } from '@/store/useAnnotationStore'
-import type { Annotation } from '@/store/useAnnotationStore'
+import { bookService } from '@/services/bookService'
+import { annotationService } from '@/services/annotationService'
+import type { Annotation } from '@/services/annotationService'
 import { IconArrowLeft, IconMoon, IconSun } from '@/components/Library/icons'
 import { formatDate } from '@/utils/dateFormat'
 
@@ -16,7 +18,8 @@ interface NoteRow extends Annotation {
 // 獨立的「我的筆記」列表：不用打開 Reader，直接把所有書的劃線原文 + 筆記列出來看。
 // 讀本機資料（跟其他頁面一樣本機優先），書本 id 是這裡唯一需要拿到的 join key。
 const Notes = () => {
-  const { records } = useLibrary()
+  const { records, replaceRecords } = useLibrary()
+  const { isSignedIn } = useUser()
   const [darkMode, setDarkMode] = useState(true)
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
 
@@ -28,14 +31,41 @@ const Notes = () => {
   const [notes, setNotes] = useState<NoteRow[]>(() =>
     records
       .flatMap((book) =>
-        loadAnnotationsForBook(book.id).map((a) => ({ ...a, bookId: book.id, bookTitle: book.title })),
+        annotationService.local.load(book.id).map((a) => ({ ...a, bookId: book.id, bookTitle: book.title })),
       )
       .sort((a, b) => b.createdAt - a.createdAt),
   )
 
+  // 這個頁面是獨立路由，跟 App.tsx（書庫／閱讀器）是完全不同的元件樹、不共用 React state，
+  // 使用者可能直接連到 /notes（沒有先經過首頁），所以不能依賴 App.tsx 那個「登入時觸發、
+  // 一個分頁只跑一次」的整書庫還原——那個只在首頁掛載時才會跑。這裡背景自己重新拉一次
+  // 書庫清單（可能有其他裝置新增、這台裝置還沒看過的書）跟每本書的註記，merge 完成後才
+  // 更新畫面；離線或未登入時直接維持本機資料，不影響離線閱讀本機筆記的既有行為。
+  useEffect(() => {
+    if (!isSignedIn) return
+    let cancelled = false
+    void (async () => {
+      const remoteBooks = await bookService.remote.fetchAll()
+      if (cancelled || remoteBooks === null) return
+      const mergedRecords = bookService.merge(bookService.local.listMeta(), remoteBooks)
+      replaceRecords(mergedRecords)
+      const lists = await Promise.all(
+        mergedRecords.map((book) =>
+          annotationService.restoreForBook(book.id).then((list) =>
+            list.map((a) => ({ ...a, bookId: book.id, bookTitle: book.title })),
+          ),
+        ),
+      )
+      if (!cancelled) setNotes(lists.flat().sort((a, b) => b.createdAt - a.createdAt))
+    })()
+    return () => { cancelled = true }
+  }, [isSignedIn, replaceRecords])
+
   const handleDelete = (bookId: string, id: string) => {
-    const remaining = loadAnnotationsForBook(bookId).filter((a) => a.id !== id)
-    saveAnnotationsForBook(bookId, remaining)
+    const remaining = annotationService.local.load(bookId).filter((a) => a.id !== id)
+    annotationService.local.save(bookId, remaining)
+    annotationService.local.recordDeleted(bookId, id)
+    annotationService.pushNow(bookId)
     setNotes((prev) => prev.filter((n) => n.id !== id))
     setPendingDeleteId(null)
   }
