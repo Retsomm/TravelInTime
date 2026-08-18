@@ -12,7 +12,7 @@ import type { BookRecord } from '@/hooks/useLibrary'
 import { progressService } from '@/services/progressService'
 import { useSaveProgress } from '@/hooks/reader/useProgress'
 import { patchBookPrototype, patchIframeViewPrototype, patchRenditionPrototype, suppressReplaceCssRejection } from '@/components/Reader/epubPatches'
-import { applyDarkOverride, applyFontFamilyOverride, applyFontSizeOverride, applyLetterSpacingOverride, applyLineHeightOverride, applyTextSizeAdjustOverride, applyWritingModeOverride, normalizeFontFamily } from '@/components/Reader/readerStyles'
+import { applyDarkOverride, applyFontFamilyOverride, applyFontSizeOverride, applyLetterSpacingOverride, applyLineHeightOverride, applyTextSizeAdjustOverride, applyWritingModeOverride, normalizeFontFamily, stripExternalFontFace } from '@/components/Reader/readerStyles'
 import { convertDoc, getToSC, getToTC, restoreDoc } from '@/components/Reader/scriptConversion'
 import { DEBUG_TTS_FOLLOW, TTS_HIGHLIGHT_INTERVAL, TTS_NEW_PAGE_AUTO_FOLLOW_GUARD, TTS_PAGE_END_FIXED_LEAD, TTS_USER_INPUT_GRACE, clearTTSHighlight, clearTTSHighlights, collectContentDocuments, createRangeFromTextOffset, ensureTTSHighlightStyle, getBoundaryOffsetFromRange, getTTSRangeViewportState, getTextIndex, paintTTSHighlightOverlay, ttsTextIndexCache } from '@/components/Reader/ttsHighlight'
 import { computeAccurateTotal, computeChapterAverage, computeGlobalPage, clampProgressRatio, resolveInitialPageInfo } from '@/components/Reader/progressCalculations'
@@ -114,18 +114,7 @@ export const useReaderEngine = (params: {
   const bookRecordRef = useRef(bookRecord)
   useEffect(() => { bookRecordRef.current = bookRecord }, [bookRecord])
 
-  // 進度同步的 Hook 層：本機立即寫 + cache 立即同步 + debounce 1200–1500ms 後才打網路
-  // （見 services/progressService.ts）。頁面離開前（分頁關閉/重新整理）或這個 hook 卸載
-  // （換書、返回書庫）時強制 flush 最後一次，避免 debounce 視窗內的最後幾次翻頁沒推上雲端。
   const saveProgress = useSaveProgress(bookId)
-  useEffect(() => {
-    const handlePageHide = () => progressService.flushAll()
-    window.addEventListener('pagehide', handlePageHide)
-    return () => {
-      window.removeEventListener('pagehide', handlePageHide)
-      progressService.flush(bookId)
-    }
-  }, [bookId])
 
   const scriptRef = useRef<Script>('tc')
   const baseScriptRef = useRef<Script>('tc') // 書本原始語言，切換時用來判斷方向
@@ -541,6 +530,7 @@ export const useReaderEngine = (params: {
           ttsContentDocsRef.current.add(doc)
           ttsTextIndexCache.delete(doc)
           clearTTSHighlight(doc)
+          stripExternalFontFace(doc)
           // 內文排版方向永遠固定 ltr，理由同上面 forceReadingDirection 的說明——不跟隨
           // 使用者的翻頁方向偏好，那個偏好只影響按鈕/手勢要呼叫 next 還是 prev
           applyWritingModeOverride(doc, 'ltr')
@@ -797,16 +787,6 @@ export const useReaderEngine = (params: {
             const restored = annotationService.local.load(bookId)
             loadForBook(restored)
             restored.forEach((ann) => addEpubAnnotation(rendition, ann))
-
-            // 背景跟雲端合併這本書的註記，補上其他裝置新增/刪除的東西——開書當下才是
-            // 「查一次其他裝置有沒有新東西」最自然的時機，登入時的整書庫還原一個瀏覽器
-            // 分頁只觸發一次，涵蓋不到「另一裝置剛新增、這個分頁早就登入過」的情境。
-            // 不 await，不阻塞開書；merge 完成後才補畫新標記，離線時直接維持本機資料。
-            annotationService.restoreForBook(bookId).then((merged) => {
-              if (destroyed || !renditionRef.current) return
-              loadForBook(merged)
-              merged.forEach((ann) => addEpubAnnotation(renditionRef.current!, ann))
-            })
 
             // 等待上面的翻頁方向修正完成，確保第一次 display() 不會跟 direction()/layout()
             // 內部可能觸發的重新導頁互相搶跑

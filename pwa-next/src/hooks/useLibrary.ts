@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useState } from 'react'
 import { settingsKey } from '@/constants/storageKeys'
 import { bookService } from '@/services/bookService'
 import { extractMeta } from '@/utils/epubMetadata'
@@ -6,7 +6,7 @@ import { extractMeta } from '@/utils/epubMetadata'
 export type { BookRecord } from '@/services/bookService'
 import type { BookRecord } from '@/services/bookService'
 
-// ── Book settings（純本機排版偏好，Prisma 沒有對應 model，不上雲端同步）───────
+// ── Book settings（純本機排版偏好）───────────────────────────────────────
 
 export interface BookSettings {
   fontSize: number
@@ -31,7 +31,7 @@ export const loadBookSettings = (bookId: string): BookSettings | null => {
 
 // ── Hook ───────────────────────────────────────────────────────────────
 // addBook 的三個分支（新書／重複匯入／檔案遺失復原）維持原本的控制流程不變，
-// 只是把底層的 localStorage/IndexedDB/雲端同步呼叫換成 bookService 提供的版本。
+// 只是把底層的 localStorage/IndexedDB 呼叫換成 bookService 提供的版本。
 
 export const useLibrary = () => {
   const [records, setRecords] = useState<BookRecord[]>(bookService.local.listMeta)
@@ -46,7 +46,6 @@ export const useLibrary = () => {
     if (existingRecord && fileExists) {
       // 重複匯入同一本書：資料都在，直接接回既有紀錄，不覆蓋既有進度/書籤/註記。
       touchBook(id)
-      bookService.remote.syncBook(id, existingRecord.title, existingRecord.author, existingRecord.filename)
       return id
     }
 
@@ -55,7 +54,6 @@ export const useLibrary = () => {
       // 這裡只補回檔案本體，不能再走下面「新書」的路徑，否則會產生重複的書庫項目。
       await bookService.local.putFile(id, buffer)
       touchBook(id)
-      bookService.remote.syncBook(id, existingRecord.title, existingRecord.author, existingRecord.filename)
 
       // 封面圖存在同一個 IndexedDB 資料庫的另一個 store，檔案遺失時很可能也一併消失了，
       // 這裡重新萃取補回，避免 hasCover 是 true 但實際讀不到封面圖。
@@ -88,7 +86,6 @@ export const useLibrary = () => {
       bookService.local.saveMeta(next)
       return next
     })
-    bookService.remote.syncBook(id, initial.title, initial.author, initial.filename)
 
     extractMeta(buffer, file.name).then(({ title, author, coverDataUrl }) => {
       if (coverDataUrl) bookService.local.putCover(id, coverDataUrl)
@@ -99,7 +96,6 @@ export const useLibrary = () => {
         bookService.local.saveMeta(next)
         return next
       })
-      bookService.remote.syncBook(id, title, author, initial.filename)
     })
 
     return id
@@ -122,7 +118,6 @@ export const useLibrary = () => {
       bookService.local.saveMeta(next)
       return next
     })
-    bookService.remote.syncRemoveBook(id)
   }
 
   const touchBook = (id: string) => {
@@ -145,14 +140,5 @@ export const useLibrary = () => {
     })
   }
 
-  // 讀取／還原路徑（useCloudRestore.ts、Notes.tsx 自己的還原 effect）算完合併結果後
-  // 呼叫這個函式把結果寫回 React state + localStorage。用 useCallback 維持穩定參照——
-  // 這個函式會被放進呼叫端 useEffect 的 dependency array，不穩定會導致 effect 每次
-  // render 都重跑，參見 useAnnotations.ts 那次 "Maximum update depth exceeded" 的教訓。
-  const replaceRecords = useCallback((next: BookRecord[]) => {
-    bookService.local.saveMeta(next)
-    setRecords(next)
-  }, [])
-
-  return { records, addBook, getBookUrl, getCoverDataUrl, removeBook, touchBook, updateProgress, replaceRecords }
+  return { records, addBook, getBookUrl, getCoverDataUrl, removeBook, touchBook, updateProgress }
 }
