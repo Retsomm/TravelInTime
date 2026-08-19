@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { type Bookmark, generateId, loadBookmarks, saveBookmarks } from '../../lib/library';
+import { generateId } from '../../services/bookService';
+import { bookmarkService, type Bookmark } from '../../services/bookmarkService';
 import { isBookmarked, removeBookmarkList, toggleBookmarkList } from '../../lib/reader/calculations';
 
 export const useBookmarks = (id: string | undefined, currentCfi: string, currentChapterTitle: string) => {
@@ -10,7 +11,7 @@ export const useBookmarks = (id: string | undefined, currentCfi: string, current
     if (!id) return;
     let cancelled = false;
     loadedRef.current = false;
-    loadBookmarks(id).then((saved) => {
+    bookmarkService.local.load(id).then((saved) => {
       if (!cancelled) {
         setBookmarks(saved);
         loadedRef.current = true;
@@ -26,7 +27,7 @@ export const useBookmarks = (id: string | undefined, currentCfi: string, current
   // 上，不會有兩次呼叫都基於同一份舊 snapshot 而互相蓋掉對方的問題。
   useEffect(() => {
     if (!id || !loadedRef.current) return;
-    saveBookmarks(id, bookmarks).catch((err) => console.error('[reader] saveBookmarks 失敗', err));
+    bookmarkService.local.save(id, bookmarks).catch((err) => console.error('[reader] saveBookmarks 失敗', err));
   }, [id, bookmarks]);
 
   const handleToggleBookmark = () => {

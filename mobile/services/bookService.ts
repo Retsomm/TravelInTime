@@ -1,3 +1,5 @@
+// Service 層：書本 metadata／檔案／封面的本機（AsyncStorage + 檔案系統）CRUD，不 import React。
+// 比照 pwa-next services/bookService.ts 現在的本機版形狀（{ local: {...} }）。
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Asset } from 'expo-asset';
 import { Directory, File, Paths } from 'expo-file-system';
@@ -15,38 +17,8 @@ export interface BookRecord {
   coverFilename?: string;
 }
 
-export interface Bookmark {
-  id: string;
-  cfi: string;
-  label: string;
-  addedAt: number;
-}
-
-export interface Annotation {
-  id: string;
-  cfi: string;
-  text: string;
-  color: string;
-  chapter: string;
-  createdAt: number;
-  note?: string;
-}
-
-export interface BookSettings {
-  fontSize: number;
-  fontFamily: string;
-  script: 'tc' | 'sc';
-  lineHeight: number;
-  letterSpacing: number;
-  readingDirection: 'ltr' | 'rtl';
-}
-
 const META_KEY = 'tit:library:meta';
 const DEFAULT_BOOK_SEEDED_KEY = 'tit:defaultBookSeeded';
-const progressKey = (id: string) => `tit:progress:${id}`;
-const settingsKey = (id: string) => `tit:settings:${id}`;
-const bookmarksKey = (id: string) => `tit:bookmarks:${id}`;
-const annotationsKey = (id: string) => `tit:annotations:${id}`;
 
 const booksDir = () => new Directory(Paths.document, 'books');
 const coversDir = () => new Directory(Paths.document, 'covers');
@@ -104,9 +76,9 @@ const updateMeta = <T>(fn: (records: BookRecord[]) => [BookRecord[], T]): Promis
   return result;
 };
 
-export const listBooks = (): Promise<BookRecord[]> => loadMeta();
+const listBooks = (): Promise<BookRecord[]> => loadMeta();
 
-export const addBook = async (): Promise<BookRecord | null> => {
+const addBook = async (): Promise<BookRecord | null> => {
   const result = await File.pickFileAsync({ mimeTypes: ['application/epub+zip'] });
   if (result.canceled || !result.result) return null;
   const picked = result.result as File;
@@ -137,7 +109,7 @@ export const addBook = async (): Promise<BookRecord | null> => {
 // （例如 useFocusEffect 短時間內被叫兩次），避免植入兩份範例書。
 let seedDefaultBookPromise: Promise<BookRecord | null> | null = null;
 
-export const seedDefaultBook = (): Promise<BookRecord | null> => {
+const seedDefaultBook = (): Promise<BookRecord | null> => {
   if (!seedDefaultBookPromise) {
     seedDefaultBookPromise = (async () => {
       const alreadySeeded = await AsyncStorage.getItem(DEFAULT_BOOK_SEEDED_KEY);
@@ -171,16 +143,18 @@ export const seedDefaultBook = (): Promise<BookRecord | null> => {
   return seedDefaultBookPromise;
 };
 
-export const getBookFileUri = (record: BookRecord): string => new File(booksDir(), record.filename).uri;
+const getBookFileUri = (record: BookRecord): string => new File(booksDir(), record.filename).uri;
 
-export const getBookBase64 = (record: BookRecord): Promise<string> =>
+const getBookBase64 = (record: BookRecord): Promise<string> =>
   new File(booksDir(), record.filename).base64();
 
 const resolveCoverFilename = (record: BookRecord): string | undefined =>
   record.coverFilename ?? record.coverUri?.split('/').pop();
 
-export const removeBook = async (id: string) => {
-  await AsyncStorage.multiRemove([progressKey(id), settingsKey(id), bookmarksKey(id), annotationsKey(id)]);
+// 只清理書本本身的 metadata／epub 檔案／封面圖；閱讀進度／排版設定／書籤／註記存在
+// 各自的 service 裡，交叉刪除的順序由呼叫端（app/(tabs)/index.tsx 的 handleDeleteBook）
+// 一次呼叫所有相關 service 的 clear 來完成，避免這裡跨 service 直接戳對方的 storage key。
+const removeBook = async (id: string) => {
   return updateMeta((records) => {
     const record = records.find((r) => r.id === id);
     if (record) {
@@ -196,7 +170,7 @@ export const removeBook = async (id: string) => {
   });
 };
 
-export const updateBookMeta = (
+const updateBookMeta = (
   id: string,
   patch: Partial<Pick<BookRecord, 'title' | 'author' | 'coverFilename'>>
 ) =>
@@ -210,7 +184,7 @@ export const updateBookMeta = (
 // 重新安裝／原生重新編譯後容器路徑會變，存死的完整路徑就會失效（見 getCoverUri 現算路徑）。
 const coverExtensions = ['jpg', 'png', 'gif', 'webp'];
 
-export const saveCoverImage = (id: string, base64: string, mediaType: string | null): string => {
+const saveCoverImage = (id: string, base64: string, mediaType: string | null): string => {
   const dir = coversDir();
   if (!dir.exists) dir.create({ intermediates: true });
   for (const ext of coverExtensions) {
@@ -226,58 +200,34 @@ export const saveCoverImage = (id: string, base64: string, mediaType: string | n
 // 比照 getBookFileUri 的做法：每次都用目前這次執行的 coversDir() 現算完整路徑，
 // 不依賴存死的絕對路徑。若只有舊版留下的 coverUri（完整路徑），退而求其次取檔名部分
 // 拼回目前的 coversDir()，讓舊資料在 App 重新安裝後也有機會恢復顯示。
-export const getCoverUri = (record: BookRecord): string | null => {
+const getCoverUri = (record: BookRecord): string | null => {
   const filename = resolveCoverFilename(record);
   if (!filename) return null;
   const file = new File(coversDir(), filename);
   return file.exists ? file.uri : null;
 };
 
-export const touchBook = (id: string) =>
+const touchBook = (id: string) =>
   updateMeta((records) => [records.map((r) => (r.id === id ? { ...r, lastOpenedAt: Date.now() } : r)), undefined]);
 
-export const updateProgress = (id: string, pct: number) =>
+const updateProgress = (id: string, pct: number) =>
   updateMeta((records) => [
     records.map((r) => (r.id === id ? { ...r, progress: Math.max(0, Math.min(1, pct)) } : r)),
     undefined,
   ]);
 
-export const saveReadingCfi = (id: string, cfi: string) => AsyncStorage.setItem(progressKey(id), cfi);
-
-export const loadReadingCfi = (id: string): Promise<string | null> => AsyncStorage.getItem(progressKey(id));
-
-export const saveBookSettings = (id: string, settings: BookSettings) =>
-  AsyncStorage.setItem(settingsKey(id), JSON.stringify(settings));
-
-export const loadBookSettings = async (id: string): Promise<BookSettings | null> => {
-  try {
-    const raw = await AsyncStorage.getItem(settingsKey(id));
-    return raw ? (JSON.parse(raw) as BookSettings) : null;
-  } catch {
-    return null;
-  }
+const local = {
+  listBooks,
+  addBook,
+  seedDefaultBook,
+  getBookFileUri,
+  getBookBase64,
+  removeBook,
+  updateBookMeta,
+  saveCoverImage,
+  getCoverUri,
+  touchBook,
+  updateProgress,
 };
 
-export const loadBookmarks = async (id: string): Promise<Bookmark[]> => {
-  try {
-    const raw = await AsyncStorage.getItem(bookmarksKey(id));
-    return raw ? (JSON.parse(raw) as Bookmark[]) : [];
-  } catch {
-    return [];
-  }
-};
-
-export const saveBookmarks = (id: string, bookmarks: Bookmark[]) =>
-  AsyncStorage.setItem(bookmarksKey(id), JSON.stringify(bookmarks));
-
-export const loadAnnotations = async (id: string): Promise<Annotation[]> => {
-  try {
-    const raw = await AsyncStorage.getItem(annotationsKey(id));
-    return raw ? (JSON.parse(raw) as Annotation[]) : [];
-  } catch {
-    return [];
-  }
-};
-
-export const saveAnnotations = (id: string, annotations: Annotation[]) =>
-  AsyncStorage.setItem(annotationsKey(id), JSON.stringify(annotations));
+export const bookService = { local };

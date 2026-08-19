@@ -1,4 +1,5 @@
-import { type Annotation, generateId, saveAnnotations } from '../../lib/library';
+import { generateId } from '../../services/bookService';
+import { annotationService, type Annotation } from '../../services/annotationService';
 import type { InboundMessage } from '../../lib/readerMessages';
 import {
   addAnnotationList,
@@ -47,7 +48,7 @@ export const useAnnotations = ({
     };
     const next = addAnnotationList(annotations, ann);
     setAnnotations(next);
-    saveAnnotations(id, next).catch((err) => console.error('[reader] saveAnnotations 失敗', err));
+    annotationService.local.save(id, next).catch((err) => console.error('[reader] saveAnnotations 失敗', err));
     syncAnnotationsToWebView(next);
     setSelection(null);
     postToWebView({ type: 'clearSelection' });
@@ -57,7 +58,7 @@ export const useAnnotations = ({
     if (!id) return;
     const next = updateAnnotationColorList(annotations, annotationId, color);
     setAnnotations(next);
-    saveAnnotations(id, next).catch((err) => console.error('[reader] saveAnnotations 失敗', err));
+    annotationService.local.save(id, next).catch((err) => console.error('[reader] saveAnnotations 失敗', err));
     syncAnnotationsToWebView(next);
   };
 
@@ -65,7 +66,7 @@ export const useAnnotations = ({
     if (!id) return;
     const next = removeAnnotationList(annotations, annotationId);
     setAnnotations(next);
-    saveAnnotations(id, next).catch((err) => console.error('[reader] saveAnnotations 失敗', err));
+    annotationService.local.save(id, next).catch((err) => console.error('[reader] saveAnnotations 失敗', err));
     syncAnnotationsToWebView(next);
     setEditingAnnotationId(null);
   };
@@ -74,7 +75,7 @@ export const useAnnotations = ({
     if (!id) return;
     const next = updateAnnotationNoteList(annotations, annotationId, note);
     setAnnotations(next);
-    saveAnnotations(id, next).catch((err) => console.error('[reader] saveAnnotations 失敗', err));
+    annotationService.local.save(id, next).catch((err) => console.error('[reader] saveAnnotations 失敗', err));
   };
 
   return {

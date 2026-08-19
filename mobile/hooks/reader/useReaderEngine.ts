@@ -1,20 +1,10 @@
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { WebView } from 'react-native-webview';
-import {
-  type Annotation,
-  type BookRecord,
-  type BookSettings,
-  getBookBase64,
-  listBooks,
-  loadAnnotations,
-  loadBookSettings,
-  loadReadingCfi,
-  saveBookSettings,
-  saveReadingCfi,
-  touchBook,
-  updateProgress,
-} from '../../lib/library';
+import { bookService, type BookRecord } from '../../services/bookService';
+import { annotationService, type Annotation } from '../../services/annotationService';
+import { progressService } from '../../services/progressService';
+import { settingsService, type BookSettings } from '../../services/settingsService';
 import type { InboundMessage, OutboundMessage, TocItem } from '../../lib/readerMessages';
 import { DEFAULT_TYPOGRAPHY } from '../../lib/readerSettings';
 
@@ -54,7 +44,7 @@ export const useReaderEngine = (id: string | undefined, darkMode: boolean, optio
   useFocusEffect(
     useCallback(() => {
       if (!id) return;
-      touchBook(id);
+      bookService.local.touchBook(id);
     }, [id])
   );
 
@@ -69,7 +59,7 @@ export const useReaderEngine = (id: string | undefined, darkMode: boolean, optio
     settingsLoadedRef.current = false;
     hadSavedSettingsRef.current = false;
     let cancelled = false;
-    loadBookSettings(id).then((saved) => {
+    settingsService.local.load(id).then((saved) => {
       if (cancelled) return;
       if (saved) {
         setTypography(saved);
@@ -86,7 +76,7 @@ export const useReaderEngine = (id: string | undefined, darkMode: boolean, optio
 
   useEffect(() => {
     if (!id || !settingsLoadedRef.current) return;
-    saveBookSettings(id, typography);
+    settingsService.local.save(id, typography);
   }, [id, typography]);
 
   useEffect(() => {
@@ -108,7 +98,7 @@ export const useReaderEngine = (id: string | undefined, darkMode: boolean, optio
 
   const handleWebViewReady = useCallback(async () => {
     if (!id) return;
-    const books = await listBooks();
+    const books = await bookService.local.listBooks();
     const found = books.find((b) => b.id === id) ?? null;
     setRecord(found);
     if (!found) {
@@ -118,9 +108,9 @@ export const useReaderEngine = (id: string | undefined, darkMode: boolean, optio
     }
     try {
       const [base64, cfi, savedAnnotations] = await Promise.all([
-        getBookBase64(found),
-        loadReadingCfi(id),
-        loadAnnotations(id),
+        bookService.local.getBookBase64(found),
+        progressService.local.load(id),
+        annotationService.local.load(id),
       ]);
       setAnnotations(savedAnnotations);
       postToWebView({
@@ -165,8 +155,8 @@ export const useReaderEngine = (id: string | undefined, darkMode: boolean, optio
         relocatedResolverRef.current?.();
         relocatedResolverRef.current = null;
         if (!id) return;
-        saveReadingCfi(id, msg.cfi);
-        updateProgress(id, msg.percentage);
+        progressService.local.save(id, msg.cfi);
+        bookService.local.updateProgress(id, msg.percentage);
         return;
       }
       if (msg.type === 'tocLoaded') {

@@ -10,7 +10,7 @@ tags:
 > 之後任何一次對話（不論是不是同一個 Claude session）都能從這裡接續，不用重新討論一次。
 > 格式沿用 [CLOUD_SYNC_PROGRESS.md](CLOUD_SYNC_PROGRESS.md) / [FP_REFACTOR_PROGRESS.md](FP_REFACTOR_PROGRESS.md) 的既有慣例。
 
-**現況（2026-08-18）：跨裝置雲端同步功能已全數移除（使用者決定放棄，原因是 Phase 1 卡住的
+**現況（2026-08-19）：跨裝置雲端同步功能已全數移除（使用者決定放棄，原因是 Phase 1 卡住的
 跨裝置同步 bug 一直沒查出根因，見下方「已放棄的雲端同步」）。pwa-next 現在是純本機儲存，
 沒有登入機制、沒有後端 API route、沒有資料庫。三個子專案（`pwa-next`／`renderer`／`mobile`）
 接下來只做「本機儲存版」的 Client/Service/Hook 分層，不含任何雲端/帳號功能。renderer 的本機
@@ -18,7 +18,8 @@ tags:
 **這是使用者明確要求「現在就推，之後有問題再補修法」下的例外**，過程中發現並修正的翻頁
 進度存檔問題（`relocated` 事件雜訊覆蓋真正進度）使用者確認「好很多，只差一頁」但**尚未
 確認完全解決**，還在持續追蹤，`constants/debug.ts` 的 `DEBUG_ANNOTATIONS`／`DEBUG_PROGRESS`
-目前刻意保持開啟以便繼續除錯；mobile 完全還沒開始動工。
+目前刻意保持開啟以便繼續除錯；mobile 的本機資料層分層已實作完成（`yarn tsc --noEmit`
+通過），使用者已在裝置/模擬器實測確認 OK，已 commit＋push 到 `dev`（見下方 Phase 進度）。
 
 ---
 
@@ -139,9 +140,39 @@ pwa-next 的 `addBook` 內容雜湊去重 id 策略、`annotationService` 的 `u
 有問題再補修法」——不是依照專案「使用者驗證過才能 commit」常規流程走的，之後接手的對話
 需要知道這個殘留的一頁落差問題還開著。**
 
-### mobile — 本機資料層分層（未開始）
-拆 `mobile/lib/library.ts` 目前身兼「儲存 client」跟「資料模型定義」的雙重角色，比照 pwa-next
-`bookService.ts` 現在的本機版形狀（`{ local: {...} }`）拆開。
+### mobile — 本機資料層分層（已完成並已 commit＋push 到 `dev`，2026-08-19）
+拆 `mobile/lib/library.ts`（原本身兼「儲存 client」跟「資料模型定義」雙重角色，283 行）為
+`mobile/services/` 下五個 `{ local: {...} }` 形狀的 service，比照 pwa-next 現有 service 的
+拆法（每個 concern 一個檔案，不是只拆一個 bookService）：
+- `bookService.ts`：`BookRecord` 型別＋書本 metadata／epub 檔案／封面圖的本機 CRUD
+  （`listBooks`／`addBook`／`seedDefaultBook`／`getBookFileUri`／`getBookBase64`／
+  `removeBook`／`updateBookMeta`／`saveCoverImage`／`getCoverUri`／`touchBook`／
+  `updateProgress`），另外保留頂層 `generateId`（不放進 `local`，因為不是 storage 操作，
+  bookmark／annotation 的 id 產生也共用這支，仍是 RN 端沿用多年的 `Date.now()+Math.random()`
+  自製版本，**沒有**改用 `crypto.randomUUID()`——pwa-next/renderer 那邊用得到是瀏覽器
+  環境保證支援，RN／Hermes 環境沒有把握一定可用，沒有裝置可驗證前不冒這個風險換掉)。
+- `progressService.ts` / `bookmarkService.ts` / `annotationService.ts` / `settingsService.ts`：
+  各自封裝對應的 `AsyncStorage` key 與 CRUD（`load`／`save`，另外新增 `clear`，下段說明原因），
+  型別（`Bookmark`／`Annotation`／`BookSettings`）也各自搬進對應檔案。
+- **`removeBook` 的跨 store 清理職責從 `bookService` 移到呼叫端**：原本 `lib/library.ts` 的
+  `removeBook` 一次呼叫 `AsyncStorage.multiRemove` 清掉 progress／settings／bookmarks／
+  annotations 四把 key，是典型的「service 跨界戳別人 storage」。比照 pwa-next 的分工原則
+  （跨 service 的組合邏輯留在呼叫端，不塞進單一 service），新的 `bookService.local.removeBook`
+  只處理書本本身（metadata／epub 檔／封面圖），另外四個 service 各自新增
+  `local.clear(bookId)`；實際清理由 `app/(tabs)/index.tsx` 的 `handleDeleteBook` 用
+  `Promise.all` 一次呼叫全部五個。**這點跟 pwa-next 本身不同**——pwa-next 的
+  `hooks/useLibrary.ts` 的 `removeBook` 其實沒有清 progress／bookmarks／annotations 的
+  key（只清 file／cover／settings），是那邊留著沒補的既有缺口；mobile 原本就有做完整清理，
+  這次保留這個正確行為，只是把职责搬到跨 service 的呼叫端，沒有跟著 pwa-next 退化。
+- 沒有新增 `hooks/useLibrary.ts`：mobile 的 `addBook` 沒有 pwa-next 那種「內容雜湊去重／
+  重複匯入接回舊資料」的三分支控制流程（每次都是挑檔案就建新記錄），不需要額外一層
+  hook 做編排，`app/(tabs)/index.tsx` 本身就是直接呼叫 service 的呼叫端，沿用原本架構。
+- 七個呼叫端（`app/(tabs)/index.tsx`／`components/BookCard.tsx`／`components/ListPanel.tsx`／
+  `hooks/reader/useAnnotations.ts`／`hooks/reader/useBookmarks.ts`／
+  `hooks/reader/useReaderEngine.ts`／`lib/reader/calculations.ts`）全部改成呼叫對應
+  service，原本 `lib/library.ts` 已刪除，`grep` 確認沒有殘留引用。
+- `yarn tsc --noEmit` 通過；mobile 沒有 `lint` script。使用者已在裝置/模擬器實測「書櫃列表／
+  加書／刪書／開書讀取進度／排版設定／加書籤／劃線註記」確認都正常，已 commit＋push 到 `dev`。
 
 ### 收尾（未開始）
 三平台的本機資料層一致後，交叉檢查三個子專案的 Service 層介面形狀是否夠接近、有沒有值得抽共用
@@ -159,6 +190,12 @@ pwa-next 的 `addBook` 內容雜湊去重 id 策略、`annotationService` 的 `u
   renderer/mobile 之後只做本機儲存版的分層。當次對話完成 pwa-next 的全面拆除（見上方
   「已放棄的雲端同步」段落），`yarn build`/`yarn lint` 驗證通過，**尚未經使用者瀏覽器實測**，
   依規則等驗證通過才能 commit。
+- 2026-08-19：接手做 mobile 的本機資料層分層（前一輪只完成 renderer）。讀完 pwa-next 現有
+  四個 service 的實際寫法（非文件描述）跟 mobile `lib/library.ts` 全部呼叫端後動手拆分，
+  過程中發現 `removeBook` 跨 store 清理的職責邊界跟 pwa-next 不同（mobile 原本有做、
+  pwa-next 沒做），判斷保留 mobile 既有的完整清理行為比削減到跟 pwa-next 一致更正確，
+  於是新增 `clear(bookId)` 到四個非 book service、把清理職責搬到呼叫端而非直接砍掉。
+  `yarn tsc --noEmit` 通過，使用者在裝置/模擬器實測確認 OK 後，已 commit＋push 到 `dev`。
 - 2026-08-18（另一次對話）：使用者選擇先做 renderer 的本機資料層分層。比對 pwa-next 現有
   `services/*.ts`／`hooks/reader/use*.ts` 的實際寫法（非文件描述，直接讀程式碼）後動手，
   發現 pwa-next 早已把 annotation 從 Zustand 換成 `useAnnotations(bookId)` hook（理由記在

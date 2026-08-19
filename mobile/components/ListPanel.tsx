@@ -3,7 +3,9 @@ import { useMemo, useRef, useState } from 'react';
 import { Image, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from 'react-native';
 import { IconCopy } from './icons';
 import { HIGHLIGHT_COLORS } from '../lib/annotationColors';
-import { getCoverUri, type Annotation, type BookRecord, type Bookmark } from '../lib/library';
+import { bookService, type BookRecord } from '../services/bookService';
+import type { Annotation } from '../services/annotationService';
+import type { Bookmark } from '../services/bookmarkService';
 import type { TocItem } from '../lib/readerMessages';
 import { coverStyleFor } from '../lib/coverStyles';
 import { useTheme } from '../lib/theme';
@@ -130,7 +132,7 @@ const ListPanel = ({
 
   const cs = record ? coverStyleFor(record.id) : null;
   const pct = record?.progress != null ? Math.round(record.progress * 100) : null;
-  const coverUri = useMemo(() => (record ? getCoverUri(record) : null), [record?.coverFilename, record?.coverUri]);
+  const coverUri = useMemo(() => (record ? bookService.local.getCoverUri(record) : null), [record?.coverFilename, record?.coverUri]);
 
   return (
     <View style={[styles.root, { backgroundColor: colors.paperBg }]}>

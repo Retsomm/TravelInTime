@@ -5,16 +5,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import BookCard from '../../components/BookCard';
 import SortControl, { type SortKey } from '../../components/SortControl';
-import {
-  addBook,
-  type BookRecord,
-  getBookBase64,
-  listBooks,
-  removeBook,
-  saveCoverImage,
-  seedDefaultBook,
-  updateBookMeta,
-} from '../../lib/library';
+import { bookService, type BookRecord } from '../../services/bookService';
+import { progressService } from '../../services/progressService';
+import { bookmarkService } from '../../services/bookmarkService';
+import { annotationService } from '../../services/annotationService';
+import { settingsService } from '../../services/settingsService';
 import { READER_HTML } from '../../lib/readerHtml.generated';
 import type { OutboundMessage } from '../../lib/readerMessages';
 import { useTheme } from '../../lib/theme';
@@ -41,7 +36,7 @@ const LibraryScreen = () => {
   } | null>(null);
 
   const refresh = useCallback(async () => {
-    setBooks(await listBooks());
+    setBooks(await bookService.local.listBooks());
     setLoading(false);
   }, []);
 
@@ -74,7 +69,7 @@ const LibraryScreen = () => {
       };
 
       const send = async () => {
-        const base64 = await getBookBase64(record);
+        const base64 = await bookService.local.getBookBase64(record);
         if (__DEV__) console.log('[library] sending extractMeta', { id: record.id, base64Length: base64.length });
         extractorRef.current?.postMessage(JSON.stringify({ type: 'extractMeta', base64 }));
       };
@@ -94,7 +89,7 @@ const LibraryScreen = () => {
 
   useFocusEffect(
     useCallback(() => {
-      seedDefaultBook().then((record) => {
+      bookService.local.seedDefaultBook().then((record) => {
         if (!record) return;
         refresh();
         extractMetaFor(record).then(refresh);
@@ -133,13 +128,13 @@ const LibraryScreen = () => {
         // 封面寫檔失敗（例如解碼異常）不應該連帶丟掉已經擷取到的書名/作者，兩者分開處理。
         if (msg.coverBase64) {
           try {
-            patch.coverFilename = saveCoverImage(pending.id, msg.coverBase64, msg.coverMediaType);
+            patch.coverFilename = bookService.local.saveCoverImage(pending.id, msg.coverBase64, msg.coverMediaType);
           } catch (err) {
             console.warn('[library] saveCoverImage failed', err);
           }
         }
         if (Object.keys(patch).length > 0) {
-          updateBookMeta(pending.id, patch)
+          bookService.local.updateBookMeta(pending.id, patch)
             .then(refresh)
             .catch((err) => console.warn('[library] updateBookMeta failed', err));
         }
@@ -158,7 +153,7 @@ const LibraryScreen = () => {
     if (addingRef.current) return;
     addingRef.current = true;
     try {
-      const record = await addBook();
+      const record = await bookService.local.addBook();
       if (!record) return;
       refresh();
       await extractMetaFor(record);
@@ -178,7 +173,15 @@ const LibraryScreen = () => {
         style: 'destructive',
         onPress: async () => {
           try {
-            await removeBook(record.id);
+            // 書本 metadata／epub 檔案／封面圖歸 bookService 管；閱讀進度／排版設定／
+            // 書籤／註記各自存在獨立的 service，刪書時逐一清掉，避免留下孤兒資料。
+            await Promise.all([
+              bookService.local.removeBook(record.id),
+              progressService.local.clear(record.id),
+              bookmarkService.local.clear(record.id),
+              annotationService.local.clear(record.id),
+              settingsService.local.clear(record.id),
+            ]);
             refresh();
           } catch {
             Alert.alert('刪除失敗', '請稍後再試一次');
