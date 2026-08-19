@@ -159,8 +159,12 @@ pwa-next 的 `addBook` 內容雜湊去重 id 策略、`annotationService` 的 `u
   annotations 四把 key，是典型的「service 跨界戳別人 storage」。比照 pwa-next 的分工原則
   （跨 service 的組合邏輯留在呼叫端，不塞進單一 service），新的 `bookService.local.removeBook`
   只處理書本本身（metadata／epub 檔／封面圖），另外四個 service 各自新增
-  `local.clear(bookId)`；實際清理由 `app/(tabs)/index.tsx` 的 `handleDeleteBook` 用
-  `Promise.all` 一次呼叫全部五個。**這點跟 pwa-next 本身不同**——pwa-next 的
+  `local.clear(bookId)`；實際清理由 `app/(tabs)/index.tsx` 的 `handleDeleteBook` 先用
+  `Promise.all` 呼叫四個 `clear`，全部成功後才呼叫 `removeBook`——`removeBook` 內含檔案
+  刪除，失敗機率比單純的 `AsyncStorage.removeItem` 高，若跟四個 clear 併發、書本先被刪
+  但某個 clear 失敗，會留下永遠沒人指到的孤兒資料；讓 clear 先跑，失敗時就不呼叫
+  `removeBook`，書本會留在書櫃裡（可重試），不會產生無聲的永久洩漏。
+  **這點跟 pwa-next 本身不同**——pwa-next 的
   `hooks/useLibrary.ts` 的 `removeBook` 其實沒有清 progress／bookmarks／annotations 的
   key（只清 file／cover／settings），是那邊留著沒補的既有缺口；mobile 原本就有做完整清理，
   這次保留這個正確行為，只是把职责搬到跨 service 的呼叫端，沒有跟著 pwa-next 退化。
