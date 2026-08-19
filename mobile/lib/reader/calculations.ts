@@ -1,4 +1,5 @@
-import type { Annotation, Bookmark } from '../library';
+import type { Annotation } from '../../services/annotationService';
+import type { Bookmark } from '../../services/bookmarkService';
 import type { TTSVoice } from '../tts';
 
 export const isBookmarked = (bookmarks: Bookmark[], cfi: string): boolean =>
